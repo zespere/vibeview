@@ -209,11 +209,11 @@
 }
 
 .workspace {
-  display: flex;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
   height: 100vh;
-  flex-direction: column;
   background: #f7f4ee;
   overflow: hidden;
 }
@@ -331,11 +331,28 @@
   padding: 18px 28px 28px;
 }
 
+.workspaceStageFlush {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
+}
+
 .workspaceSingle {
   display: flex;
   flex: 1 1 auto;
-  min-height: calc(100vh - 190px);
+  min-height: 0;
   width: 100%;
+}
+
+.notesWorkspace {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #fffdf9;
 }
 
 .workspaceSplit {
@@ -373,6 +390,75 @@
 .graphFrame {
   min-height: calc(100vh - 190px);
   overflow: auto;
+}
+
+.notesWorkspace .canvasFrame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-bottom: 0;
+  overflow: auto;
+}
+
+.buildDock {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 5;
+  padding: 0 18px 14px;
+  pointer-events: none;
+}
+
+.buildComposer {
+  display: block;
+  width: min(860px, 100%);
+  margin: 0 auto;
+  border: 1px solid #d4c8ba;
+  border-radius: 8px;
+  background: rgba(248, 242, 232, 0.96);
+  box-shadow: 0 10px 28px rgba(47, 33, 20, 0.08);
+  padding: 10px 12px 10px;
+  pointer-events: auto;
+}
+
+.buildComposerInput {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #241d17;
+  font: inherit;
+  line-height: 1.5;
+  min-height: 28px;
+  max-height: 92px;
+  padding: 6px 8px 4px;
+  resize: none;
+}
+
+.buildComposerInput::placeholder {
+  color: #817261;
+}
+
+.buildComposerInput:focus {
+  outline: none;
+}
+
+.buildComposerActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  border-top: 1px solid #e2d8cb;
+  padding: 8px 4px 0;
+}
+
+.buildComposerMeta {
+  font-size: 12px;
+  color: #6c6257;
 }
 
 .field {
@@ -548,13 +634,13 @@
   flex: 1 1 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 22px;
-  min-height: calc(100vh - 222px);
+  gap: 30px;
+  min-height: 0;
   width: 100%;
   max-width: none;
   border: 0;
   background: transparent;
-  padding: 4px 0 0;
+  padding: 28px 32px 32px;
 }
 
 .noteEditorMain,
@@ -566,6 +652,7 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  padding-right: 8px;
 }
 
 .noteEditorHeader {
@@ -636,7 +723,9 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding-left: 20px;
+  padding-top: 6px;
+  padding-left: 24px;
+  border-left: 1px solid #e5dccf;
 }
 
 .noteSidebarInput,
@@ -938,13 +1027,83 @@
 
 .canvasBoard {
   position: relative;
-  width: 1400px;
-  height: 900px;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
   background-color: #fffdf9;
   background-image:
     linear-gradient(to right, #efe7dd 1px, transparent 1px),
     linear-gradient(to bottom, #efe7dd 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+.canvasBoard :global(.react-flow) {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.canvasBoard :global(.react-flow__renderer),
+.canvasBoard :global(.react-flow__pane),
+.canvasBoard :global(.react-flow__viewport) {
+  background: transparent;
+}
+
+.canvasBoard :global(.react-flow__pane) {
+  cursor: grab;
+}
+
+.canvasBoard :global(.react-flow__pane.dragging),
+.canvasBoard :global(.react-flow__viewport-portal) {
+  cursor: grabbing;
+}
+
+.canvasBoard :global(.react-flow__node) {
+  width: 240px;
+}
+
+.canvasBoard :global(.react-flow__edge-path) {
+  stroke: #b6a391;
+  stroke-width: 2;
+}
+
+.canvasBoard :global(.react-flow__edge-text) {
+  fill: #6f6255;
+  font-size: 12px;
+}
+
+.canvasContextMenu {
+  position: fixed;
+  z-index: 20;
+  min-width: 168px;
+  border: 1px solid #d4c8ba;
+  border-radius: 8px;
+  background: #fffaf3;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(43, 31, 19, 0.12);
+}
+
+.canvasContextItem,
+.canvasContextItemDanger {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #241d17;
+  font: inherit;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.canvasContextItem:hover,
+.canvasContextItemDanger:hover {
+  background: #f3eadf;
+}
+
+.canvasContextItemDanger {
+  color: #8b2e1a;
 }
 
 .canvasEdges,
@@ -1110,5 +1269,11 @@
   .actionsRow {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .buildDock {
+    right: 18px;
+    bottom: 18px;
+    left: 18px;
   }
 }

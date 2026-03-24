@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
-import { CanvasGraph } from "@/components/canvas-graph";
 import { StructureTree } from "@/components/structure-tree";
 import {
   API_BASE_URL,
   createCanvasNode,
+  deleteCanvasNode,
   fetchCanvas,
   fetchProject,
+  fetchProjectAgents,
   fetchRelationships,
   fetchStatus,
   fetchStructure,
@@ -19,7 +20,9 @@ import {
   runIndex,
   runQuery,
   updateProject,
+  updateProjectAgents,
   updateCanvasNode,
+  type AgentsDocumentResponse,
   type AssistImpactResponse,
   type CanvasDocument,
   type CodexChangeResponse,
@@ -32,15 +35,13 @@ import {
   type SymbolRecord,
 } from "@/lib/api";
 
-type WorkspaceView = "build" | "notes" | "graph" | "inspect" | "project";
+type WorkspaceView = "notes" | "inspect" | "project";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `note:${string}`; type: "note"; nodeId: string };
 
 const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
-  { id: "build", label: "Build" },
   { id: "notes", label: "Notes" },
-  { id: "graph", label: "Graph" },
   { id: "inspect", label: "Inspect" },
   { id: "project", label: "Project" },
 ];
@@ -48,17 +49,13 @@ const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
 export default function Home() {
   const [isRailExpanded, setIsRailExpanded] = useState(true);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { id: "view:build", type: "view", view: "build", preview: false },
+    { id: "view:notes", type: "view", view: "notes", preview: false },
   ]);
-  const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:build");
+  const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:notes");
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [project, setProject] = useState<ProjectProfile | null>(null);
-  const [projectName, setProjectName] = useState("");
-  const [projectDescription, setProjectDescription] = useState("");
-  const [projectStack, setProjectStack] = useState("");
-  const [projectGoals, setProjectGoals] = useState("");
-  const [projectConstraints, setProjectConstraints] = useState("");
-  const [projectDesignDirection, setProjectDesignDirection] = useState("");
+  const [agentsDocument, setAgentsDocument] = useState<AgentsDocumentResponse | null>(null);
+  const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [cleanIndex, setCleanIndex] = useState(true);
   const [dryRunIndex, setDryRunIndex] = useState(false);
@@ -74,12 +71,10 @@ export default function Home() {
   const [structureRelationships, setStructureRelationships] = useState<RelationshipRecord[]>([]);
   const [impactPrompt, setImpactPrompt] = useState("create user");
   const [impactResult, setImpactResult] = useState<AssistImpactResponse | null>(null);
-  const [codexPrompt, setCodexPrompt] = useState(
-    "Add a short note to src/styles.css saying the UI is managed by Konceptura.",
-  );
-  const [codexDryRun, setCodexDryRun] = useState(true);
-  const [codexUseGraphContext, setCodexUseGraphContext] = useState(true);
-  const [codexBypassSandbox, setCodexBypassSandbox] = useState(true);
+  const [codexPrompt, setCodexPrompt] = useState("");
+  const [codexDryRun] = useState(true);
+  const [codexUseGraphContext] = useState(true);
+  const [codexBypassSandbox] = useState(true);
   const [codexResult, setCodexResult] = useState<CodexChangeResponse | null>(null);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
@@ -94,6 +89,7 @@ export default function Home() {
 
   const [statusPending, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
+  const [agentsPending, startAgentsTransition] = useTransition();
   const [indexPending, startIndexTransition] = useTransition();
   const [queryPending, startQueryTransition] = useTransition();
   const [relationshipsPending, startRelationshipsTransition] = useTransition();
@@ -127,7 +123,6 @@ export default function Home() {
     canvasDocument?.edges.filter((edge) => edge.source_node_id === selectedCanvasNodeId) ?? [];
   const canvasIncomingEdges =
     canvasDocument?.edges.filter((edge) => edge.target_node_id === selectedCanvasNodeId) ?? [];
-  const semanticContextPreview = buildSemanticContext(canvasDocument, selectedCanvasNodeIds);
   const sampleRepos = Object.entries(status?.sample_repos ?? {});
 
   useEffect(() => {
@@ -155,14 +150,19 @@ export default function Home() {
     if (!project) {
       return;
     }
-    setProjectName(project.name);
-    setProjectDescription(project.description);
-    setProjectStack(project.stack);
-    setProjectGoals(project.goals);
-    setProjectConstraints(project.constraints);
-    setProjectDesignDirection(project.design_direction);
     setRepoPath((current) => current || project.repo_path || status?.active_repo_path || status?.default_repo_path || "");
   }, [project, status]);
+
+  useEffect(() => {
+    if (!project?.repo_path) {
+      setAgentsDocument(null);
+      setAgentsContent("");
+      return;
+    }
+    startAgentsTransition(() => {
+      void refreshAgentsDocument(project.repo_path);
+    });
+  }, [project?.repo_path]);
 
   useEffect(() => {
     if (!selectedCanvasNode) {
@@ -246,6 +246,17 @@ export default function Home() {
       setErrorMessage(null);
       const response = await fetchProject();
       setProject(response.project);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
+  async function refreshAgentsDocument(nextRepoPath?: string) {
+    try {
+      setErrorMessage(null);
+      const response = await fetchProjectAgents(nextRepoPath);
+      setAgentsDocument(response);
+      setAgentsContent(response.content);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -417,12 +428,12 @@ export default function Home() {
     if (nextPath.includes("react-crud-app")) {
       setQueryInput("create user");
       setImpactPrompt("create user");
-      setCodexPrompt("Add a short note to src/styles.css saying the UI is managed by Konceptura.");
+      setCodexPrompt("");
       return;
     }
     setQueryInput("user");
     setImpactPrompt("user");
-    setCodexPrompt("Explain the smallest safe code change you would make for the current task.");
+    setCodexPrompt("");
   }
 
   async function handleSaveProject() {
@@ -431,16 +442,30 @@ export default function Home() {
         try {
           setErrorMessage(null);
           const response = await updateProject({
-            name: projectName.trim(),
-            description: projectDescription.trim(),
             repo_path: repoPath.trim(),
-            stack: projectStack.trim(),
-            goals: projectGoals.trim(),
-            constraints: projectConstraints.trim(),
-            design_direction: projectDesignDirection.trim(),
+            name: "",
+            recent_projects: [],
           });
           setProject(response.project);
-          openViewTab("build");
+          openViewTab("notes");
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
+  async function handleSaveAgentsDocument() {
+    startAgentsTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await updateProjectAgents(agentsContent, repoPath.trim() || undefined);
+          setAgentsDocument(response);
+          if (!project?.repo_path && response.repo_path) {
+            const nextProject = await updateProject({ name: "", repo_path: response.repo_path, recent_projects: [] });
+            setProject(nextProject.project);
+          }
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -470,7 +495,7 @@ export default function Home() {
     setOpenTabs((current) => {
       const next = current.filter((item) => item.id !== `note:${nodeId}`);
       if (activeTabId === `note:${nodeId}`) {
-        setActiveTabId(next.at(-1)?.id ?? "view:build");
+        setActiveTabId(next.at(-1)?.id ?? "view:notes");
       }
       return next;
     });
@@ -478,7 +503,7 @@ export default function Home() {
 
   function openViewTab(view: WorkspaceView) {
     const id = `view:${view}` as const;
-    if (view === "build") {
+    if (view === "notes") {
       setOpenTabs((current) =>
         current.some((tab) => tab.id === id)
           ? current
@@ -495,7 +520,7 @@ export default function Home() {
       }
 
       const previewIndex = current.findIndex(
-        (tab) => tab.type === "view" && tab.view !== "build" && tab.preview,
+        (tab) => tab.type === "view" && tab.view !== "notes" && tab.preview,
       );
       const nextTab: OpenTab = { id, type: "view", view, preview: true };
 
@@ -532,7 +557,7 @@ export default function Home() {
   }
 
   function closeTab(tabId: OpenTab["id"]) {
-    if (tabId === "view:build") {
+    if (tabId === "view:notes") {
       return;
     }
     const tab = openTabs.find((item) => item.id === tabId);
@@ -546,7 +571,7 @@ export default function Home() {
     setOpenTabs((current) => {
       const next = current.filter((item) => item.id !== tabId);
       if (activeTabId === tabId) {
-        setActiveTabId(next.at(-1)?.id ?? "view:build");
+        setActiveTabId(next.at(-1)?.id ?? "view:notes");
       }
       return next;
     });
@@ -610,6 +635,19 @@ export default function Home() {
     });
   }
 
+  async function handleDeleteCanvasNode(nodeId: string) {
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          const response = await deleteCanvasNode(nodeId);
+          setCanvasDocument(response.document);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
   async function handleSaveCanvasNode() {
     if (!selectedCanvasNode) {
       return;
@@ -636,12 +674,13 @@ export default function Home() {
 
   function renderNotesView() {
     return (
-      <div className={styles.workspaceSingle}>
+      <div className={styles.notesWorkspace}>
         <div className={styles.canvasFrame}>
           {!canvasDocument ? (
             <EmptyState message="Load or create a canvas for this repo. Double-click empty space to add a node." />
           ) : (
             <CanvasBoard
+              onDeleteNode={handleDeleteCanvasNode}
               document={canvasDocument}
               onCreateNodeAt={(x, y) => {
                 startCanvasTransition(() => {
@@ -661,6 +700,31 @@ export default function Home() {
               selectedNodeIds={selectedCanvasNodeIds}
             />
           )}
+        </div>
+        <div className={styles.buildDock}>
+          {codexResult ? <p className={styles.helperText}>{codexResult.summary}</p> : null}
+          <label className={styles.buildComposer}>
+            <textarea
+              className={styles.buildComposerInput}
+              onChange={(event) => setCodexPrompt(event.target.value)}
+              placeholder="What should Konceptura build next?"
+              rows={3}
+              value={codexPrompt}
+            />
+            <div className={styles.buildComposerActions}>
+              <span className={styles.buildComposerMeta}>
+                {selectedCanvasNodeIds.size > 0 ? `${selectedCanvasNodeIds.size} note${selectedCanvasNodeIds.size === 1 ? "" : "s"} selected` : "No notes selected"}
+              </span>
+              <button
+                className={styles.primaryButton}
+                disabled={codexPending || !status?.codex_ok}
+                onClick={handleSubmitCodexChange}
+                type="button"
+              >
+                {codexPending ? "Working..." : "Build"}
+              </button>
+            </div>
+          </label>
         </div>
       </div>
     );
@@ -782,120 +846,6 @@ export default function Home() {
                 ))}
               </ul>
             </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderGraphView() {
-    return (
-      <div className={styles.workspaceSplit}>
-        <div className={styles.workspacePrimary}>
-          <div className={styles.graphFrame}>
-            <CanvasGraph
-              document={canvasDocument}
-              onOpenNode={openCanvasNode}
-              onSelectNode={openCanvasNode}
-              selectedNodeId={selectedCanvasNodeId}
-            />
-          </div>
-        </div>
-
-        <div className={styles.workspaceSidebar}>
-          <div className={styles.panelSurface}>
-            {!selectedCanvasNode ? (
-              <EmptyState message="Select a note in the graph to inspect it." />
-            ) : (
-              <div className={styles.inspectorPane}>
-                <div className={styles.tagRow}>
-                  {selectedCanvasNode.tags.length === 0 ? (
-                    <span className={styles.tagChip}>untagged</span>
-                  ) : (
-                    selectedCanvasNode.tags.map((tag) => (
-                      <span className={styles.tagChip} key={tag}>
-                        {tag}
-                      </span>
-                    ))
-                  )}
-                </div>
-                <strong className={styles.resultTitle}>{selectedCanvasNode.title}</strong>
-                <p className={styles.resultMeta}>{selectedCanvasNode.description}</p>
-
-                <div className={styles.actionsRow}>
-                  <button className={styles.primaryButton} onClick={handleSaveCanvasNode} type="button">
-                    Save changes
-                  </button>
-                  <button className={styles.secondaryButton} onClick={() => openCanvasNode(selectedCanvasNode.id)} type="button">
-                    Open note tab
-                  </button>
-                </div>
-
-                <div className={styles.detailGrid}>
-                  <DetailRow label="Outgoing" value={String(canvasOutgoingEdges.length)} />
-                  <DetailRow label="Incoming" value={String(canvasIncomingEdges.length)} />
-                </div>
-
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Title</span>
-                  <input
-                    className={styles.input}
-                    onChange={(event) => setCanvasDraftTitle(event.target.value)}
-                    value={canvasDraftTitle}
-                  />
-                </label>
-
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Tags</span>
-                  <input
-                    className={styles.input}
-                    onChange={(event) => setCanvasDraftTags(event.target.value)}
-                    placeholder="screen, users, crud"
-                    value={canvasDraftTags}
-                  />
-                </label>
-
-                <label className={styles.field}>
-                  <span className={styles.fieldLabel}>Description</span>
-                  <textarea
-                    className={styles.textarea}
-                    onChange={(event) => setCanvasDraftDescription(event.target.value)}
-                    rows={6}
-                    value={canvasDraftDescription}
-                  />
-                </label>
-
-                <div>
-                  <span className={styles.fieldLabel}>Connections</span>
-                  <ul className={styles.relationshipList}>
-                    {canvasOutgoingEdges.map((edge) => (
-                      <li className={styles.relationshipItem} key={edge.id}>
-                        <span className={styles.relationshipDirection}>{edge.label || "out"}</span>
-                        <button
-                          className={styles.inlineLink}
-                          onClick={() => openCanvasNode(edge.target_node_id)}
-                          type="button"
-                        >
-                          {findCanvasNodeTitle(canvasDocument, edge.target_node_id)}
-                        </button>
-                      </li>
-                    ))}
-                    {canvasIncomingEdges.map((edge) => (
-                      <li className={styles.relationshipItem} key={edge.id}>
-                        <span className={styles.relationshipDirection}>{edge.label || "in"}</span>
-                        <button
-                          className={styles.inlineLink}
-                          onClick={() => openCanvasNode(edge.source_node_id)}
-                          type="button"
-                        >
-                          {findCanvasNodeTitle(canvasDocument, edge.source_node_id)}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1151,141 +1101,24 @@ export default function Home() {
     );
   }
 
-  function renderBuildView() {
-    return (
-      <div className={styles.workspaceSplit}>
-        <div className={styles.workspacePrimary}>
-          <div className={styles.panelSurface}>
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>What should Konceptura build next?</span>
-              <textarea
-                className={styles.textarea}
-                onChange={(event) => setCodexPrompt(event.target.value)}
-                rows={7}
-                value={codexPrompt}
-              />
-            </label>
-
-            <div className={styles.optionGrid}>
-              <label className={styles.checkboxRow}>
-                <input checked={codexDryRun} onChange={(event) => setCodexDryRun(event.target.checked)} type="checkbox" />
-                <span>Dry run only</span>
-              </label>
-              <label className={styles.checkboxRow}>
-                <input
-                  checked={codexUseGraphContext}
-                  onChange={(event) => setCodexUseGraphContext(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>Use graph context</span>
-              </label>
-              <label className={styles.checkboxRow}>
-                <input
-                  checked={codexBypassSandbox}
-                  onChange={(event) => setCodexBypassSandbox(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>Bypass sandbox</span>
-              </label>
-            </div>
-
-            <div className={styles.actionsRow}>
-              <button
-                className={styles.primaryButton}
-                disabled={codexPending || !status?.codex_ok}
-                onClick={handleSubmitCodexChange}
-                type="button"
-              >
-                {codexPending ? "Working..." : "Build"}
-              </button>
-            </div>
-
-            <div className={styles.resultsPane}>
-              {!codexResult ? (
-                <EmptyState message="Describe the next feature or change and let Konceptura implement it." />
-              ) : codexResult.changed_files.length === 0 ? (
-                <EmptyState
-                  message={
-                    codexResult.dry_run
-                      ? "Dry run completed without writing files."
-                      : "Konceptura finished without detecting text-file changes."
-                  }
-                />
-              ) : (
-                <div className={styles.inspectorPane}>
-                  <p className={styles.helperText}>{codexResult.summary}</p>
-                  <div className={styles.detailGrid}>
-                    <DetailRow label="Changed areas" value={String(codexResult.changed_files.length)} />
-                    <DetailRow label="Commands" value={String(codexResult.commands.length)} />
-                    <DetailRow label="Graph context" value={codexResult.used_graph_context ? "yes" : "no"} />
-                    <DetailRow label="Mode" value={codexResult.dry_run ? "preview" : "write"} />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.workspaceSidebar}>
-          <div className={styles.panelSurface}>
-            <span className={styles.fieldLabel}>Project context</span>
-            {project?.name ? <strong className={styles.resultTitle}>{project.name}</strong> : null}
-            {project?.description ? <p className={styles.resultMeta}>{project.description}</p> : null}
-            {semanticContextPreview ? (
-              <pre className={styles.codeBlockInline}>{semanticContextPreview}</pre>
-            ) : (
-              <p className={styles.helperText}>Select notes with the `Codex` checkbox to steer the current build task.</p>
-            )}
-            <div className={styles.detailGrid}>
-              <DetailRow label="Repo" value={repoPath ? "ready" : "missing"} />
-              <DetailRow label="Codex" value={status?.codex_ok ? "ready" : "missing"} />
-              <DetailRow label="Index" value={status?.index_job.status ?? "idle"} />
-              <DetailRow label="Notes" value={String(selectedCanvasNodeIds.size)} />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function renderProjectView() {
     return (
       <div className={styles.settingsPane}>
         <div className={styles.panelSurface}>
           <label className={styles.field}>
-            <span className={styles.fieldLabel}>Project name</span>
-            <input className={styles.input} onChange={(event) => setProjectName(event.target.value)} value={projectName} />
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>What is this project?</span>
-            <textarea className={styles.textarea} onChange={(event) => setProjectDescription(event.target.value)} rows={3} value={projectDescription} />
-          </label>
-
-          <label className={styles.field}>
             <span className={styles.fieldLabel}>Repository path</span>
             <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
           </label>
 
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Stack</span>
-            <input className={styles.input} onChange={(event) => setProjectStack(event.target.value)} placeholder="Next.js, React, TypeScript, SQLite" value={projectStack} />
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Goals</span>
-            <textarea className={styles.textarea} onChange={(event) => setProjectGoals(event.target.value)} rows={4} value={projectGoals} />
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Constraints</span>
-            <textarea className={styles.textarea} onChange={(event) => setProjectConstraints(event.target.value)} rows={4} value={projectConstraints} />
-          </label>
-
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Design direction</span>
-            <textarea className={styles.textarea} onChange={(event) => setProjectDesignDirection(event.target.value)} rows={3} value={projectDesignDirection} />
-          </label>
+          {project?.recent_projects.length ? (
+            <div className={styles.sampleRepoList}>
+              {project.recent_projects.map((path) => (
+                <button className={styles.secondaryButton} key={path} onClick={() => setRepoPath(path)} type="button">
+                  {PathLabel(path)}
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           {sampleRepos.length > 0 ? (
             <div className={styles.sampleRepoList}>
@@ -1310,11 +1143,25 @@ export default function Home() {
 
           <div className={styles.actionsRow}>
             <button className={styles.primaryButton} disabled={projectPending} onClick={handleSaveProject} type="button">
-              {projectPending ? "Saving..." : "Save project"}
+              {projectPending ? "Saving..." : "Open project"}
             </button>
             <button className={styles.secondaryButton} disabled={indexPending} onClick={handleIndex} type="button">
               {indexPending ? "Submitting..." : dryRunIndex ? "Preview index" : "Index repo"}
             </button>
+          </div>
+        </div>
+
+        <div className={styles.panelSurface}>
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>AGENTS.md</span>
+            <textarea className={styles.textarea} onChange={(event) => setAgentsContent(event.target.value)} rows={18} value={agentsContent} />
+          </label>
+
+          <div className={styles.actionsRow}>
+            <button className={styles.primaryButton} disabled={agentsPending || !repoPath.trim()} onClick={handleSaveAgentsDocument} type="button">
+              {agentsPending ? "Saving..." : "Save AGENTS.md"}
+            </button>
+            {agentsDocument?.path ? <span className={styles.helperText}>{agentsDocument.path}</span> : null}
           </div>
         </div>
 
@@ -1342,16 +1189,6 @@ export default function Home() {
               value={status?.index_job.status ?? "idle"}
             />
           </dl>
-
-          {status?.active_repo_path ? <p className={styles.sidebarText}>{status.active_repo_path}</p> : null}
-          {status?.index_job.message ? <pre className={styles.noteBlock}>{status.index_job.message}</pre> : null}
-          {status?.preview ? <pre className={styles.noteBlock}>{status.preview}</pre> : null}
-
-          <div className={styles.metaList}>
-            <MetaRow label="Config" value={status?.config_path ?? "—"} />
-            <MetaRow label="Log" value={status?.log_path ?? "—"} />
-            <MetaRow label="Codex" value={status?.codex_binary ?? "—"} />
-          </div>
         </div>
       </div>
     );
@@ -1394,6 +1231,16 @@ export default function Home() {
               <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
             </label>
 
+            {project?.recent_projects.length ? (
+              <div className={styles.sampleRepoList}>
+                {project.recent_projects.map((path) => (
+                  <button className={styles.secondaryButton} key={path} onClick={() => setRepoPath(path)} type="button">
+                    {PathLabel(path)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
             {sampleRepos.length > 0 ? (
               <div className={styles.sampleRepoList}>
                 {sampleRepos.map(([name, path]) => (
@@ -1421,12 +1268,8 @@ export default function Home() {
     }
 
     switch (activeView) {
-      case "build":
-        return renderBuildView();
       case "notes":
         return renderNotesView();
-      case "graph":
-        return renderGraphView();
       case "inspect":
         return renderInspectView();
       case "project":
@@ -1507,7 +1350,7 @@ export default function Home() {
                     ? VIEW_ITEMS.find((item) => item.id === tab.view)?.label ?? tab.view
                     : canvasDocument?.nodes.find((node) => node.id === tab.nodeId)?.title ?? "Note"}
                 </button>
-                {tab.id !== "view:build" ? (
+                {tab.id !== "view:notes" ? (
                   <button className={styles.documentTabClose} onClick={() => closeTab(tab.id)} type="button">
                     ×
                   </button>
@@ -1518,7 +1361,9 @@ export default function Home() {
 
           {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
 
-          <section className={styles.workspaceStage}>{renderActiveView()}</section>
+          <section className={activeView === "notes" ? styles.workspaceStageFlush : styles.workspaceStage}>
+            {renderActiveView()}
+          </section>
         </main>
       </div>
     </div>
@@ -1544,15 +1389,6 @@ function StatusRow({
   );
 }
 
-function MetaRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.metaRow}>
-      <span className={styles.metaLabel}>{label}</span>
-      <span className={styles.metaValue}>{value}</span>
-    </div>
-  );
-}
-
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className={styles.detailRow}>
@@ -1568,26 +1404,10 @@ function EmptyState({ message }: { message: string }) {
 
 function ViewIcon({ view }: { view: WorkspaceView }) {
   switch (view) {
-    case "build":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path d="M3 4.5h10M3 8h7M3 11.5h5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          <path d="m10.5 10.2 1.6 1.6 2.4-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
     case "notes":
       return (
         <svg aria-hidden="true" viewBox="0 0 16 16">
           <path d="M4 4.5h8M4 8h8M4 11.5h6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      );
-    case "graph":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <circle cx="4" cy="4" r="1.6" fill="currentColor" />
-          <circle cx="12" cy="5" r="1.6" fill="currentColor" />
-          <circle cx="8" cy="12" r="1.6" fill="currentColor" />
-          <path d="M5.3 4.5 10.7 5.1M4.9 5.2 7.2 10.8M11.1 6.2 8.8 10.8" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
         </svg>
       );
     case "inspect":
@@ -1621,6 +1441,12 @@ function ToggleIcon({ collapsed }: { collapsed: boolean }) {
       )}
     </svg>
   );
+}
+
+function PathLabel(value: string) {
+  const normalized = value.trim().replace(/\/+$/, "");
+  const segments = normalized.split("/");
+  return segments.at(-1) || normalized || value;
 }
 
 function isSymbolRecord(value: Record<string, unknown> | SymbolRecord): value is SymbolRecord {

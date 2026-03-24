@@ -11,6 +11,8 @@ from .canvas_service import CanvasService, CanvasStore
 from .codex_service import CodexService
 from .logging_utils import configure_logging
 from .models import (
+    AgentsDocumentResponse,
+    AgentsDocumentUpdateRequest,
     AssistImpactRequest,
     AssistImpactResponse,
     CanvasEdgeCreateRequest,
@@ -110,6 +112,27 @@ def update_project(request: ProjectProfileUpdateRequest) -> ProjectProfileRespon
     if project.repo_path:
         canvas_service.set_repo_path(project.repo_path)
     return ProjectProfileResponse(project=project, is_configured=project.is_configured)
+
+
+@app.get("/project/agents", response_model=AgentsDocumentResponse)
+def get_project_agents(repo_path: str | None = None) -> AgentsDocumentResponse:
+    try:
+        resolved_repo_path, path, content = project_service.read_agents_document(repo_path)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return AgentsDocumentResponse(repo_path=resolved_repo_path, path=str(path), content=content)
+
+
+@app.put("/project/agents", response_model=AgentsDocumentResponse)
+def update_project_agents(request: AgentsDocumentUpdateRequest) -> AgentsDocumentResponse:
+    try:
+        resolved_repo_path, path, content = project_service.write_agents_document(
+            request.content,
+            request.repo_path,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return AgentsDocumentResponse(repo_path=resolved_repo_path, path=str(path), content=content)
 
 
 @app.get("/symbols", response_model=SymbolsResponse)

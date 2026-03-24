@@ -38,12 +38,8 @@ class StatusResponse(BaseModel):
 
 class ProjectProfile(BaseModel):
     name: str = ""
-    description: str = ""
     repo_path: str = ""
-    stack: str = ""
-    goals: str = ""
-    constraints: str = ""
-    design_direction: str = ""
+    recent_projects: list[str] = Field(default_factory=list)
 
     @property
     def is_configured(self) -> bool:
@@ -52,17 +48,23 @@ class ProjectProfile(BaseModel):
 
 class ProjectProfileUpdateRequest(BaseModel):
     name: str = Field(default="", max_length=120)
-    description: str = ""
     repo_path: str = ""
-    stack: str = ""
-    goals: str = ""
-    constraints: str = ""
-    design_direction: str = ""
 
 
 class ProjectProfileResponse(BaseModel):
     project: ProjectProfile
     is_configured: bool
+
+
+class AgentsDocumentResponse(BaseModel):
+    repo_path: str
+    path: str
+    content: str
+
+
+class AgentsDocumentUpdateRequest(BaseModel):
+    repo_path: str | None = None
+    content: str = ""
 
 
 class SymbolRecord(BaseModel):

@@ -1,6 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+
+import "@xyflow/react/dist/style.css";
+import {
+  Background,
+  type Edge,
+  type Node,
+  type NodeMouseHandler,
+  PanOnScrollMode,
+  type ReactFlowInstance,
+  ReactFlow,
+  type ReactFlowProps,
+} from "@xyflow/react";
 
 import styles from "@/app/page.module.css";
 import type { CanvasDocument, CanvasNode } from "@/lib/api";
@@ -10,6 +22,7 @@ interface CanvasBoardProps {
   selectedNodeId: string | null;
   selectedNodeIds: Set<string>;
   onCreateNodeAt: (x: number, y: number) => void;
+  onDeleteNode: (nodeId: string) => void;
   onMoveNode: (nodeId: string, x: number, y: number) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
@@ -17,165 +30,226 @@ interface CanvasBoardProps {
   onToggleNodeForCodex: (nodeId: string) => void;
 }
 
-interface DragState {
-  nodeId: string;
-  offsetX: number;
-  offsetY: number;
+interface ContextMenuState {
+  x: number;
+  y: number;
+  canvasX: number;
+  canvasY: number;
+  nodeId: string | null;
+}
+
+interface NoteNodeData extends Record<string, unknown> {
+  node: CanvasNode;
+  isCodexSelected: boolean;
+  onOpenNode: (nodeId: string) => void;
+  onSelectNode: (nodeId: string) => void;
+  onToggleNodeForCodex: (nodeId: string) => void;
 }
 
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 148;
+
+const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
+  note: NoteFlowNode,
+};
 
 export function CanvasBoard({
   document,
   selectedNodeId,
   selectedNodeIds,
   onCreateNodeAt,
+  onDeleteNode,
   onMoveNode,
   onMoveNodeEnd,
   onSelectNode,
   onOpenNode,
   onToggleNodeForCodex,
 }: CanvasBoardProps) {
-  const boardRef = useRef<HTMLDivElement | null>(null);
-  const [dragState, setDragState] = useState<DragState | null>(null);
+  const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   useEffect(() => {
-    const currentDrag = dragState;
-    if (!currentDrag) {
+    if (!contextMenu) {
       return;
     }
-    const drag = currentDrag;
 
-    function handlePointerMove(event: PointerEvent) {
-      const board = boardRef.current;
-      if (!board) {
-        return;
-      }
-      const bounds = board.getBoundingClientRect();
-      const nextX = Math.max(16, Math.round(event.clientX - bounds.left - drag.offsetX));
-      const nextY = Math.max(16, Math.round(event.clientY - bounds.top - drag.offsetY));
-      onMoveNode(drag.nodeId, nextX, nextY);
+    function handleClose() {
+      setContextMenu(null);
     }
 
-    function handlePointerUp(event: PointerEvent) {
-      const board = boardRef.current;
-      if (board) {
-        const bounds = board.getBoundingClientRect();
-        const nextX = Math.max(16, Math.round(event.clientX - bounds.left - drag.offsetX));
-        const nextY = Math.max(16, Math.round(event.clientY - bounds.top - drag.offsetY));
-        onMoveNodeEnd(drag.nodeId, nextX, nextY);
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setContextMenu(null);
       }
-      setDragState(null);
     }
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointerdown", handleClose);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointerdown", handleClose);
+      window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [dragState, onMoveNode, onMoveNodeEnd]);
+  }, [contextMenu]);
 
-  function handleBoardDoubleClick(event: MouseEvent<HTMLDivElement>) {
-    const board = boardRef.current;
-    if (!board || event.target !== board) {
-      return;
-    }
-    const bounds = board.getBoundingClientRect();
-    onCreateNodeAt(
-      Math.round(event.clientX - bounds.left - NODE_WIDTH / 2),
-      Math.round(event.clientY - bounds.top - NODE_HEIGHT / 2),
-    );
-  }
+  const nodes: Array<Node<NoteNodeData>> = (document?.nodes ?? []).map((node) => ({
+    id: node.id,
+    type: "note",
+    position: { x: node.x, y: node.y },
+    data: {
+      node,
+      isCodexSelected: selectedNodeIds.has(node.id),
+      onOpenNode,
+      onSelectNode,
+      onToggleNodeForCodex,
+    },
+    selected: node.id === selectedNodeId,
+    draggable: true,
+  }));
+
+  const edges: Edge[] = (document?.edges ?? []).map((edge) => ({
+    id: edge.id,
+    source: edge.source_node_id,
+    target: edge.target_node_id,
+    label: edge.label || undefined,
+    type: "default",
+    animated: false,
+  }));
+
+  const handleNodeDrag: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
+    onMoveNode(node.id, Math.round(node.position.x), Math.round(node.position.y));
+  };
+
+  const handleNodeDragStop: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
+    onMoveNodeEnd(node.id, Math.round(node.position.x), Math.round(node.position.y));
+  };
+
+  const handleNodeClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
+    onSelectNode(node.id);
+  };
+
+  const handleNodeDoubleClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
+    onOpenNode(node.id);
+  };
 
   return (
     <div
       className={styles.canvasBoard}
-      onDoubleClick={handleBoardDoubleClick}
-      ref={boardRef}
+      onDoubleClick={(event) => {
+        if (!flowRef.current) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        if (target.closest(".react-flow__node")) {
+          return;
+        }
+        const point = flowRef.current.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        onCreateNodeAt(Math.round(point.x - NODE_WIDTH / 2), Math.round(point.y - NODE_HEIGHT / 2));
+      }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        if (!flowRef.current) {
+          return;
+        }
+        const point = flowRef.current.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        setContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          canvasX: Math.round(point.x - NODE_WIDTH / 2),
+          canvasY: Math.round(point.y - NODE_HEIGHT / 2),
+          nodeId: null,
+        });
+      }}
     >
-      {!document ? null : (
-        <>
-          <svg className={styles.canvasEdges} viewBox="0 0 1400 900" preserveAspectRatio="none">
-            {document.edges.map((edge) => {
-              const source = document.nodes.find((item) => item.id === edge.source_node_id);
-              const target = document.nodes.find((item) => item.id === edge.target_node_id);
-              if (!source || !target) {
-                return null;
-              }
-              const sourceX = source.x + NODE_WIDTH;
-              const sourceY = source.y + NODE_HEIGHT / 2;
-              const targetX = target.x;
-              const targetY = target.y + NODE_HEIGHT / 2;
-              const midX = (sourceX + targetX) / 2;
-              const path = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
-              return (
-                <g key={edge.id}>
-                  <path className={styles.canvasEdgePath} d={path} />
-                  {edge.label ? (
-                    <text
-                      className={styles.canvasEdgeLabel}
-                      x={midX}
-                      y={(sourceY + targetY) / 2 - 6}
-                    >
-                      {edge.label}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
-          </svg>
-
-          {document.nodes.map((node) => (
-            <CanvasNodeCard
-              isCodexSelected={selectedNodeIds.has(node.id)}
-              isSelected={selectedNodeId === node.id}
-              key={node.id}
-              node={node}
-              onPointerDown={(event) => {
-                const bounds = (event.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                setDragState({
-                  nodeId: node.id,
-                  offsetX: event.clientX - bounds.left,
-                  offsetY: event.clientY - bounds.top,
-                });
+      <ReactFlow
+        defaultEdgeOptions={{ style: { stroke: "#b6a391", strokeWidth: 2 } }}
+        edges={edges}
+        fitView={false}
+        maxZoom={1.8}
+        minZoom={0.35}
+        nodeOrigin={[0, 0]}
+        nodes={nodes}
+        nodeTypes={nodeTypes}
+        onInit={(instance) => {
+          flowRef.current = instance;
+        }}
+        onNodeClick={handleNodeClick}
+        onNodeDoubleClick={handleNodeDoubleClick}
+        onNodeDrag={handleNodeDrag}
+        onNodeDragStop={handleNodeDragStop}
+        onNodeContextMenu={(event, node) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const point = flowRef.current?.screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          setContextMenu({
+            x: event.clientX,
+            y: event.clientY,
+            canvasX: Math.round((point?.x ?? node.position.x) - NODE_WIDTH / 2),
+            canvasY: Math.round((point?.y ?? node.position.y) - NODE_HEIGHT / 2),
+            nodeId: node.id,
+          });
+        }}
+        panOnDrag={[1, 2]}
+        panOnScroll
+        panOnScrollMode={PanOnScrollMode.Free}
+        proOptions={{ hideAttribution: true }}
+        selectionOnDrag={false}
+      >
+        <Background color="#e6ddd2" gap={24} />
+      </ReactFlow>
+      {contextMenu ? (
+        <div
+          className={styles.canvasContextMenu}
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            className={styles.canvasContextItem}
+            onClick={() => {
+              onCreateNodeAt(contextMenu.canvasX, contextMenu.canvasY);
+              setContextMenu(null);
+            }}
+            type="button"
+          >
+            Create note
+          </button>
+          {contextMenu.nodeId ? (
+            <button
+              className={styles.canvasContextItemDanger}
+              onClick={() => {
+                onDeleteNode(contextMenu.nodeId as string);
+                setContextMenu(null);
               }}
-              onOpenNode={onOpenNode}
-              onSelectNode={onSelectNode}
-              onToggleNodeForCodex={onToggleNodeForCodex}
-            />
-          ))}
-        </>
-      )}
+              type="button"
+            >
+              Delete note
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function CanvasNodeCard({
-  isCodexSelected,
-  isSelected,
-  node,
-  onPointerDown,
-  onOpenNode,
-  onSelectNode,
-  onToggleNodeForCodex,
-}: {
-  isCodexSelected: boolean;
-  isSelected: boolean;
-  node: CanvasNode;
-  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onOpenNode: (nodeId: string) => void;
-  onSelectNode: (nodeId: string) => void;
-  onToggleNodeForCodex: (nodeId: string) => void;
-}) {
+function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boolean }) {
+  const { node, isCodexSelected, onOpenNode, onSelectNode, onToggleNodeForCodex } = data;
+
   return (
     <button
-      className={isSelected ? styles.canvasNodeActive : styles.canvasNode}
+      className={selected ? styles.canvasNodeActive : styles.canvasNode}
       onClick={() => onSelectNode(node.id)}
       onDoubleClick={() => onOpenNode(node.id)}
-      onPointerDown={onPointerDown}
-      style={{ left: node.x, top: node.y }}
       type="button"
     >
       <div className={styles.canvasNodeHeader}>
@@ -187,10 +261,7 @@ function CanvasNodeCard({
             </span>
           ))}
         </div>
-        <label
-          className={styles.canvasToggle}
-          onClick={(event) => event.stopPropagation()}
-        >
+        <label className={styles.canvasToggle} onClick={(event) => event.stopPropagation()}>
           <input
             checked={isCodexSelected}
             onChange={() => onToggleNodeForCodex(node.id)}

@@ -28,17 +28,19 @@ export interface StatusResponse {
 
 export interface ProjectProfile {
   name: string;
-  description: string;
   repo_path: string;
-  stack: string;
-  goals: string;
-  constraints: string;
-  design_direction: string;
+  recent_projects: string[];
 }
 
 export interface ProjectProfileResponse {
   project: ProjectProfile;
   is_configured: boolean;
+}
+
+export interface AgentsDocumentResponse {
+  repo_path: string;
+  path: string;
+  content: string;
 }
 
 export interface SymbolRecord {
@@ -195,6 +197,18 @@ export function updateProject(payload: ProjectProfile) {
   return apiRequest<ProjectProfileResponse>("/project", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function fetchProjectAgents(repoPath?: string) {
+  const suffix = repoPath ? `?repo_path=${encodeURIComponent(repoPath)}` : "";
+  return apiRequest<AgentsDocumentResponse>(`/project/agents${suffix}`, { cache: "no-store" });
+}
+
+export function updateProjectAgents(content: string, repoPath?: string) {
+  return apiRequest<AgentsDocumentResponse>("/project/agents", {
+    method: "PUT",
+    body: JSON.stringify({ content, repo_path: repoPath }),
   });
 }
 
