@@ -261,6 +261,31 @@ class CanvasEdgeCreateRequest(BaseModel):
     label: str = ""
 
 
+class GeneratedCanvasNode(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    linked_files: list[str] = Field(default_factory=list)
+    linked_symbols: list[str] = Field(default_factory=list)
+
+
+class GeneratedCanvasEdge(BaseModel):
+    source_title: str = Field(min_length=1, max_length=120)
+    target_title: str = Field(min_length=1, max_length=120)
+    label: str = ""
+
+
+class CanvasGenerateRequest(BaseModel):
+    repo_path: str
+    prompt: str = Field(min_length=2, max_length=500)
+
+
+class CanvasGenerateResponse(BaseModel):
+    document: CanvasDocument
+    summary: str
+    created_count: int
+
+
 class CanvasResponse(BaseModel):
     document: CanvasDocument
 

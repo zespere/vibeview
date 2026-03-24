@@ -9,6 +9,8 @@ from .models import (
     CanvasDocument,
     CanvasEdge,
     CanvasEdgeCreateRequest,
+    GeneratedCanvasEdge,
+    GeneratedCanvasNode,
     CanvasNode,
     CanvasNodeCreateRequest,
     CanvasNodeUpdateRequest,
@@ -128,6 +130,69 @@ class CanvasService:
         document.edges.append(edge)
         logger.info("Created canvas edge %s", edge.id)
         return self.store.save(document)
+
+    def append_generated_map(
+        self,
+        nodes: list[GeneratedCanvasNode],
+        edges: list[GeneratedCanvasEdge],
+    ) -> tuple[CanvasDocument, int]:
+        document = self.store.load()
+        existing_titles = {node.title.strip().lower(): node for node in document.nodes}
+        title_to_id: dict[str, str] = {}
+        start_x = 120
+        start_y = 120
+        gap_x = 320
+        gap_y = 220
+        created_count = 0
+
+        index = len(document.nodes)
+        for generated in nodes:
+            normalized_title = generated.title.strip().lower()
+            if not normalized_title or normalized_title in existing_titles or normalized_title in title_to_id:
+                continue
+
+            col = index % 3
+            row = index // 3
+            node = CanvasNode(
+                id=f"node_{uuid4().hex[:10]}",
+                title=generated.title.strip(),
+                description=generated.description.strip(),
+                tags=_normalize_tags(generated.tags),
+                x=start_x + col * gap_x,
+                y=start_y + row * gap_y,
+                linked_files=generated.linked_files,
+                linked_symbols=generated.linked_symbols,
+            )
+            document.nodes.append(node)
+            title_to_id[normalized_title] = node.id
+            existing_titles[normalized_title] = node
+            created_count += 1
+            index += 1
+
+        edge_keys = {
+            (edge.source_node_id, edge.target_node_id, edge.label.strip().lower())
+            for edge in document.edges
+        }
+        for generated_edge in edges:
+            source = existing_titles.get(generated_edge.source_title.strip().lower())
+            target = existing_titles.get(generated_edge.target_title.strip().lower())
+            if source is None or target is None or source.id == target.id:
+                continue
+            key = (source.id, target.id, generated_edge.label.strip().lower())
+            if key in edge_keys:
+                continue
+            edge = CanvasEdge(
+                id=f"edge_{uuid4().hex[:10]}",
+                source_node_id=source.id,
+                target_node_id=target.id,
+                label=generated_edge.label.strip(),
+            )
+            document.edges.append(edge)
+            edge_keys.add(key)
+
+        if created_count:
+            logger.info("Generated %s canvas nodes from prompt workflow", created_count)
+        return self.store.save(document), created_count
 
     def delete_edge(self, edge_id: str) -> CanvasDocument:
         document = self.store.load()

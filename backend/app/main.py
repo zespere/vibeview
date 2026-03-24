@@ -16,6 +16,8 @@ from .models import (
     AssistImpactRequest,
     AssistImpactResponse,
     CanvasEdgeCreateRequest,
+    CanvasGenerateRequest,
+    CanvasGenerateResponse,
     CanvasResponse,
     CanvasNodeCreateRequest,
     CanvasNodeUpdateRequest,
@@ -266,6 +268,30 @@ def delete_canvas_edge(edge_id: str) -> CanvasResponse:
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return CanvasResponse(document=document)
+
+
+@app.post("/canvas/generate", response_model=CanvasGenerateResponse)
+def generate_canvas_from_prompt(request: CanvasGenerateRequest) -> CanvasGenerateResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    try:
+        nodes, edges, summary = codex_service.generate_architecture_notes(
+            repo_path=str(repo_path.resolve()),
+            prompt=request.prompt,
+        )
+        document, created_count = canvas_service.append_generated_map(nodes, edges)
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return CanvasGenerateResponse(
+        document=document,
+        summary=summary,
+        created_count=created_count,
+    )
 
 
 def build_status(preview: str | None = None) -> StatusResponse:

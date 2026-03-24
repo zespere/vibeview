@@ -13,6 +13,8 @@ from .models import (
     ChangedFileRecord,
     CodexChangeResponse,
     CodexCommandRecord,
+    GeneratedCanvasEdge,
+    GeneratedCanvasNode,
 )
 from .services import GraphService, _clean_log_output
 
@@ -129,6 +131,78 @@ class CodexService:
             commands=commands,
             raw_event_count=len(events),
         )
+
+    def generate_architecture_notes(
+        self,
+        repo_path: str,
+        prompt: str,
+    ) -> tuple[list[GeneratedCanvasNode], list[GeneratedCanvasEdge], str]:
+        if not self.is_available():
+            nodes = self._fallback_architecture_notes(prompt)
+            return nodes, [], f"Created {len(nodes)} architecture notes from the prompt."
+
+        repo_dir = Path(repo_path)
+        generation_prompt = (
+            "You are mapping product architecture into editable workspace notes.\n"
+            "Inspect the repository and the user prompt, then return JSON only.\n"
+            "Do not modify files.\n\n"
+            "Return exactly this shape:\n"
+            '{\n'
+            '  "summary": "short plain sentence",\n'
+            '  "nodes": [\n'
+            '    {\n'
+            '      "title": "string",\n'
+            '      "description": "2-4 sentence note about responsibility and behavior",\n'
+            '      "tags": ["feature"],\n'
+            '      "linked_files": ["src/app.tsx"],\n'
+            '      "linked_symbols": ["app.main"]\n'
+            '    }\n'
+            '  ],\n'
+            '  "edges": [\n'
+            '    {\n'
+            '      "source_title": "string",\n'
+            '      "target_title": "string",\n'
+            '      "label": "drives"\n'
+            '    }\n'
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- 3 to 6 nodes only.\n"
+            "- Titles must be short and human-readable.\n"
+            "- Focus on app architecture, features, screens, state, and data flow.\n"
+            "- If the repo is empty, propose a sensible first-pass architecture for the prompt.\n"
+            "- JSON only. No markdown fences.\n\n"
+            f"User prompt:\n{prompt.strip()}\n"
+        )
+        command = self._build_command(repo_dir, generation_prompt, True, True)
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        events = self._parse_jsonl_output(result.stdout)
+        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        payload = self._extract_json_object(raw_text)
+        if payload is None:
+            nodes = self._fallback_architecture_notes(prompt)
+            return nodes, [], f"Created {len(nodes)} architecture notes from the prompt."
+
+        try:
+            node_items = [
+                GeneratedCanvasNode.model_validate(item)
+                for item in payload.get("nodes", [])
+            ]
+            edge_items = [
+                GeneratedCanvasEdge.model_validate(item)
+                for item in payload.get("edges", [])
+            ]
+        except Exception:
+            nodes = self._fallback_architecture_notes(prompt)
+            return nodes, [], f"Created {len(nodes)} architecture notes from the prompt."
+
+        node_items = node_items[:6]
+        summary = str(payload.get("summary") or f"Created {len(node_items)} architecture notes.").strip()
+        if not node_items:
+            node_items = self._fallback_architecture_notes(prompt)
+            edge_items = []
+            summary = f"Created {len(node_items)} architecture notes from the prompt."
+        return node_items, edge_items, summary
 
     def _build_command(
         self,
@@ -249,3 +323,47 @@ class CodexService:
                 )
             )
         return commands
+
+    def _extract_json_object(self, value: str) -> dict[str, Any] | None:
+        if not value:
+            return None
+        text = value.strip()
+        candidates = [text]
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidates.append(text[start : end + 1])
+        for candidate in candidates:
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return None
+
+    def _fallback_architecture_notes(self, prompt: str) -> list[GeneratedCanvasNode]:
+        prompt_value = prompt.strip() or "App"
+        root = prompt_value[:80]
+        return [
+            GeneratedCanvasNode(
+                title="App shell",
+                description=f"The main application shell for {root}. It owns routing, layout, and top-level composition.",
+                tags=["shell"],
+            ),
+            GeneratedCanvasNode(
+                title="Primary screen",
+                description="The main screen users interact with first. It should present the core workflow in the simplest possible way.",
+                tags=["screen"],
+            ),
+            GeneratedCanvasNode(
+                title="Data model",
+                description="The central data shape and CRUD behavior for the app. This note should track create, read, update, and delete expectations.",
+                tags=["data", "crud"],
+            ),
+            GeneratedCanvasNode(
+                title="UI state",
+                description="Local state, form state, loading state, and error handling for the main flow.",
+                tags=["state"],
+            ),
+        ]

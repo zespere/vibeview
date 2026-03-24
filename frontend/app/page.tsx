@@ -15,7 +15,7 @@ import {
   fetchRelationships,
   fetchStatus,
   fetchStructure,
-  runCodexChange,
+  generateCanvasFromPrompt,
   runImpactAnalysis,
   runIndex,
   runQuery,
@@ -25,7 +25,6 @@ import {
   type AgentsDocumentResponse,
   type AssistImpactResponse,
   type CanvasDocument,
-  type CodexChangeResponse,
   type ProjectProfile,
   type QueryMode,
   type QueryResponse,
@@ -72,10 +71,7 @@ export default function Home() {
   const [impactPrompt, setImpactPrompt] = useState("create user");
   const [impactResult, setImpactResult] = useState<AssistImpactResponse | null>(null);
   const [codexPrompt, setCodexPrompt] = useState("");
-  const [codexDryRun] = useState(true);
-  const [codexUseGraphContext] = useState(true);
-  const [codexBypassSandbox] = useState(true);
-  const [codexResult, setCodexResult] = useState<CodexChangeResponse | null>(null);
+  const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
@@ -342,26 +338,24 @@ export default function Home() {
     });
   }
 
-  async function submitCodexChange() {
+  async function submitArchitecturePrompt() {
     try {
       setErrorMessage(null);
-      const response = await runCodexChange(
-        repoPath,
-        codexPrompt,
-        codexDryRun,
-        codexUseGraphContext,
-        codexBypassSandbox,
-        buildSemanticContext(canvasDocument, selectedCanvasNodeIds),
+      const response = await generateCanvasFromPrompt(repoPath, codexPrompt);
+      setCanvasDocument(response.document);
+      setComposerStatus(
+        response.created_count > 0
+          ? `${response.summary} Added ${response.created_count} note${response.created_count === 1 ? "" : "s"}.`
+          : response.summary,
       );
-      setCodexResult(response);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
   }
 
-  async function handleSubmitCodexChange() {
+  async function handleSubmitArchitecturePrompt() {
     startCodexTransition(() => {
-      void submitCodexChange();
+      void submitArchitecturePrompt();
     });
   }
 
@@ -702,12 +696,12 @@ export default function Home() {
           )}
         </div>
         <div className={styles.buildDock}>
-          {codexResult ? <p className={styles.helperText}>{codexResult.summary}</p> : null}
+          {composerStatus ? <p className={styles.helperText}>{composerStatus}</p> : null}
           <label className={styles.buildComposer}>
             <textarea
               className={styles.buildComposerInput}
               onChange={(event) => setCodexPrompt(event.target.value)}
-              placeholder="What should Konceptura build next?"
+              placeholder="Describe the app or feature map you want to create."
               rows={3}
               value={codexPrompt}
             />
@@ -717,11 +711,11 @@ export default function Home() {
               </span>
               <button
                 className={styles.primaryButton}
-                disabled={codexPending || !status?.codex_ok}
-                onClick={handleSubmitCodexChange}
+                disabled={codexPending || !repoPath.trim() || !codexPrompt.trim()}
+                onClick={handleSubmitArchitecturePrompt}
                 type="button"
               >
-                {codexPending ? "Working..." : "Build"}
+                {codexPending ? "Mapping..." : "Create notes"}
               </button>
             </div>
           </label>
@@ -1480,24 +1474,6 @@ function parseTagList(value: string) {
       seen.add(lowered);
       return true;
     });
-}
-
-function buildSemanticContext(document: CanvasDocument | null, selectedNodeIds: Set<string>) {
-  if (!document || selectedNodeIds.size === 0) {
-    return "";
-  }
-  const selectedNodes = document.nodes.filter((item) => selectedNodeIds.has(item.id));
-  if (selectedNodes.length === 0) {
-    return "";
-  }
-  return selectedNodes
-    .map((node) => {
-      const tags = node.tags.length > 0 ? `Tags: ${node.tags.join(", ")}` : "";
-      const files = node.linked_files.length > 0 ? `Files: ${node.linked_files.join(", ")}` : "";
-      const symbols = node.linked_symbols.length > 0 ? `Symbols: ${node.linked_symbols.join(", ")}` : "";
-      return [node.title, tags, node.description, files, symbols].filter(Boolean).join("\n");
-    })
-    .join("\n\n");
 }
 
 function buildLinkedFiles(symbol: SymbolRecord | null, treeNode: StructureNode | null) {

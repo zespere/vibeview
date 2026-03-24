@@ -165,6 +165,12 @@ export interface CanvasResponse {
   document: CanvasDocument;
 }
 
+export interface CanvasGenerateResponse {
+  document: CanvasDocument;
+  summary: string;
+  created_count: number;
+}
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -323,5 +329,12 @@ export function createCanvasEdge(payload: {
 export function deleteCanvasEdge(edgeId: string) {
   return apiRequest<CanvasResponse>(`/canvas/edges/${encodeURIComponent(edgeId)}`, {
     method: "DELETE",
+  });
+}
+
+export function generateCanvasFromPrompt(repoPath: string, prompt: string) {
+  return apiRequest<CanvasGenerateResponse>("/canvas/generate", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, prompt }),
   });
 }
