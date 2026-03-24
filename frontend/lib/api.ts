@@ -26,6 +26,21 @@ export interface StatusResponse {
   codex_model: string | null;
 }
 
+export interface ProjectProfile {
+  name: string;
+  description: string;
+  repo_path: string;
+  stack: string;
+  goals: string;
+  constraints: string;
+  design_direction: string;
+}
+
+export interface ProjectProfileResponse {
+  project: ProjectProfile;
+  is_configured: boolean;
+}
+
 export interface SymbolRecord {
   labels: string[];
   properties: Record<string, unknown>;
@@ -170,6 +185,17 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchStatus() {
   return apiRequest<StatusResponse>("/status", { cache: "no-store" });
+}
+
+export function fetchProject() {
+  return apiRequest<ProjectProfileResponse>("/project", { cache: "no-store" });
+}
+
+export function updateProject(payload: ProjectProfile) {
+  return apiRequest<ProjectProfileResponse>("/project", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function runIndex(repoPath: string, clean: boolean, dryRun: boolean) {

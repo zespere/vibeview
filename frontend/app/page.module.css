@@ -4,6 +4,49 @@
   background: #f3eee7;
 }
 
+.loadingShell,
+.setupShell {
+  display: flex;
+  min-height: 100vh;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 32px;
+  overflow: auto;
+}
+
+.loadingShell {
+  align-items: center;
+  color: #6c6257;
+  font-size: 15px;
+}
+
+.setupPanel {
+  width: min(980px, 100%);
+  padding: 28px 0 56px;
+}
+
+.setupHeader {
+  margin-bottom: 22px;
+}
+
+.setupTitle {
+  display: block;
+  font-size: 30px;
+  line-height: 1.1;
+  color: #241d17;
+}
+
+.setupText {
+  margin-top: 10px;
+  max-width: 760px;
+  color: #6c6257;
+  line-height: 1.6;
+}
+
+.setupCard {
+  max-width: 640px;
+}
+
 .shell {
   position: relative;
   height: 100vh;
@@ -489,6 +532,12 @@
 
 .settingsPane {
   gap: 18px;
+}
+
+.inspectPane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .resultsPane {

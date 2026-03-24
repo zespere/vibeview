@@ -20,6 +20,8 @@ from .models import (
     CodexChangeRequest,
     CodexChangeResponse,
     IndexRequest,
+    ProjectProfileResponse,
+    ProjectProfileUpdateRequest,
     QueryRequest,
     QueryResponse,
     RelationshipsResponse,
@@ -27,6 +29,7 @@ from .models import (
     StructureResponse,
     SymbolsResponse,
 )
+from .project_service import ProjectService, ProjectStore
 from .services import GraphService, IndexService, SEARCHABLE_SYMBOL_LABELS, StateStore
 
 configure_logging()
@@ -43,9 +46,11 @@ app.add_middleware(
 
 state_store = StateStore(settings.state_path)
 canvas_store = CanvasStore(settings.canvas_path)
+project_store = ProjectStore(settings.project_path)
 graph_service = GraphService()
 index_service = IndexService(state_store)
 canvas_service = CanvasService(canvas_store)
+project_service = ProjectService(project_store)
 codex_service = CodexService(graph_service)
 
 
@@ -64,6 +69,7 @@ def root() -> dict[str, object]:
             "/assist/impact",
             "/codex/change",
             "/canvas",
+            "/project",
         ],
     }
 
@@ -90,6 +96,20 @@ async def index_repo(request: IndexRequest) -> StatusResponse:
 @app.get("/status", response_model=StatusResponse)
 def get_status() -> StatusResponse:
     return build_status()
+
+
+@app.get("/project", response_model=ProjectProfileResponse)
+def get_project() -> ProjectProfileResponse:
+    project = project_service.get_project()
+    return ProjectProfileResponse(project=project, is_configured=project.is_configured)
+
+
+@app.put("/project", response_model=ProjectProfileResponse)
+def update_project(request: ProjectProfileUpdateRequest) -> ProjectProfileResponse:
+    project = project_service.update_project(request)
+    if project.repo_path:
+        canvas_service.set_repo_path(project.repo_path)
+    return ProjectProfileResponse(project=project, is_configured=project.is_configured)
 
 
 @app.get("/symbols", response_model=SymbolsResponse)

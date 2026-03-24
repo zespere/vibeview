@@ -36,6 +36,35 @@ class StatusResponse(BaseModel):
     codex_model: str | None = None
 
 
+class ProjectProfile(BaseModel):
+    name: str = ""
+    description: str = ""
+    repo_path: str = ""
+    stack: str = ""
+    goals: str = ""
+    constraints: str = ""
+    design_direction: str = ""
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.repo_path.strip())
+
+
+class ProjectProfileUpdateRequest(BaseModel):
+    name: str = Field(default="", max_length=120)
+    description: str = ""
+    repo_path: str = ""
+    stack: str = ""
+    goals: str = ""
+    constraints: str = ""
+    design_direction: str = ""
+
+
+class ProjectProfileResponse(BaseModel):
+    project: ProjectProfile
+    is_configured: bool
+
+
 class SymbolRecord(BaseModel):
     labels: list[str]
     properties: dict[str, Any]

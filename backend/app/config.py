@@ -25,6 +25,7 @@ class Settings(BaseModel):
     codex_bypass_sandbox_default: bool = True
     state_path: Path = WORKSPACE_ROOT / "backend" / "data" / "state.json"
     canvas_path: Path = WORKSPACE_ROOT / "backend" / "data" / "canvas.json"
+    project_path: Path = WORKSPACE_ROOT / "backend" / "data" / "project.json"
     log_path: Path = WORKSPACE_ROOT / "backend" / "data" / "konceptura.log"
     log_level: str = "INFO"
     default_repo_path: Path = WORKSPACE_ROOT / "repos" / "react-crud-app"
@@ -121,6 +122,10 @@ def load_settings() -> Settings:
         ),
         canvas_path=_resolve_path(
             app_cfg.get("canvas_path", "backend/data/canvas.json"),
+            workspace_root,
+        ),
+        project_path=_resolve_path(
+            app_cfg.get("project_path", "backend/data/project.json"),
             workspace_root,
         ),
         log_path=_resolve_path(

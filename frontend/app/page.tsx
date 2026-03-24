@@ -10,6 +10,7 @@ import {
   API_BASE_URL,
   createCanvasNode,
   fetchCanvas,
+  fetchProject,
   fetchRelationships,
   fetchStatus,
   fetchStructure,
@@ -17,10 +18,12 @@ import {
   runImpactAnalysis,
   runIndex,
   runQuery,
+  updateProject,
   updateCanvasNode,
   type AssistImpactResponse,
   type CanvasDocument,
   type CodexChangeResponse,
+  type ProjectProfile,
   type QueryMode,
   type QueryResponse,
   type RelationshipRecord,
@@ -29,31 +32,37 @@ import {
   type SymbolRecord,
 } from "@/lib/api";
 
-type WorkspaceView = "notes" | "graph" | "structure" | "search" | "impact" | "codex" | "settings";
+type WorkspaceView = "build" | "notes" | "graph" | "inspect" | "project";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `note:${string}`; type: "note"; nodeId: string };
 
 const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
+  { id: "build", label: "Build" },
   { id: "notes", label: "Notes" },
   { id: "graph", label: "Graph" },
-  { id: "structure", label: "Structure" },
-  { id: "search", label: "Search" },
-  { id: "impact", label: "Impact" },
-  { id: "codex", label: "Codex" },
-  { id: "settings", label: "Settings" },
+  { id: "inspect", label: "Inspect" },
+  { id: "project", label: "Project" },
 ];
 
 export default function Home() {
   const [isRailExpanded, setIsRailExpanded] = useState(true);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { id: "view:notes", type: "view", view: "notes", preview: false },
+    { id: "view:build", type: "view", view: "build", preview: false },
   ]);
-  const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:notes");
+  const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:build");
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [project, setProject] = useState<ProjectProfile | null>(null);
+  const [projectName, setProjectName] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
+  const [projectStack, setProjectStack] = useState("");
+  const [projectGoals, setProjectGoals] = useState("");
+  const [projectConstraints, setProjectConstraints] = useState("");
+  const [projectDesignDirection, setProjectDesignDirection] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [cleanIndex, setCleanIndex] = useState(true);
   const [dryRunIndex, setDryRunIndex] = useState(false);
+  const [inspectView, setInspectView] = useState<"structure" | "search" | "impact">("structure");
   const [queryMode, setQueryMode] = useState<QueryMode>("search");
   const [queryInput, setQueryInput] = useState("create user");
   const [queryResults, setQueryResults] = useState<QueryResponse["results"]>([]);
@@ -84,6 +93,7 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [statusPending, startStatusTransition] = useTransition();
+  const [projectPending, startProjectTransition] = useTransition();
   const [indexPending, startIndexTransition] = useTransition();
   const [queryPending, startQueryTransition] = useTransition();
   const [relationshipsPending, startRelationshipsTransition] = useTransition();
@@ -124,6 +134,9 @@ export default function Home() {
     startStatusTransition(() => {
       void refreshStatus();
     });
+    startProjectTransition(() => {
+      void refreshProject();
+    });
     startStructureTransition(() => {
       void refreshStructure();
     });
@@ -139,11 +152,17 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!status) {
+    if (!project) {
       return;
     }
-    setRepoPath((current) => current || status.active_repo_path || status.default_repo_path);
-  }, [status]);
+    setProjectName(project.name);
+    setProjectDescription(project.description);
+    setProjectStack(project.stack);
+    setProjectGoals(project.goals);
+    setProjectConstraints(project.constraints);
+    setProjectDesignDirection(project.design_direction);
+    setRepoPath((current) => current || project.repo_path || status?.active_repo_path || status?.default_repo_path || "");
+  }, [project, status]);
 
   useEffect(() => {
     if (!selectedCanvasNode) {
@@ -217,6 +236,16 @@ export default function Home() {
       setErrorMessage(null);
       const nextStatus = await fetchStatus();
       setStatus(nextStatus);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
+  async function refreshProject() {
+    try {
+      setErrorMessage(null);
+      const response = await fetchProject();
+      setProject(response.project);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -396,6 +425,29 @@ export default function Home() {
     setCodexPrompt("Explain the smallest safe code change you would make for the current task.");
   }
 
+  async function handleSaveProject() {
+    startProjectTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await updateProject({
+            name: projectName.trim(),
+            description: projectDescription.trim(),
+            repo_path: repoPath.trim(),
+            stack: projectStack.trim(),
+            goals: projectGoals.trim(),
+            constraints: projectConstraints.trim(),
+            design_direction: projectDesignDirection.trim(),
+          });
+          setProject(response.project);
+          openViewTab("build");
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
   function openCanvasNode(nodeId: string) {
     setSelectedCanvasNodeId(nodeId);
     setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
@@ -418,7 +470,7 @@ export default function Home() {
     setOpenTabs((current) => {
       const next = current.filter((item) => item.id !== `note:${nodeId}`);
       if (activeTabId === `note:${nodeId}`) {
-        setActiveTabId(next.at(-1)?.id ?? "view:notes");
+        setActiveTabId(next.at(-1)?.id ?? "view:build");
       }
       return next;
     });
@@ -426,7 +478,7 @@ export default function Home() {
 
   function openViewTab(view: WorkspaceView) {
     const id = `view:${view}` as const;
-    if (view === "notes") {
+    if (view === "build") {
       setOpenTabs((current) =>
         current.some((tab) => tab.id === id)
           ? current
@@ -443,7 +495,7 @@ export default function Home() {
       }
 
       const previewIndex = current.findIndex(
-        (tab) => tab.type === "view" && tab.view !== "notes" && tab.preview,
+        (tab) => tab.type === "view" && tab.view !== "build" && tab.preview,
       );
       const nextTab: OpenTab = { id, type: "view", view, preview: true };
 
@@ -480,7 +532,7 @@ export default function Home() {
   }
 
   function closeTab(tabId: OpenTab["id"]) {
-    if (tabId === "view:notes") {
+    if (tabId === "view:build") {
       return;
     }
     const tab = openTabs.find((item) => item.id === tabId);
@@ -494,7 +546,7 @@ export default function Home() {
     setOpenTabs((current) => {
       const next = current.filter((item) => item.id !== tabId);
       if (activeTabId === tabId) {
-        setActiveTabId(next.at(-1)?.id ?? "view:notes");
+        setActiveTabId(next.at(-1)?.id ?? "view:build");
       }
       return next;
     });
@@ -1099,17 +1151,17 @@ export default function Home() {
     );
   }
 
-  function renderCodexView() {
+  function renderBuildView() {
     return (
       <div className={styles.workspaceSplit}>
         <div className={styles.workspacePrimary}>
           <div className={styles.panelSurface}>
             <label className={styles.field}>
-              <span className={styles.fieldLabel}>Task</span>
+              <span className={styles.fieldLabel}>What should Konceptura build next?</span>
               <textarea
                 className={styles.textarea}
                 onChange={(event) => setCodexPrompt(event.target.value)}
-                rows={5}
+                rows={7}
                 value={codexPrompt}
               />
             </label>
@@ -1144,33 +1196,31 @@ export default function Home() {
                 onClick={handleSubmitCodexChange}
                 type="button"
               >
-                {codexPending ? "Running..." : codexDryRun ? "Preview change" : "Run change"}
+                {codexPending ? "Working..." : "Build"}
               </button>
             </div>
 
             <div className={styles.resultsPane}>
               {!codexResult ? (
-                <EmptyState message="Run Codex to capture diffs." />
+                <EmptyState message="Describe the next feature or change and let Konceptura implement it." />
               ) : codexResult.changed_files.length === 0 ? (
                 <EmptyState
                   message={
                     codexResult.dry_run
                       ? "Dry run completed without writing files."
-                      : "Codex completed but no text-file changes were detected."
+                      : "Konceptura finished without detecting text-file changes."
                   }
                 />
               ) : (
-                <ul className={styles.resultList}>
-                  {codexResult.changed_files.map((item) => (
-                    <li key={item.path}>
-                      <div className={styles.resultCard}>
-                        <span className={styles.resultLabel}>{item.change_type}</span>
-                        <strong className={styles.resultTitle}>{item.path}</strong>
-                        <pre className={styles.codeBlockInline}>{item.diff}</pre>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <div className={styles.inspectorPane}>
+                  <p className={styles.helperText}>{codexResult.summary}</p>
+                  <div className={styles.detailGrid}>
+                    <DetailRow label="Changed areas" value={String(codexResult.changed_files.length)} />
+                    <DetailRow label="Commands" value={String(codexResult.commands.length)} />
+                    <DetailRow label="Graph context" value={codexResult.used_graph_context ? "yes" : "no"} />
+                    <DetailRow label="Mode" value={codexResult.dry_run ? "preview" : "write"} />
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -1178,36 +1228,63 @@ export default function Home() {
 
         <div className={styles.workspaceSidebar}>
           <div className={styles.panelSurface}>
-            <span className={styles.fieldLabel}>Semantic context</span>
+            <span className={styles.fieldLabel}>Project context</span>
+            {project?.name ? <strong className={styles.resultTitle}>{project.name}</strong> : null}
+            {project?.description ? <p className={styles.resultMeta}>{project.description}</p> : null}
             {semanticContextPreview ? (
               <pre className={styles.codeBlockInline}>{semanticContextPreview}</pre>
             ) : (
-              <p className={styles.helperText}>Select notes with the `Codex` checkbox to include them here.</p>
+              <p className={styles.helperText}>Select notes with the `Codex` checkbox to steer the current build task.</p>
             )}
-            {!codexResult ? null : (
-              <div className={styles.inspectorPane}>
-                <p className={styles.helperText}>{codexResult.summary}</p>
-                <div className={styles.detailGrid}>
-                  <DetailRow label="Files" value={String(codexResult.changed_files.length)} />
-                  <DetailRow label="Commands" value={String(codexResult.commands.length)} />
-                  <DetailRow label="Graph context" value={codexResult.used_graph_context ? "yes" : "no"} />
-                  <DetailRow label="Dry run" value={codexResult.dry_run ? "yes" : "no"} />
-                </div>
-              </div>
-            )}
+            <div className={styles.detailGrid}>
+              <DetailRow label="Repo" value={repoPath ? "ready" : "missing"} />
+              <DetailRow label="Codex" value={status?.codex_ok ? "ready" : "missing"} />
+              <DetailRow label="Index" value={status?.index_job.status ?? "idle"} />
+              <DetailRow label="Notes" value={String(selectedCanvasNodeIds.size)} />
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  function renderSettingsView() {
+  function renderProjectView() {
     return (
       <div className={styles.settingsPane}>
         <div className={styles.panelSurface}>
           <label className={styles.field}>
+            <span className={styles.fieldLabel}>Project name</span>
+            <input className={styles.input} onChange={(event) => setProjectName(event.target.value)} value={projectName} />
+          </label>
+
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>What is this project?</span>
+            <textarea className={styles.textarea} onChange={(event) => setProjectDescription(event.target.value)} rows={3} value={projectDescription} />
+          </label>
+
+          <label className={styles.field}>
             <span className={styles.fieldLabel}>Repository path</span>
             <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
+          </label>
+
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Stack</span>
+            <input className={styles.input} onChange={(event) => setProjectStack(event.target.value)} placeholder="Next.js, React, TypeScript, SQLite" value={projectStack} />
+          </label>
+
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Goals</span>
+            <textarea className={styles.textarea} onChange={(event) => setProjectGoals(event.target.value)} rows={4} value={projectGoals} />
+          </label>
+
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Constraints</span>
+            <textarea className={styles.textarea} onChange={(event) => setProjectConstraints(event.target.value)} rows={4} value={projectConstraints} />
+          </label>
+
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>Design direction</span>
+            <textarea className={styles.textarea} onChange={(event) => setProjectDesignDirection(event.target.value)} rows={3} value={projectDesignDirection} />
           </label>
 
           {sampleRepos.length > 0 ? (
@@ -1232,19 +1309,11 @@ export default function Home() {
           </div>
 
           <div className={styles.actionsRow}>
-            <button className={styles.primaryButton} disabled={indexPending} onClick={handleIndex} type="button">
-              {indexPending ? "Submitting..." : dryRunIndex ? "Preview index command" : "Index repository"}
+            <button className={styles.primaryButton} disabled={projectPending} onClick={handleSaveProject} type="button">
+              {projectPending ? "Saving..." : "Save project"}
             </button>
-            <button
-              className={styles.secondaryButton}
-              onClick={() =>
-                startStatusTransition(() => {
-                  void refreshStatus();
-                })
-              }
-              type="button"
-            >
-              Refresh status
+            <button className={styles.secondaryButton} disabled={indexPending} onClick={handleIndex} type="button">
+              {indexPending ? "Submitting..." : dryRunIndex ? "Preview index" : "Index repo"}
             </button>
           </div>
         </div>
@@ -1288,29 +1357,100 @@ export default function Home() {
     );
   }
 
+  function renderInspectView() {
+    return (
+      <div className={styles.inspectPane}>
+        <div className={styles.inlineTabs}>
+          <button className={inspectView === "structure" ? styles.activeTab : styles.tab} onClick={() => setInspectView("structure")} type="button">
+            Structure
+          </button>
+          <button className={inspectView === "search" ? styles.activeTab : styles.tab} onClick={() => setInspectView("search")} type="button">
+            Search
+          </button>
+          <button className={inspectView === "impact" ? styles.activeTab : styles.tab} onClick={() => setInspectView("impact")} type="button">
+            Impact
+          </button>
+        </div>
+        {inspectView === "structure" ? renderStructureView() : null}
+        {inspectView === "search" ? renderSearchView() : null}
+        {inspectView === "impact" ? renderImpactView() : null}
+      </div>
+    );
+  }
+
+  function renderProjectSetup() {
+    return (
+      <div className={styles.setupShell}>
+        <div className={styles.setupPanel}>
+          <div className={styles.setupHeader}>
+            <strong className={styles.setupTitle}>Open your project</strong>
+            <p className={styles.setupText}>
+              Start with the local folder for your app. You can fill in goals, stack, and design direction later inside the project.
+            </p>
+          </div>
+          <div className={styles.setupCard}>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Project folder</span>
+              <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
+            </label>
+
+            {sampleRepos.length > 0 ? (
+              <div className={styles.sampleRepoList}>
+                {sampleRepos.map(([name, path]) => (
+                  <button className={styles.secondaryButton} key={name} onClick={() => applySampleRepo(path)} type="button">
+                    {name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div className={styles.actionsRow}>
+              <button className={styles.primaryButton} disabled={projectPending || !repoPath.trim()} onClick={handleSaveProject} type="button">
+                {projectPending ? "Opening..." : "Open project"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderActiveView() {
     if (activeTab?.type === "note") {
       return renderNoteTabView(activeTab.nodeId);
     }
 
     switch (activeView) {
+      case "build":
+        return renderBuildView();
       case "notes":
         return renderNotesView();
       case "graph":
         return renderGraphView();
-      case "structure":
-        return renderStructureView();
-      case "search":
-        return renderSearchView();
-      case "impact":
-        return renderImpactView();
-      case "codex":
-        return renderCodexView();
-      case "settings":
-        return renderSettingsView();
+      case "inspect":
+        return renderInspectView();
+      case "project":
+        return renderProjectView();
       default:
         return null;
     }
+  }
+
+  if (!project) {
+    return (
+      <div className={styles.page}>
+        <div className={styles.loadingShell}>Loading project...</div>
+      </div>
+    );
+  }
+
+  if (!repoPath.trim()) {
+    return (
+      <div className={styles.page}>
+        {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+        {renderProjectSetup()}
+      </div>
+    );
   }
 
   return (
@@ -1367,7 +1507,7 @@ export default function Home() {
                     ? VIEW_ITEMS.find((item) => item.id === tab.view)?.label ?? tab.view
                     : canvasDocument?.nodes.find((node) => node.id === tab.nodeId)?.title ?? "Note"}
                 </button>
-                {tab.id !== "view:notes" ? (
+                {tab.id !== "view:build" ? (
                   <button className={styles.documentTabClose} onClick={() => closeTab(tab.id)} type="button">
                     ×
                   </button>
@@ -1428,6 +1568,13 @@ function EmptyState({ message }: { message: string }) {
 
 function ViewIcon({ view }: { view: WorkspaceView }) {
   switch (view) {
+    case "build":
+      return (
+        <svg aria-hidden="true" viewBox="0 0 16 16">
+          <path d="M3 4.5h10M3 8h7M3 11.5h5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          <path d="m10.5 10.2 1.6 1.6 2.4-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
     case "notes":
       return (
         <svg aria-hidden="true" viewBox="0 0 16 16">
@@ -1443,40 +1590,20 @@ function ViewIcon({ view }: { view: WorkspaceView }) {
           <path d="M5.3 4.5 10.7 5.1M4.9 5.2 7.2 10.8M11.1 6.2 8.8 10.8" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
         </svg>
       );
-    case "structure":
+    case "inspect":
       return (
         <svg aria-hidden="true" viewBox="0 0 16 16">
           <rect x="2.5" y="2.5" width="4" height="4" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <rect x="9.5" y="2.5" width="4" height="4" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <rect x="6" y="9.5" width="4" height="4" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M6.5 4.5h3M8 6.5v3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+          <circle cx="11.5" cy="4.5" r="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+          <path d="m9.9 9.8 2.7 2.7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+          <circle cx="7" cy="11" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
         </svg>
       );
-    case "search":
+    case "project":
       return (
         <svg aria-hidden="true" viewBox="0 0 16 16">
-          <circle cx="7" cy="7" r="3.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
-          <path d="m10.2 10.2 2.8 2.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        </svg>
-      );
-    case "impact":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path d="M8 2.2 12.8 8 8 13.8 3.2 8 8 2.2Z" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="8" cy="8" r="1.8" fill="currentColor" />
-        </svg>
-      );
-    case "codex":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path d="m3 4 3 4-3 4M8 12h5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-    case "settings":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="M8 2.3v1.6M8 12.1v1.6M13.7 8h-1.6M3.9 8H2.3M11.9 4.1l-1.1 1.1M5.2 10.8l-1.1 1.1M11.9 11.9l-1.1-1.1M5.2 5.2 4.1 4.1" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+          <path d="M3 13.2h10M4 11V4.6a1.6 1.6 0 0 1 1.6-1.6h4.8L12 4.6V11" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+          <path d="M10.4 3v2h2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
         </svg>
       );
     default:
