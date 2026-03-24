@@ -1,0 +1,1065 @@
+.page {
+  height: 100vh;
+  overflow: hidden;
+  background: #f3eee7;
+}
+
+.shell {
+  position: relative;
+  height: 100vh;
+}
+
+.shellExpanded {
+  position: relative;
+  height: 100vh;
+}
+
+.leftRail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 20;
+  width: 72px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 0;
+  border-right: 1px solid #d9d1c6;
+  background: #e6ded2;
+  padding: 14px 8px;
+  overflow: hidden;
+}
+
+.leftRailExpanded {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 20;
+  width: 196px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 0;
+  border-right: 1px solid #d9d1c6;
+  background: #e6ded2;
+  padding: 14px 10px;
+  overflow: hidden;
+}
+
+.railMeta,
+.helperText,
+.resultMeta,
+.statusLabel,
+.metaLabel,
+.metaValue {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #6c6257;
+}
+
+.railNav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.railButton,
+.railButtonActive,
+.tab,
+.activeTab,
+.primaryButton,
+.secondaryButton,
+.resultButton,
+.treeNode,
+.treeNodeActive,
+.treeToggle,
+.resultCard,
+.noteTab,
+.noteTabActive,
+.inlineLink,
+.graphNode,
+.graphNodeActive {
+  font: inherit;
+}
+
+.railButton,
+.railButtonActive {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #695d4f;
+  cursor: pointer;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.railButtonActive {
+  border-color: #cdbda9;
+  background: #f8f3eb;
+  color: #241d17;
+}
+
+.railIcon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.railIcon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.railLabel {
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+.railFooter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.railToggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #695d4f;
+  cursor: pointer;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.leftRail .railButton,
+.leftRail .railButtonActive,
+.leftRail .railToggle {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.leftRailExpanded .railButton,
+.leftRailExpanded .railButtonActive,
+.leftRailExpanded .railToggle {
+  justify-content: flex-start;
+}
+
+.workspace {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  height: 100vh;
+  flex-direction: column;
+  background: #f7f4ee;
+  overflow: hidden;
+}
+
+.shell .workspace {
+  margin-left: 72px;
+}
+
+.shellExpanded .workspace {
+  margin-left: 196px;
+}
+
+.workspaceHeader {
+  border-bottom: 1px solid #ddd5ca;
+  padding: 22px 28px 16px;
+}
+
+.workspaceTitle {
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1.15;
+  color: #241d17;
+}
+
+.workspaceSubtitle {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #6c6257;
+}
+
+.inlineTabs,
+.tabStrip {
+  display: flex;
+  gap: 10px;
+}
+
+.tabStrip {
+  flex: 0 0 auto;
+  overflow-x: auto;
+  border-bottom: 1px solid #ddd5ca;
+  padding: 12px 28px 0;
+}
+
+.tab,
+.activeTab {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #6c6257;
+  cursor: pointer;
+  padding: 8px 11px;
+}
+
+.activeTab {
+  border-color: #d0c5b7;
+  background: #efe7db;
+  color: #241d17;
+}
+
+.documentTab,
+.documentTabActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 240px;
+  border: 1px solid transparent;
+  border-radius: 10px 10px 0 0;
+  background: transparent;
+  padding: 10px 12px 9px;
+}
+
+.documentTabActive {
+  border-color: #d0c5b7;
+  border-bottom-color: #fffdf9;
+  background: #fffdf9;
+  margin-bottom: -1px;
+}
+
+.documentTabButton,
+.documentTabButtonPreview,
+.documentTabClose {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+}
+
+.documentTabButton,
+.documentTabButtonPreview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  color: #3b3026;
+}
+
+.documentTabButtonPreview {
+  font-style: italic;
+  color: #6d5d4d;
+}
+
+.documentTabClose {
+  cursor: pointer;
+  color: #8f8170;
+}
+
+.workspaceStage {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 18px 28px 28px;
+}
+
+.workspaceSingle {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: calc(100vh - 190px);
+  width: 100%;
+}
+
+.workspaceSplit {
+  display: grid;
+  min-height: calc(100vh - 190px);
+  grid-template-columns: minmax(0, 1.55fr) 360px;
+  gap: 18px;
+}
+
+.workspacePrimary,
+.workspaceSidebar {
+  min-width: 0;
+}
+
+.workspaceSidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panelSurface,
+.canvasFrame,
+.graphFrame {
+  border: 1px solid #ddd5ca;
+  border-radius: 10px;
+  background: #fffdf9;
+}
+
+.panelSurface {
+  height: 100%;
+  padding: 16px;
+}
+
+.canvasFrame,
+.graphFrame {
+  min-height: calc(100vh - 190px);
+  overflow: auto;
+}
+
+.field {
+  display: block;
+  margin-top: 14px;
+}
+
+.fieldLabel,
+.columnTitle,
+.resultLabel,
+.relationshipDirection,
+.detailLabel,
+.treeNodeKind {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #7a6f60;
+}
+
+.input,
+.textarea {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid #c7bcad;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #241d17;
+  font: inherit;
+}
+
+.input {
+  height: 42px;
+  padding: 0 12px;
+}
+
+.textarea {
+  min-height: 92px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.input:focus,
+.textarea:focus {
+  outline: 2px solid rgba(139, 92, 50, 0.12);
+  outline-offset: 1px;
+  border-color: #8b5c32;
+}
+
+.optionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #44382d;
+}
+
+.checkboxRow input {
+  width: 16px;
+  height: 16px;
+}
+
+.actionsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.primaryButton,
+.secondaryButton {
+  min-height: 40px;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.primaryButton {
+  border: 1px solid #8b5c32;
+  background: #8b5c32;
+  color: #fffdfa;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.secondaryButton {
+  border: 1px solid #c7bcad;
+  background: #f2ece2;
+  color: #31271e;
+}
+
+.noteTabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.noteTab,
+.noteTabActive {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  border: 1px solid #d6cdc1;
+  border-radius: 8px 8px 0 0;
+  background: #f4eee5;
+  padding: 8px 10px;
+}
+
+.noteTabActive {
+  background: #fffdf9;
+}
+
+.noteTabButton,
+.noteTabClose {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+}
+
+.noteTabButton {
+  min-width: 0;
+  cursor: pointer;
+}
+
+.noteTabTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.noteTabClose {
+  cursor: pointer;
+  color: #8f8170;
+}
+
+.editorPane,
+.inspectorPane,
+.settingsPane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settingsPane {
+  gap: 18px;
+}
+
+.resultsPane {
+  margin-top: 16px;
+}
+
+.noteEditorLayout {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 22px;
+  min-height: calc(100vh - 222px);
+  width: 100%;
+  max-width: none;
+  border: 0;
+  background: transparent;
+  padding: 4px 0 0;
+}
+
+.noteEditorMain,
+.noteEditorSidebar {
+  min-width: 0;
+}
+
+.noteEditorMain {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.noteEditorHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 14px;
+}
+
+.noteTitleInput {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #241d17;
+  font: inherit;
+  font-size: 31px;
+  font-weight: 650;
+  line-height: 1.15;
+  padding: 0;
+}
+
+.noteTitleInput:focus {
+  outline: none;
+}
+
+.noteMetaBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  font-size: 13px;
+  color: #6c6257;
+}
+
+.noteField,
+.noteSidebarSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.noteSidebarSection + .noteSidebarSection {
+  padding-top: 14px;
+}
+
+.noteBodyInput {
+  width: 100%;
+  min-height: 460px;
+  border: 0;
+  background: transparent;
+  color: #241d17;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.65;
+  padding: 0;
+  resize: vertical;
+}
+
+.noteBodyInput:focus {
+  outline: none;
+}
+
+.noteActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.noteEditorSidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-left: 20px;
+}
+
+.noteSidebarInput,
+.noteSidebarTextarea {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #241d17;
+  font: inherit;
+  padding: 0;
+}
+
+.noteSidebarInput {
+  min-height: 28px;
+}
+
+.noteSidebarTextarea {
+  min-height: 110px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.noteSidebarInput:focus,
+.noteSidebarTextarea:focus {
+  outline: none;
+}
+
+.noteRelationshipList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  list-style: none;
+}
+
+.noteRelationshipItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  padding: 8px 0;
+}
+
+.detailGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detailRow {
+  border: 1px solid #ddd5ca;
+  border-radius: 8px;
+  background: #f8f2e9;
+  padding: 10px 12px;
+}
+
+.detailValue {
+  display: block;
+  margin-top: 5px;
+  font-size: 14px;
+  color: #241d17;
+  word-break: break-word;
+}
+
+.sampleRepoList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.statusList,
+.metaList,
+.resultList,
+.relationshipList,
+.simpleList,
+.treeList,
+.treeChildren {
+  list-style: none;
+}
+
+.statusList,
+.metaList,
+.resultList,
+.relationshipList,
+.simpleList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.statusRow,
+.metaRow,
+.relationshipItem,
+.treeRow,
+.canvasNodeHeader,
+.canvasNodeMeta,
+.relationshipBody {
+  display: flex;
+  align-items: center;
+}
+
+.statusRow,
+.metaRow {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.statusRow dd {
+  margin: 0;
+}
+
+.statusValueOk {
+  color: #107569;
+}
+
+.statusValueError {
+  color: #b42318;
+}
+
+.statusValueMuted {
+  color: #7b7061;
+}
+
+.metaValue {
+  min-width: 0;
+  text-align: right;
+  word-break: break-word;
+}
+
+.treeChildren {
+  margin-left: 18px;
+  padding-left: 10px;
+  border-left: 1px solid #e2dad0;
+}
+
+.treeItem + .treeItem {
+  margin-top: 6px;
+}
+
+.treeRow {
+  gap: 8px;
+}
+
+.treeToggle,
+.treeSpacer {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+}
+
+.treeToggle {
+  border: 1px solid #c7bcad;
+  border-radius: 6px;
+  background: #fffdf9;
+  color: #31271e;
+  cursor: pointer;
+}
+
+.treeSpacer {
+  display: inline-block;
+}
+
+.treeNode,
+.treeNodeActive {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.treeNode:hover {
+  background: #f5eee5;
+  border-color: #e2dad0;
+}
+
+.treeNodeActive {
+  background: #f1e7da;
+  border-color: #d1c0ac;
+}
+
+.treeNodeName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: #241d17;
+}
+
+.resultButton,
+.resultCard {
+  width: 100%;
+  border: 1px solid #ddd5ca;
+  border-radius: 8px;
+  background: #f8f2e9;
+  padding: 12px;
+  text-align: left;
+}
+
+.resultButton {
+  cursor: pointer;
+}
+
+.resultButton:hover {
+  border-color: #d0c0ac;
+  background: #f2e9de;
+}
+
+.resultTitle,
+.graphNodeTitle {
+  display: block;
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.4;
+  word-break: break-word;
+  color: #241d17;
+}
+
+.relationshipItem {
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #ddd5ca;
+  border-radius: 8px;
+  background: #f8f2e9;
+  padding: 12px;
+}
+
+.relationshipBody {
+  width: 100%;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.inlineLink,
+.linkButton {
+  border: 0;
+  background: transparent;
+  color: #8b5c32;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.tagRow,
+.canvasTagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tagChip,
+.canvasTag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid #d8c9b6;
+  border-radius: 999px;
+  background: #f4ebdf;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #6b5641;
+}
+
+.codeBlock,
+.noteBlock,
+.codeBlockInline {
+  overflow-x: auto;
+  border: 1px solid #ddd5ca;
+  border-radius: 8px;
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.codeBlock,
+.noteBlock {
+  background: #f6f0e6;
+  padding: 12px;
+  color: #241d17;
+}
+
+.codeBlockInline {
+  margin-top: 10px;
+  background: #fffdf9;
+  padding: 10px 12px;
+  color: #241d17;
+}
+
+.canvasBoard {
+  position: relative;
+  width: 1400px;
+  height: 900px;
+  background-color: #fffdf9;
+  background-image:
+    linear-gradient(to right, #efe7dd 1px, transparent 1px),
+    linear-gradient(to bottom, #efe7dd 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.canvasEdges,
+.graphEdges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.canvasEdgePath,
+.graphEdgeLine {
+  fill: none;
+  stroke: #b6a391;
+  stroke-width: 2;
+}
+
+.canvasEdgeLabel,
+.graphEdgeText {
+  fill: #6f6255;
+  font-size: 12px;
+  text-anchor: middle;
+}
+
+.canvasNode,
+.canvasNodeActive {
+  position: absolute;
+  width: 240px;
+  min-height: 148px;
+  border: 1px solid #cebfae;
+  border-radius: 10px;
+  background: #fffaf3;
+  cursor: grab;
+  padding: 12px;
+  text-align: left;
+}
+
+.canvasNodeActive {
+  border-color: #8b5c32;
+  background: #fff4e7;
+}
+
+.canvasNodeHeader,
+.canvasNodeMeta {
+  justify-content: space-between;
+}
+
+.canvasNodeHeader {
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.canvasNodeTitle {
+  display: block;
+  margin-top: 10px;
+  font-size: 15px;
+  line-height: 1.35;
+  color: #241d17;
+}
+
+.canvasNodeDescription,
+.canvasNodeMeta,
+.graphNodeMeta {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #6c6257;
+}
+
+.canvasToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6c6257;
+}
+
+.graphBoard {
+  position: relative;
+  width: 960px;
+  height: 620px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(234, 224, 210, 0.9), transparent 30%),
+    radial-gradient(circle at 80% 30%, rgba(244, 236, 223, 0.9), transparent 28%),
+    #fcfaf6;
+}
+
+.graphNode,
+.graphNodeActive {
+  position: absolute;
+  min-width: 140px;
+  max-width: 200px;
+  transform: translate(-50%, -50%);
+  border: 1px solid #d4c7b8;
+  border-radius: 10px;
+  background: rgba(255, 253, 249, 0.96);
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.graphNodeActive {
+  border-color: #8b5c32;
+  background: #fff5e9;
+}
+
+.errorText {
+  margin: 14px 28px 0;
+  color: #b42318;
+}
+
+@media (max-width: 1180px) {
+  .workspaceSplit {
+    grid-template-columns: 1fr;
+  }
+
+  .noteEditorLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .noteEditorSidebar {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid #e6ddd2;
+    padding-top: 16px;
+  }
+}
+
+@media (max-width: 900px) {
+  .shell,
+  .shellExpanded {
+    grid-template-columns: 1fr;
+  }
+
+  .leftRail,
+  .leftRailExpanded {
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    border-right: 0;
+    border-bottom: 1px solid #d9d1c6;
+    overflow-x: auto;
+  }
+
+  .railNav,
+  .railFooter {
+    flex-direction: row;
+  }
+
+  .workspaceHeader,
+  .tabStrip,
+  .workspaceStage {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .detailGrid,
+  .optionGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .actionsRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

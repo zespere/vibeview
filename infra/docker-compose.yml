@@ -1,0 +1,25 @@
+services:
+  memgraph:
+    image: memgraph/memgraph:latest
+    platform: linux/arm64/v8
+    container_name: konceptura-memgraph
+    command:
+      - "--also-log-to-stderr=true"
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+    volumes:
+      - memgraph-data:/var/lib/memgraph
+
+  memgraph-lab:
+    image: memgraph/lab:latest
+    container_name: konceptura-memgraph-lab
+    depends_on:
+      - memgraph
+    ports:
+      - "3000:3000"
+    environment:
+      QUICK_CONNECT_MG_HOST: memgraph
+
+volumes:
+  memgraph-data:

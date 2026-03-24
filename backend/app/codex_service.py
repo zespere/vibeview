@@ -1,0 +1,251 @@
+from __future__ import annotations
+
+import difflib
+import json
+import logging
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .config import settings
+from .models import (
+    ChangedFileRecord,
+    CodexChangeResponse,
+    CodexCommandRecord,
+)
+from .services import GraphService, _clean_log_output
+
+logger = logging.getLogger(__name__)
+
+IGNORED_DIR_NAMES = {
+    ".git",
+    ".next",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+}
+MAX_SNAPSHOT_BYTES = 250_000
+
+
+@dataclass
+class _SnapshotFile:
+    path: str
+    content: str
+
+
+class CodexService:
+    def __init__(self, graph_service: GraphService) -> None:
+        self.graph_service = graph_service
+
+    def is_available(self) -> bool:
+        return bool(settings.codex_binary and settings.codex_binary.exists())
+
+    def run_change(
+        self,
+        repo_path: str,
+        prompt: str,
+        dry_run: bool,
+        use_graph_context: bool,
+        bypass_sandbox: bool | None,
+        semantic_context: str | None,
+    ) -> CodexChangeResponse:
+        if not self.is_available():
+            raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
+
+        repo_dir = Path(repo_path)
+        before = self._snapshot_repo(repo_dir)
+
+        graph_context_summary = None
+        final_prompt = prompt.strip()
+        if semantic_context:
+            final_prompt = (
+                "Use this semantic workspace context when planning and editing:\n"
+                f"{semantic_context.strip()}\n\nTask:\n{final_prompt}"
+            )
+        if use_graph_context:
+            try:
+                impact = self.graph_service.analyze_impact(prompt, limit=5)
+            except Exception:
+                logger.exception("Failed to build graph context for Codex change run")
+                graph_context_summary = "Graph context unavailable; proceeding without code-graph hints."
+            else:
+                graph_context_summary = impact.summary
+                context_lines = [impact.summary]
+                if impact.affected_files:
+                    context_lines.append("Likely files:")
+                    context_lines.extend(f"- {item.path}" for item in impact.affected_files[:5])
+                if impact.seeds:
+                    context_lines.append("Seed symbols:")
+                    context_lines.extend(
+                        f"- {seed.symbol.properties.get('qualified_name') or seed.symbol.properties.get('path')}"
+                        for seed in impact.seeds[:5]
+                    )
+                final_prompt = (
+                    "Use this code-graph context when deciding what to inspect or change.\n"
+                    + "\n".join(context_lines)
+                    + f"\n\nTask:\n{prompt.strip()}"
+                )
+
+        if dry_run:
+            final_prompt += (
+                "\n\nDo not modify files. Inspect the repo and explain the exact changes you would make."
+            )
+
+        bypass = settings.codex_bypass_sandbox_default if bypass_sandbox is None else bypass_sandbox
+        command = self._build_command(repo_dir, final_prompt, dry_run, bypass)
+        logger.info("Starting Codex change run for %s", repo_path)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        events = self._parse_jsonl_output(result.stdout)
+        commands = self._collect_command_records(events)
+        summary = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+
+        after = self._snapshot_repo(repo_dir)
+        changed_files = [] if dry_run else self._build_changed_files(before, after)
+
+        if result.returncode != 0:
+            error_tail = _clean_log_output(result.stderr or result.stdout)
+            summary = error_tail or summary or "Codex run failed."
+
+        return CodexChangeResponse(
+            repo_path=str(repo_dir),
+            prompt=prompt,
+            summary=summary,
+            dry_run=dry_run,
+            used_graph_context=use_graph_context,
+            bypass_sandbox=bypass,
+            codex_binary=str(settings.codex_binary),
+            codex_model=settings.codex_model,
+            graph_context_summary=graph_context_summary,
+            changed_files=changed_files,
+            commands=commands,
+            raw_event_count=len(events),
+        )
+
+    def _build_command(
+        self,
+        repo_dir: Path,
+        prompt: str,
+        dry_run: bool,
+        bypass_sandbox: bool,
+    ) -> list[str]:
+        assert settings.codex_binary is not None
+        command = [
+            str(settings.codex_binary),
+            "exec",
+            "-C",
+            str(repo_dir),
+            "--skip-git-repo-check",
+            "--json",
+        ]
+        if settings.codex_model:
+            command.extend(["-m", settings.codex_model])
+        if bypass_sandbox:
+            command.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            command.extend(["--sandbox", "read-only" if dry_run else "workspace-write"])
+        command.append(prompt)
+        return command
+
+    def _snapshot_repo(self, repo_dir: Path) -> dict[str, _SnapshotFile]:
+        snapshot: dict[str, _SnapshotFile] = {}
+        for path in repo_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            if any(part in IGNORED_DIR_NAMES for part in path.relative_to(repo_dir).parts):
+                continue
+            try:
+                if path.stat().st_size > MAX_SNAPSHOT_BYTES:
+                    continue
+                content = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            relative_path = str(path.relative_to(repo_dir))
+            snapshot[relative_path] = _SnapshotFile(path=relative_path, content=content)
+        return snapshot
+
+    def _build_changed_files(
+        self,
+        before: dict[str, _SnapshotFile],
+        after: dict[str, _SnapshotFile],
+    ) -> list[ChangedFileRecord]:
+        changed: list[ChangedFileRecord] = []
+        all_paths = sorted(set(before) | set(after))
+        for path in all_paths:
+            before_file = before.get(path)
+            after_file = after.get(path)
+            if before_file and after_file and before_file.content == after_file.content:
+                continue
+
+            if before_file is None and after_file is not None:
+                change_type = "added"
+                before_lines: list[str] = []
+                after_lines = after_file.content.splitlines()
+            elif before_file is not None and after_file is None:
+                change_type = "deleted"
+                before_lines = before_file.content.splitlines()
+                after_lines = []
+            else:
+                change_type = "modified"
+                assert before_file is not None and after_file is not None
+                before_lines = before_file.content.splitlines()
+                after_lines = after_file.content.splitlines()
+
+            diff = "\n".join(
+                difflib.unified_diff(
+                    before_lines,
+                    after_lines,
+                    fromfile=f"a/{path}",
+                    tofile=f"b/{path}",
+                    lineterm="",
+                )
+            )
+            changed.append(ChangedFileRecord(path=path, change_type=change_type, diff=diff))
+        return changed
+
+    def _parse_jsonl_output(self, stdout: str) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return events
+
+    def _last_agent_message(self, events: list[dict[str, Any]]) -> str | None:
+        for event in reversed(events):
+            item = event.get("item")
+            if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text")
+                if isinstance(text, str):
+                    return text
+        return None
+
+    def _collect_command_records(self, events: list[dict[str, Any]]) -> list[CodexCommandRecord]:
+        commands: list[CodexCommandRecord] = []
+        for event in events:
+            item = event.get("item")
+            if event.get("type") != "item.completed" or not isinstance(item, dict):
+                continue
+            if item.get("type") != "command_execution":
+                continue
+            commands.append(
+                CodexCommandRecord(
+                    command=str(item.get("command", "")),
+                    status=str(item.get("status", "")),
+                    exit_code=item.get("exit_code"),
+                    output=_clean_log_output(str(item.get("aggregated_output", ""))) or None,
+                )
+            )
+        return commands

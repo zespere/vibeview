@@ -1,0 +1,1 @@
+"""Konceptura backend package."""

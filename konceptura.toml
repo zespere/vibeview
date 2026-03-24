@@ -1,0 +1,22 @@
+[app]
+default_repo_path = "repos/react-crud-app"
+state_path = "backend/data/state.json"
+log_path = "backend/data/konceptura.log"
+log_level = "INFO"
+frontend_origins = ["http://localhost:3001", "http://127.0.0.1:3001"]
+
+[memgraph]
+uri = "bolt://localhost:7687"
+username = ""
+password = ""
+
+[code_graph]
+binary = "vendor/code-graph-rag/.venv/bin/cgr"
+
+[codex]
+binary = "/home/wniak/.config/nvm/versions/node/v25.2.0/bin/codex"
+bypass_sandbox_default = true
+
+[repos]
+sample-python = "repos/sample-app"
+react-crud = "repos/react-crud-app"

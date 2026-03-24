@@ -1,0 +1,14 @@
+.venv/
+backend/.venv/
+.python-version
+.env
+.DS_Store
+vendor/
+data/
+__pycache__/
+.cgr-hash-cache.json
+backend/data/
+backend/data/*.log
+frontend/.next/
+frontend/node_modules/
+frontend/.env.local
