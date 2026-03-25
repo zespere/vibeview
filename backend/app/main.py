@@ -24,6 +24,8 @@ from .models import (
     CodexChangeRequest,
     CodexChangeResponse,
     IndexRequest,
+    ProjectBuildRequest,
+    ProjectBuildResponse,
     ProjectProfileResponse,
     ProjectProfileUpdateRequest,
     QueryRequest,
@@ -72,6 +74,7 @@ def root() -> dict[str, object]:
             "/query",
             "/assist/impact",
             "/codex/change",
+            "/project/build",
             "/canvas",
             "/project",
         ],
@@ -224,8 +227,65 @@ def codex_change(request: CodexChangeRequest) -> CodexChangeResponse:
     return response
 
 
+@app.post("/project/build", response_model=ProjectBuildResponse)
+def build_project(request: ProjectBuildRequest) -> ProjectBuildResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    canvas_service.set_repo_path(resolved_repo_path)
+
+    try:
+        change_response = codex_service.build_project(
+            repo_path=resolved_repo_path,
+            prompt=request.prompt,
+            semantic_context=request.semantic_context,
+        )
+        generated_nodes, generated_edges, note_summary = codex_service.generate_architecture_notes(
+            repo_path=resolved_repo_path,
+            prompt=request.prompt,
+        )
+        document, notes_created = canvas_service.append_generated_map(generated_nodes, generated_edges)
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    modified_files = [item.path for item in change_response.changed_files]
+    file_count = len(modified_files)
+    if file_count > 0:
+        summary_parts = [
+            f"Updated {file_count} file{'s' if file_count != 1 else ''} in {resolved_repo_path}."
+        ]
+    else:
+        summary_parts = [f"No project files were modified in {resolved_repo_path}."]
+    if notes_created > 0:
+        summary_parts.append(f"Added {notes_created} architecture note{'s' if notes_created != 1 else ''}.")
+    else:
+        summary_parts.append("Architecture notes refreshed with no new nodes added.")
+
+    return ProjectBuildResponse(
+        repo_path=resolved_repo_path,
+        prompt=request.prompt,
+        summary=" ".join(summary_parts),
+        code_summary=change_response.summary,
+        note_summary=note_summary,
+        modified_files=modified_files,
+        notes_created=notes_created,
+        document=document,
+    )
+
+
 @app.get("/canvas", response_model=CanvasResponse)
-def get_canvas() -> CanvasResponse:
+def get_canvas(repo_path: str | None = None) -> CanvasResponse:
+    if repo_path:
+        resolved_path = Path(repo_path)
+        if not resolved_path.exists():
+            raise HTTPException(status_code=404, detail=f"Repository path does not exist: {resolved_path}")
+        if not resolved_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {resolved_path}")
+        return CanvasResponse(document=canvas_service.get_document_for_repo(str(resolved_path.resolve())))
     return CanvasResponse(document=canvas_service.get_document())
 
 
@@ -279,6 +339,7 @@ def generate_canvas_from_prompt(request: CanvasGenerateRequest) -> CanvasGenerat
         raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
 
     try:
+        canvas_service.set_repo_path(str(repo_path.resolve()))
         nodes, edges, summary = codex_service.generate_architecture_notes(
             repo_path=str(repo_path.resolve()),
             prompt=request.prompt,

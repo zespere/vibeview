@@ -19,6 +19,7 @@ import type { CanvasDocument, CanvasNode } from "@/lib/api";
 
 interface CanvasBoardProps {
   document: CanvasDocument | null;
+  fitViewSignal: number;
   selectedNodeId: string | null;
   selectedNodeIds: Set<string>;
   onCreateNodeAt: (x: number, y: number) => void;
@@ -55,6 +56,7 @@ const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
 
 export function CanvasBoard({
   document,
+  fitViewSignal,
   selectedNodeId,
   selectedNodeIds,
   onCreateNodeAt,
@@ -66,6 +68,7 @@ export function CanvasBoard({
   onToggleNodeForCodex,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
+  const [flowReady, setFlowReady] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   useEffect(() => {
@@ -90,6 +93,18 @@ export function CanvasBoard({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!flowReady || !flowRef.current || !document || document.nodes.length === 0 || fitViewSignal === 0) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      flowRef.current?.fitView({
+        duration: 240,
+        padding: 0.2,
+      });
+    });
+  }, [document, fitViewSignal, flowReady]);
 
   const nodes: Array<Node<NoteNodeData>> = (document?.nodes ?? []).map((node) => ({
     id: node.id,
@@ -180,6 +195,7 @@ export function CanvasBoard({
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           flowRef.current = instance;
+          setFlowReady(true);
         }}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}

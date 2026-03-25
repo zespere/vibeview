@@ -171,6 +171,17 @@ export interface CanvasGenerateResponse {
   created_count: number;
 }
 
+export interface ProjectBuildResponse {
+  repo_path: string;
+  prompt: string;
+  summary: string;
+  code_summary: string;
+  note_summary: string;
+  modified_files: string[];
+  notes_created: number;
+  document: CanvasDocument;
+}
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -272,8 +283,26 @@ export function runCodexChange(
   });
 }
 
-export function fetchCanvas() {
-  return apiRequest<CanvasResponse>("/canvas", { cache: "no-store" });
+export function buildProjectFromPrompt(
+  repoPath: string,
+  prompt: string,
+  semanticContext?: string,
+  selectedNoteIds: string[] = [],
+) {
+  return apiRequest<ProjectBuildResponse>("/project/build", {
+    method: "POST",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      prompt,
+      semantic_context: semanticContext,
+      selected_note_ids: selectedNoteIds,
+    }),
+  });
+}
+
+export function fetchCanvas(repoPath?: string) {
+  const suffix = repoPath ? `?repo_path=${encodeURIComponent(repoPath)}` : "";
+  return apiRequest<CanvasResponse>(`/canvas${suffix}`, { cache: "no-store" });
 }
 
 export function createCanvasNode(payload: {

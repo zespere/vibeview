@@ -39,13 +39,39 @@ class CanvasStore:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def load(self) -> CanvasDocument:
-        if not self.path.exists():
+    def _project_canvas_path(self, repo_path: str) -> Path:
+        return Path(repo_path) / ".konceptura" / "canvas.json"
+
+    def _read_document(self, path: Path) -> CanvasDocument:
+        if not path.exists():
             return CanvasDocument()
-        return CanvasDocument.model_validate(json.loads(self.path.read_text()))
+        return CanvasDocument.model_validate(json.loads(path.read_text()))
+
+    def load(self) -> CanvasDocument:
+        pointer = self._read_document(self.path)
+        if pointer.repo_path:
+            project_path = self._project_canvas_path(pointer.repo_path)
+            if project_path.exists():
+                return self._read_document(project_path)
+        return pointer
+
+    def load_for_repo(self, repo_path: str) -> CanvasDocument:
+        project_path = self._project_canvas_path(repo_path)
+        if project_path.exists():
+            return self._read_document(project_path)
+
+        pointer = self._read_document(self.path)
+        if pointer.repo_path == repo_path:
+            return pointer
+        return CanvasDocument(repo_path=repo_path)
 
     def save(self, document: CanvasDocument) -> CanvasDocument:
-        self.path.write_text(json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True))
+        payload = json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True)
+        self.path.write_text(payload)
+        if document.repo_path:
+            project_path = self._project_canvas_path(document.repo_path)
+            project_path.parent.mkdir(parents=True, exist_ok=True)
+            project_path.write_text(payload)
         return document
 
 
@@ -56,8 +82,13 @@ class CanvasService:
     def get_document(self) -> CanvasDocument:
         return self.store.load()
 
+    def get_document_for_repo(self, repo_path: str) -> CanvasDocument:
+        document = self.store.load_for_repo(repo_path)
+        document.repo_path = repo_path
+        return self.store.save(document)
+
     def set_repo_path(self, repo_path: str) -> CanvasDocument:
-        document = self.store.load()
+        document = self.store.load_for_repo(repo_path)
         document.repo_path = repo_path
         return self.store.save(document)
 

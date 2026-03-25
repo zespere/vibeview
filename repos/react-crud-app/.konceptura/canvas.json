@@ -1,0 +1,145 @@
+{
+  "edges": [
+    {
+      "id": "edge_e1dedd754c",
+      "label": "uses",
+      "source_node_id": "node_4945318499",
+      "target_node_id": "node_975ad26204"
+    },
+    {
+      "id": "edge_aa74782d19",
+      "label": "drives",
+      "source_node_id": "node_4945318499",
+      "target_node_id": "node_69ad264152"
+    },
+    {
+      "id": "edge_ddeee04f71",
+      "label": "drives",
+      "source_node_id": "node_4945318499",
+      "target_node_id": "node_ac5232ec4b"
+    },
+    {
+      "id": "edge_8fb26a965a",
+      "label": "persists via",
+      "source_node_id": "node_975ad26204",
+      "target_node_id": "node_f11980e17e"
+    },
+    {
+      "id": "edge_d9b1e0abcf",
+      "label": "emits actions to",
+      "source_node_id": "node_ac5232ec4b",
+      "target_node_id": "node_4945318499"
+    },
+    {
+      "id": "edge_d4d6cb5507",
+      "label": "submits through",
+      "source_node_id": "node_69ad264152",
+      "target_node_id": "node_4945318499"
+    }
+  ],
+  "nodes": [
+    {
+      "description": "The root screen composes the form and table into a single admin workspace. It owns the currently selected user for editing and derives a role summary from the loaded records. It passes save, edit, delete, and cancel handlers down to feature components.",
+      "id": "node_4945318499",
+      "linked_files": [
+        "src/app.tsx",
+        "src/main.tsx"
+      ],
+      "linked_symbols": [
+        "App"
+      ],
+      "tags": [
+        "screen",
+        "composition",
+        "state"
+      ],
+      "title": "App Shell",
+      "x": 120,
+      "y": 120
+    },
+    {
+      "description": "A custom hook manages the canonical user collection and loading flag for the whole app. On mount it fetches the current list, and after every create, update, or delete it refreshes from the API again. This keeps UI components simple and centralizes async state transitions.",
+      "id": "node_975ad26204",
+      "linked_files": [
+        "src/hooks/use-users.ts"
+      ],
+      "linked_symbols": [
+        "useUsers"
+      ],
+      "tags": [
+        "state",
+        "data-flow",
+        "feature"
+      ],
+      "title": "Users State",
+      "x": 440,
+      "y": 120
+    },
+    {
+      "description": "The form is responsible for creating new users and editing the selected one. It mirrors the active record into local draft state, resets when selection is cleared, and submits typed draft data upward. The component does not persist directly; it delegates saving to the parent callback.",
+      "id": "node_69ad264152",
+      "linked_files": [
+        "src/features/users/user-form.tsx",
+        "src/types.ts"
+      ],
+      "linked_symbols": [
+        "UserForm",
+        "UserDraft",
+        "UserRecord"
+      ],
+      "tags": [
+        "feature",
+        "input",
+        "editor"
+      ],
+      "title": "User Form",
+      "x": 760,
+      "y": 120
+    },
+    {
+      "description": "The table renders the loaded records and exposes row-level edit and delete actions. It reflects loading state and record count, but remains presentation-oriented. User interactions are emitted upward so the parent and hook can coordinate mutations.",
+      "id": "node_ac5232ec4b",
+      "linked_files": [
+        "src/features/users/user-table.tsx",
+        "src/types.ts"
+      ],
+      "linked_symbols": [
+        "UserTable",
+        "UserRecord"
+      ],
+      "tags": [
+        "feature",
+        "list",
+        "screen"
+      ],
+      "title": "User Table",
+      "x": 120,
+      "y": 340
+    },
+    {
+      "description": "A local in-memory API simulates persistence with seeded records and short artificial latency. It provides list, create, update, and delete operations over a module-scoped array. This layer behaves like a backend boundary even though data resets with a reload.",
+      "id": "node_f11980e17e",
+      "linked_files": [
+        "src/api/users-api.ts",
+        "src/types.ts"
+      ],
+      "linked_symbols": [
+        "listUsers",
+        "createUser",
+        "updateUser",
+        "deleteUser",
+        "UserDraft",
+        "UserRecord"
+      ],
+      "tags": [
+        "data",
+        "api",
+        "feature"
+      ],
+      "title": "Fake Users API",
+      "x": 440,
+      "y": 340
+    }
+  ],
+  "repo_path": "/home/wniak/konceptura/repos/react-crud-app"
+}

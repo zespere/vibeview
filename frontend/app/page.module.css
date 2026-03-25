@@ -91,6 +91,7 @@
 
 .railMeta,
 .helperText,
+.helperTextLoading,
 .resultMeta,
 .statusLabel,
 .metaLabel,
@@ -355,6 +356,33 @@
   background: #fffdf9;
 }
 
+.notesConsoleShell {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  left: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px 14px;
+  pointer-events: none;
+}
+
+.notesConsoleDock {
+  display: flex;
+  width: min(980px, 100%);
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid #d4c8ba;
+  border-radius: 14px;
+  background: rgba(250, 244, 235, 0.95);
+  box-shadow: 0 18px 42px rgba(47, 33, 20, 0.12);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
 .workspaceSplit {
   display: grid;
   min-height: calc(100vh - 190px);
@@ -403,29 +431,140 @@
   overflow: auto;
 }
 
-.buildDock {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 5;
-  padding: 0 18px 14px;
-  pointer-events: none;
+.canvasFrameWithConsoleCollapsed {
+  padding-bottom: 176px;
 }
 
-.buildComposer {
-  display: block;
-  width: min(860px, 100%);
-  margin: 0 auto;
-  border: 1px solid #d4c8ba;
-  border-radius: 8px;
-  background: rgba(248, 242, 232, 0.96);
-  box-shadow: 0 10px 28px rgba(47, 33, 20, 0.08);
-  padding: 10px 12px 10px;
+.canvasFrameWithConsoleExpanded {
+  padding-bottom: 438px;
+}
+
+.helperTextLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.helperTextLoading::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border: 2px solid #ccbba6;
+  border-top-color: #8b5c32;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.notesConsoleBar,
+.notesConsoleBarExpanded {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: rgba(248, 242, 232, 0.82);
+  color: #241d17;
+  cursor: pointer;
+  padding: 12px 14px;
   pointer-events: auto;
 }
 
-.buildComposerInput {
+.notesConsoleBarExpanded {
+  border-top: 1px solid #e3d7c8;
+}
+
+.notesConsoleBarLabel {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a6f60;
+}
+
+.notesConsoleBarSummary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: #3b3026;
+}
+
+.notesConsoleBarAction {
+  font-size: 12px;
+  color: #7a6f60;
+}
+
+.notesConsolePanel {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  width: 100%;
+  height: 248px;
+  border: 0;
+  background: rgba(255, 251, 245, 0.72);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.notesConsoleMessages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.consoleMessageUser,
+.consoleMessageAssistant {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(720px, 100%);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.consoleMessageUser {
+  align-self: flex-end;
+  background: #f1e6d8;
+}
+
+.consoleMessageAssistant {
+  align-self: flex-start;
+  background: #f7f3ec;
+  border: 1px solid #e7ddcf;
+}
+
+.consoleMessageRole {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a7a67;
+}
+
+.consoleMessageTitle {
+  font-size: 14px;
+  color: #2d241c;
+}
+
+.consoleMessageBody {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+  color: #4c4035;
+}
+
+.consoleComposer {
+  display: block;
+  border: 0;
+  background: transparent;
+  padding: 10px 12px 12px;
+  pointer-events: auto;
+}
+
+.consoleComposerInput {
   width: 100%;
   border: 0;
   background: transparent;
@@ -438,15 +577,15 @@
   resize: none;
 }
 
-.buildComposerInput::placeholder {
+.consoleComposerInput::placeholder {
   color: #817261;
 }
 
-.buildComposerInput:focus {
+.consoleComposerInput:focus {
   outline: none;
 }
 
-.buildComposerActions {
+.consoleComposerActions {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -547,6 +686,10 @@
   border: 1px solid #8b5c32;
   background: #8b5c32;
   color: #fffdfa;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .primaryButton:disabled,
@@ -559,6 +702,25 @@
   border: 1px solid #c7bcad;
   background: #f2ece2;
   color: #31271e;
+}
+
+.buttonSpinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 253, 250, 0.45);
+  border-top-color: #fffdfa;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .noteTabs {
@@ -1271,9 +1433,19 @@
     align-items: stretch;
   }
 
-  .buildDock {
-    right: 18px;
-    bottom: 18px;
-    left: 18px;
+  .notesConsoleShell {
+    padding: 0 14px 12px;
+  }
+
+  .notesConsolePanel {
+    height: 280px;
+  }
+
+  .canvasFrameWithConsoleCollapsed {
+    padding-bottom: 178px;
+  }
+
+  .canvasFrameWithConsoleExpanded {
+    padding-bottom: 474px;
   }
 }

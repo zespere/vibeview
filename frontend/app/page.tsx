@@ -7,6 +7,7 @@ import { CanvasBoard } from "@/components/canvas-board";
 import { StructureTree } from "@/components/structure-tree";
 import {
   API_BASE_URL,
+  buildProjectFromPrompt,
   createCanvasNode,
   deleteCanvasNode,
   fetchCanvas,
@@ -15,7 +16,6 @@ import {
   fetchRelationships,
   fetchStatus,
   fetchStructure,
-  generateCanvasFromPrompt,
   runImpactAnalysis,
   runIndex,
   runQuery,
@@ -25,6 +25,7 @@ import {
   type AgentsDocumentResponse,
   type AssistImpactResponse,
   type CanvasDocument,
+  type CanvasNode,
   type ProjectProfile,
   type QueryMode,
   type QueryResponse,
@@ -38,6 +39,12 @@ type WorkspaceView = "notes" | "inspect" | "project";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `note:${string}`; type: "note"; nodeId: string };
+type ConsoleMessage = {
+  id: string;
+  role: "user" | "assistant";
+  title?: string;
+  content: string;
+};
 
 const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
   { id: "notes", label: "Notes" },
@@ -72,10 +79,14 @@ export default function Home() {
   const [impactResult, setImpactResult] = useState<AssistImpactResponse | null>(null);
   const [codexPrompt, setCodexPrompt] = useState("");
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
+  const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
   const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<Set<string>>(new Set());
+  const [canvasFitViewSignal, setCanvasFitViewSignal] = useState(0);
   const [canvasDraftTitle, setCanvasDraftTitle] = useState("");
   const [canvasDraftDescription, setCanvasDraftDescription] = useState("");
   const [canvasDraftTags, setCanvasDraftTags] = useState("");
@@ -120,6 +131,15 @@ export default function Home() {
   const canvasIncomingEdges =
     canvasDocument?.edges.filter((edge) => edge.target_node_id === selectedCanvasNodeId) ?? [];
   const sampleRepos = Object.entries(status?.sample_repos ?? {});
+  const latestConsoleSummary = useMemo(() => {
+    if (isBuilding) {
+      return "Building the project and refreshing notes...";
+    }
+    if (composerStatus) {
+      return composerStatus;
+    }
+    return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
+  }, [composerStatus, consoleMessages, isBuilding]);
 
   useEffect(() => {
     startStatusTransition(() => {
@@ -157,6 +177,9 @@ export default function Home() {
     }
     startAgentsTransition(() => {
       void refreshAgentsDocument(project.repo_path);
+    });
+    startCanvasTransition(() => {
+      void refreshCanvas(project.repo_path);
     });
   }, [project?.repo_path]);
 
@@ -206,6 +229,13 @@ export default function Home() {
       }
     }
   }, [canvasDocument, selectedCanvasNodeId]);
+
+  useEffect(() => {
+    if (!canvasDocument?.repo_path || canvasDocument.nodes.length === 0) {
+      return;
+    }
+    setCanvasFitViewSignal((current) => current + 1);
+  }, [canvasDocument?.repo_path, canvasDocument?.nodes.length]);
 
   useEffect(() => {
     if (status?.index_job.status === "completed") {
@@ -258,10 +288,11 @@ export default function Home() {
     }
   }
 
-  async function refreshCanvas() {
+  async function refreshCanvas(nextRepoPath?: string) {
     try {
       setErrorMessage(null);
-      const response = await fetchCanvas();
+      const targetRepoPath = nextRepoPath ?? (repoPath.trim() || project?.repo_path || undefined);
+      const response = await fetchCanvas(targetRepoPath);
       setCanvasDocument(response.document);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -296,7 +327,7 @@ export default function Home() {
             setSelectedTreeNode(null);
             setStructureRelationships([]);
           }
-          void refreshCanvas();
+          void refreshCanvas(repoPath);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -339,17 +370,55 @@ export default function Home() {
   }
 
   async function submitArchitecturePrompt() {
+    const prompt = codexPrompt.trim();
+    if (!prompt) {
+      return;
+    }
+
+    const userMessage: ConsoleMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      title: "You",
+      content: prompt,
+    };
+    setConsoleMessages((current) => [...current, userMessage]);
+    setIsBuilding(true);
     try {
       setErrorMessage(null);
-      const response = await generateCanvasFromPrompt(repoPath, codexPrompt);
-      setCanvasDocument(response.document);
-      setComposerStatus(
-        response.created_count > 0
-          ? `${response.summary} Added ${response.created_count} note${response.created_count === 1 ? "" : "s"}.`
-          : response.summary,
+      setComposerStatus("Building the project and refreshing notes...");
+      const response = await buildProjectFromPrompt(
+        repoPath,
+        prompt,
+        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeIds),
+        [...selectedCanvasNodeIds],
       );
+      setCanvasDocument(response.document);
+      setCanvasFitViewSignal((current) => current + 1);
+      setComposerStatus(response.summary);
+      setConsoleMessages((current) => [
+        ...current,
+        {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          title: response.summary,
+          content: [response.code_summary, response.note_summary].filter(Boolean).join("\n\n"),
+        },
+      ]);
+      setCodexPrompt("");
     } catch (error) {
+      setComposerStatus("Build failed.");
       setErrorMessage(getErrorMessage(error));
+      setConsoleMessages((current) => [
+        ...current,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant",
+          title: "Build failed.",
+          content: getErrorMessage(error),
+        },
+      ]);
+    } finally {
+      setIsBuilding(false);
     }
   }
 
@@ -669,13 +738,86 @@ export default function Home() {
   function renderNotesView() {
     return (
       <div className={styles.notesWorkspace}>
-        <div className={styles.canvasFrame}>
+        <div className={styles.notesConsoleShell}>
+          <div className={styles.notesConsoleDock}>
+            {isConsoleExpanded ? (
+              <div className={styles.notesConsolePanel}>
+                <div className={styles.notesConsoleMessages}>
+                  {consoleMessages.length === 0 ? (
+                    <p className={styles.helperText}>Describe what to build. The console will show your prompt and the latest architectural summary from the run.</p>
+                  ) : (
+                    consoleMessages.map((message) => (
+                      <article
+                        className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
+                        key={message.id}
+                      >
+                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
+                        {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                        <p className={styles.consoleMessageBody}>{message.content}</p>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            <button
+              className={isConsoleExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
+              onClick={() => setIsConsoleExpanded((current) => !current)}
+              type="button"
+            >
+              <span className={styles.notesConsoleBarLabel}>Console</span>
+              <span className={styles.notesConsoleBarSummary}>{latestConsoleSummary}</span>
+              <span className={styles.notesConsoleBarAction}>{isConsoleExpanded ? "Hide" : "Show"}</span>
+            </button>
+
+            <label className={styles.consoleComposer}>
+              <textarea
+                className={styles.consoleComposerInput}
+                disabled={isBuilding}
+                onChange={(event) => setCodexPrompt(event.target.value)}
+                placeholder="Describe what to build in this project."
+                rows={3}
+                value={codexPrompt}
+              />
+              <div className={styles.consoleComposerActions}>
+                <span className={styles.buildComposerMeta}>
+                  {selectedCanvasNodeIds.size > 0
+                    ? `${selectedCanvasNodeIds.size} note${selectedCanvasNodeIds.size === 1 ? "" : "s"} selected`
+                    : "No notes selected"}
+                </span>
+                <button
+                  className={styles.primaryButton}
+                  disabled={isBuilding || codexPending || !repoPath.trim() || !codexPrompt.trim()}
+                  onClick={handleSubmitArchitecturePrompt}
+                  type="button"
+                >
+                  {isBuilding ? (
+                    <>
+                      <span aria-hidden="true" className={styles.buttonSpinner} />
+                      <span>Building...</span>
+                    </>
+                  ) : (
+                    "Build"
+                  )}
+                </button>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div
+          className={`${styles.canvasFrame} ${
+            isConsoleExpanded ? styles.canvasFrameWithConsoleExpanded : styles.canvasFrameWithConsoleCollapsed
+          }`}
+        >
           {!canvasDocument ? (
             <EmptyState message="Load or create a canvas for this repo. Double-click empty space to add a node." />
           ) : (
             <CanvasBoard
               onDeleteNode={handleDeleteCanvasNode}
               document={canvasDocument}
+              fitViewSignal={canvasFitViewSignal}
               onCreateNodeAt={(x, y) => {
                 startCanvasTransition(() => {
                   void handleCreateCanvasNodeAt(x, y);
@@ -694,31 +836,6 @@ export default function Home() {
               selectedNodeIds={selectedCanvasNodeIds}
             />
           )}
-        </div>
-        <div className={styles.buildDock}>
-          {composerStatus ? <p className={styles.helperText}>{composerStatus}</p> : null}
-          <label className={styles.buildComposer}>
-            <textarea
-              className={styles.buildComposerInput}
-              onChange={(event) => setCodexPrompt(event.target.value)}
-              placeholder="Describe the app or feature map you want to create."
-              rows={3}
-              value={codexPrompt}
-            />
-            <div className={styles.buildComposerActions}>
-              <span className={styles.buildComposerMeta}>
-                {selectedCanvasNodeIds.size > 0 ? `${selectedCanvasNodeIds.size} note${selectedCanvasNodeIds.size === 1 ? "" : "s"} selected` : "No notes selected"}
-              </span>
-              <button
-                className={styles.primaryButton}
-                disabled={codexPending || !repoPath.trim() || !codexPrompt.trim()}
-                onClick={handleSubmitArchitecturePrompt}
-                type="button"
-              >
-                {codexPending ? "Mapping..." : "Create notes"}
-              </button>
-            </div>
-          </label>
         </div>
       </div>
     );
@@ -1534,6 +1651,32 @@ function buildNewCanvasNodeTags(symbol: SymbolRecord | null, treeNode: Structure
 
 function findCanvasNodeTitle(document: CanvasDocument | null, nodeId: string) {
   return document?.nodes.find((item) => item.id === nodeId)?.title ?? nodeId;
+}
+
+function buildSelectedNoteContext(document: CanvasDocument | null, selectedNodeIds: Set<string>) {
+  if (!document || selectedNodeIds.size === 0) {
+    return undefined;
+  }
+
+  const selectedNodes: CanvasNode[] = document.nodes.filter((node) => selectedNodeIds.has(node.id));
+  if (selectedNodes.length === 0) {
+    return undefined;
+  }
+
+  return selectedNodes
+    .map((node) => {
+      const tags = node.tags.length > 0 ? node.tags.join(", ") : "untagged";
+      const files = node.linked_files.length > 0 ? node.linked_files.join(", ") : "none";
+      const symbols = node.linked_symbols.length > 0 ? node.linked_symbols.join(", ") : "none";
+      return [
+        `Note: ${node.title}`,
+        `Tags: ${tags}`,
+        `Files: ${files}`,
+        `Symbols: ${symbols}`,
+        `Description: ${node.description || "No description yet."}`,
+      ].join("\n");
+    })
+    .join("\n\n");
 }
 
 function getErrorMessage(error: unknown) {

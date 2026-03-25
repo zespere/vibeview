@@ -63,10 +63,11 @@ class CodexService:
 
         graph_context_summary = None
         final_prompt = prompt.strip()
+        context_blocks: list[str] = []
         if semantic_context:
-            final_prompt = (
+            context_blocks.append(
                 "Use this semantic workspace context when planning and editing:\n"
-                f"{semantic_context.strip()}\n\nTask:\n{final_prompt}"
+                f"{semantic_context.strip()}"
             )
         if use_graph_context:
             try:
@@ -86,11 +87,13 @@ class CodexService:
                         f"- {seed.symbol.properties.get('qualified_name') or seed.symbol.properties.get('path')}"
                         for seed in impact.seeds[:5]
                     )
-                final_prompt = (
+                context_blocks.append(
                     "Use this code-graph context when deciding what to inspect or change.\n"
                     + "\n".join(context_lines)
-                    + f"\n\nTask:\n{prompt.strip()}"
                 )
+
+        if context_blocks:
+            final_prompt = "\n\n".join(context_blocks) + f"\n\nTask:\n{prompt.strip()}"
 
         if dry_run:
             final_prompt += (
@@ -130,6 +133,29 @@ class CodexService:
             changed_files=changed_files,
             commands=commands,
             raw_event_count=len(events),
+        )
+
+    def build_project(
+        self,
+        repo_path: str,
+        prompt: str,
+        semantic_context: str | None,
+    ) -> CodexChangeResponse:
+        implementation_prompt = (
+            "Implement the user's request directly in the repository.\n"
+            "Make real file changes when they are needed.\n"
+            "If the repository is empty or effectively empty, scaffold the smallest practical web app that satisfies the request.\n"
+            "Prefer a simple local-first web stack already implied by the repository. If there is no stack yet, choose the minimum practical setup.\n"
+            "Do not stop at a plan. Write the code.\n\n"
+            f"User request:\n{prompt.strip()}"
+        )
+        return self.run_change(
+            repo_path=repo_path,
+            prompt=implementation_prompt,
+            dry_run=False,
+            use_graph_context=True,
+            bypass_sandbox=None,
+            semantic_context=semantic_context,
         )
 
     def generate_architecture_notes(

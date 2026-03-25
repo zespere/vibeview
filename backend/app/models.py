@@ -192,6 +192,24 @@ class CodexChangeResponse(BaseModel):
     raw_event_count: int
 
 
+class ProjectBuildRequest(BaseModel):
+    repo_path: str
+    prompt: str = Field(min_length=4)
+    selected_note_ids: list[str] = Field(default_factory=list)
+    semantic_context: str | None = None
+
+
+class ProjectBuildResponse(BaseModel):
+    repo_path: str
+    prompt: str
+    summary: str
+    code_summary: str
+    note_summary: str
+    modified_files: list[str]
+    notes_created: int
+    document: "CanvasDocument"
+
+
 class CanvasNode(BaseModel):
     id: str
     title: str
