@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
@@ -107,6 +107,7 @@ export default function Home() {
   const [canvasDraftFiles, setCanvasDraftFiles] = useState("");
   const [canvasDraftSymbols, setCanvasDraftSymbols] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
 
   const [statusPending, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
@@ -287,6 +288,17 @@ export default function Home() {
     setCanvasDraftFiles(selectedCanvasNode.linked_files.join("\n"));
     setCanvasDraftSymbols(selectedCanvasNode.linked_symbols.join("\n"));
   }, [selectedCanvasNode]);
+
+  useEffect(() => {
+    if (!isConsoleExpanded) {
+      return;
+    }
+    const container = consoleMessagesRef.current;
+    if (!container) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [consoleMessages, isConsoleExpanded]);
 
   useEffect(() => {
     if (!canvasDocument) {
@@ -537,13 +549,13 @@ export default function Home() {
     const userMessage: ConversationMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      title: "You",
       content: prompt,
       created_at: new Date().toISOString(),
     };
     const pendingMessages = [...consoleMessages, userMessage];
     setConsoleMessages(pendingMessages);
     setIsBuilding(true);
+    setCodexPrompt("");
     let ensuredConversationId: string | null = null;
     try {
       setErrorMessage(null);
@@ -575,7 +587,6 @@ export default function Home() {
       const nextMessages = [...pendingMessages, assistantMessage];
       setConsoleMessages(nextMessages);
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      setCodexPrompt("");
       await refreshCommitStatus(activeRepoPath);
     } catch (error) {
       setComposerStatus("Build failed.");
@@ -728,7 +739,6 @@ export default function Home() {
         setCanvasDocument(null);
         setSelectedCanvasNodeId(null);
         setOpenCanvasNodeIds([]);
-        setSelectedCanvasNodeIds(new Set());
         setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
         setActiveTabId("view:notes");
         setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
@@ -990,7 +1000,7 @@ export default function Home() {
           <div className={styles.notesConsoleDock}>
             {isConsoleExpanded ? (
               <div className={styles.notesConsolePanel}>
-                <div className={styles.notesConsoleMessages}>
+                <div className={styles.notesConsoleMessages} ref={consoleMessagesRef}>
                   {consoleMessages.length === 0 ? (
                     <p className={styles.helperText}>Describe what to build. The console will show your prompt and the latest architectural summary from the run.</p>
                   ) : (

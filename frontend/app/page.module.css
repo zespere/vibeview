@@ -645,7 +645,7 @@
 }
 
 .canvasFrameWithConsoleExpanded {
-  padding-bottom: 360px;
+  padding-bottom: 438px;
 }
 
 .helperTextLoading {
@@ -709,7 +709,7 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   width: 100%;
-  height: 182px;
+  height: 260px;
   border: 0;
   background: rgba(255, 251, 245, 0.72);
   overflow: hidden;
@@ -719,6 +719,7 @@
 .notesConsoleMessages {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
   overflow: auto;
   padding: 10px 12px;
@@ -1681,7 +1682,7 @@
   }
 
   .notesConsolePanel {
-    height: 280px;
+    height: 320px;
   }
 
   .canvasFrameWithConsoleCollapsed {
@@ -1689,6 +1690,6 @@
   }
 
   .canvasFrameWithConsoleExpanded {
-    padding-bottom: 474px;
+    padding-bottom: 518px;
   }
 }
