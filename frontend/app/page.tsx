@@ -87,7 +87,6 @@ export default function Home() {
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
   const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<Set<string>>(new Set());
-  const [canvasFitViewSignal, setCanvasFitViewSignal] = useState(0);
   const [canvasDraftTitle, setCanvasDraftTitle] = useState("");
   const [canvasDraftDescription, setCanvasDraftDescription] = useState("");
   const [canvasDraftTags, setCanvasDraftTags] = useState("");
@@ -230,13 +229,6 @@ export default function Home() {
       }
     }
   }, [canvasDocument, selectedCanvasNodeId]);
-
-  useEffect(() => {
-    if (!canvasDocument?.repo_path || canvasDocument.nodes.length === 0) {
-      return;
-    }
-    setCanvasFitViewSignal((current) => current + 1);
-  }, [canvasDocument?.repo_path, canvasDocument?.nodes.length]);
 
   useEffect(() => {
     if (status?.index_job.status === "completed") {
@@ -394,7 +386,6 @@ export default function Home() {
         [...selectedCanvasNodeIds],
       );
       setCanvasDocument(response.document);
-      setCanvasFitViewSignal((current) => current + 1);
       setComposerStatus(response.summary);
       setConsoleMessages((current) => [
         ...current,

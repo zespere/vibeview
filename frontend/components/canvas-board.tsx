@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import "@xyflow/react/dist/style.css";
 import {
+  applyNodeChanges,
   Background,
   type Edge,
   type Node,
+  type NodeChange,
   type NodeMouseHandler,
   PanOnScrollMode,
   type ReactFlowInstance,
@@ -137,16 +139,6 @@ export function CanvasBoard({
     isDraggingRef.current = true;
   };
 
-  const handleNodeDrag: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
-    setLocalNodes((current) =>
-      current.map((item) =>
-        item.id === node.id
-          ? { ...item, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) } }
-          : item,
-      ),
-    );
-  };
-
   const handleNodeDragStop: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
     isDraggingRef.current = false;
     setLocalNodes((current) =>
@@ -157,6 +149,10 @@ export function CanvasBoard({
       ),
     );
     onMoveNodeEnd(node.id, Math.round(node.position.x), Math.round(node.position.y));
+  };
+
+  const handleNodesChange = (changes: NodeChange<Node<NoteNodeData>>[]) => {
+    setLocalNodes((current) => applyNodeChanges(changes, current));
   };
 
   const handleNodeClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
@@ -217,10 +213,10 @@ export function CanvasBoard({
         onInit={(instance) => {
           flowRef.current = instance;
         }}
+        onNodesChange={handleNodesChange}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         onNodeDragStart={handleNodeDragStart}
-        onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStop}
         onNodeContextMenu={(event, node) => {
           event.preventDefault();
