@@ -11,23 +11,30 @@ import {
   createCanvasNode,
   deleteCanvasNode,
   fetchCanvas,
+  fetchProjectConversation,
+  fetchProjectsTree,
   fetchProject,
   fetchProjectAgents,
   fetchRelationships,
   fetchStatus,
   fetchStructure,
+  createProjectConversation,
   runImpactAnalysis,
   runIndex,
   runQuery,
   resetCanvas,
   updateProject,
+  updateProjectConversation,
   updateProjectAgents,
   updateCanvasNode,
   type AgentsDocumentResponse,
   type AssistImpactResponse,
   type CanvasDocument,
   type CanvasNode,
+  type ConversationMessage,
+  type ConversationSummary,
   type ProjectProfile,
+  type ProjectTreeItem,
   type QueryMode,
   type QueryResponse,
   type RelationshipRecord,
@@ -40,12 +47,6 @@ type WorkspaceView = "notes" | "inspect" | "project";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `note:${string}`; type: "note"; nodeId: string };
-type ConsoleMessage = {
-  id: string;
-  role: "user" | "assistant";
-  title?: string;
-  content: string;
-};
 
 const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
   { id: "notes", label: "Notes" },
@@ -55,12 +56,21 @@ const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
 
 export default function Home() {
   const [isRailExpanded, setIsRailExpanded] = useState(true);
+  const [railWidth, setRailWidth] = useState(292);
+  const [isRailResizing, setIsRailResizing] = useState(false);
+  const [railResizeStartX, setRailResizeStartX] = useState<number | null>(null);
+  const [railResizeStartWidth, setRailResizeStartWidth] = useState<number | null>(null);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([
     { id: "view:notes", type: "view", view: "notes", preview: false },
   ]);
   const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:notes");
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [project, setProject] = useState<ProjectProfile | null>(null);
+  const [projectsTree, setProjectsTree] = useState<ProjectTreeItem[]>([]);
+  const [isProjectsSectionExpanded, setIsProjectsSectionExpanded] = useState(true);
+  const [expandedProjectPaths, setExpandedProjectPaths] = useState<Set<string>>(new Set());
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationRepoPath, setActiveConversationRepoPath] = useState<string | null>(null);
   const [agentsDocument, setAgentsDocument] = useState<AgentsDocumentResponse | null>(null);
   const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
@@ -82,7 +92,7 @@ export default function Home() {
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
-  const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
+  const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
@@ -131,6 +141,18 @@ export default function Home() {
   const canvasIncomingEdges =
     canvasDocument?.edges.filter((edge) => edge.target_node_id === selectedCanvasNodeId) ?? [];
   const sampleRepos = Object.entries(status?.sample_repos ?? {});
+  const currentRailWidth = isRailExpanded ? railWidth : 72;
+  const activeProjectTreeItem = useMemo(
+    () => projectsTree.find((item) => item.repo_path === (project?.repo_path ?? repoPath.trim())) ?? null,
+    [project?.repo_path, projectsTree, repoPath],
+  );
+  const activeConversationSummary = useMemo(
+    () =>
+      activeProjectTreeItem?.conversations.find(
+        (item) => item.id === activeConversationId && activeConversationRepoPath === activeProjectTreeItem.repo_path,
+      ) ?? null,
+    [activeConversationId, activeConversationRepoPath, activeProjectTreeItem],
+  );
   const latestConsoleSummary = useMemo(() => {
     if (isBuilding) {
       return "Building the project and refreshing notes...";
@@ -138,8 +160,11 @@ export default function Home() {
     if (composerStatus) {
       return composerStatus;
     }
+    if (activeConversationSummary) {
+      return activeConversationSummary.title;
+    }
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
-  }, [composerStatus, consoleMessages, isBuilding]);
+  }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding]);
 
   useEffect(() => {
     startStatusTransition(() => {
@@ -147,6 +172,9 @@ export default function Home() {
     });
     startProjectTransition(() => {
       void refreshProject();
+    });
+    startProjectTransition(() => {
+      void refreshProjectsTree();
     });
     startStructureTransition(() => {
       void refreshStructure();
@@ -163,6 +191,33 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!isRailResizing) {
+      return;
+    }
+
+    function handleMouseMove(event: MouseEvent) {
+      if (railResizeStartX === null || railResizeStartWidth === null) {
+        return;
+      }
+      const nextWidth = railResizeStartWidth + (event.clientX - railResizeStartX);
+      setRailWidth(Math.max(232, Math.min(420, nextWidth)));
+    }
+
+    function handleMouseUp() {
+      setIsRailResizing(false);
+      setRailResizeStartX(null);
+      setRailResizeStartWidth(null);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isRailResizing, railResizeStartWidth, railResizeStartX]);
+
+  useEffect(() => {
     if (!project) {
       return;
     }
@@ -173,6 +228,9 @@ export default function Home() {
     if (!project?.repo_path) {
       setAgentsDocument(null);
       setAgentsContent("");
+      setActiveConversationId(null);
+      setActiveConversationRepoPath(null);
+      setConsoleMessages([]);
       return;
     }
     startAgentsTransition(() => {
@@ -180,6 +238,23 @@ export default function Home() {
     });
     startCanvasTransition(() => {
       void refreshCanvas(project.repo_path);
+    });
+    startProjectTransition(() => {
+      void refreshProjectsTree();
+    });
+  }, [project?.repo_path]);
+
+  useEffect(() => {
+    if (!project?.repo_path) {
+      return;
+    }
+    setExpandedProjectPaths((current) => {
+      if (current.has(project.repo_path)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(project.repo_path);
+      return next;
     });
   }, [project?.repo_path]);
 
@@ -270,12 +345,78 @@ export default function Home() {
     }
   }
 
+  async function refreshProjectsTree() {
+    try {
+      setErrorMessage(null);
+      const response = await fetchProjectsTree();
+      setProjectsTree(response.projects);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
   async function refreshAgentsDocument(nextRepoPath?: string) {
     try {
       setErrorMessage(null);
       const response = await fetchProjectAgents(nextRepoPath);
       setAgentsDocument(response);
       setAgentsContent(response.content);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
+  async function loadConversation(repoPath: string, conversation: ConversationSummary) {
+    const resolvedRepoPath = repoPath.trim();
+    setActiveConversationRepoPath(resolvedRepoPath);
+    setActiveConversationId(conversation.id);
+
+    if (conversation.placeholder || conversation.id === "default") {
+      setConsoleMessages([]);
+      setComposerStatus(`Ready in ${PathLabel(resolvedRepoPath)}.`);
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      const response = await fetchProjectConversation(resolvedRepoPath, conversation.id);
+      setConsoleMessages(response.conversation.messages);
+      setComposerStatus(`Opened ${response.conversation.title}.`);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
+  async function createConversationForProject(nextRepoPath: string, title = "New conversation") {
+    try {
+      setErrorMessage(null);
+      const response = await createProjectConversation(nextRepoPath, title);
+      setActiveConversationRepoPath(response.repo_path);
+      setActiveConversationId(response.conversation.id);
+      setConsoleMessages(response.conversation.messages);
+      setComposerStatus(`Created ${response.conversation.title}.`);
+      await refreshProjectsTree();
+      openViewTab("notes");
+      return response.conversation.id;
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      return null;
+    }
+  }
+
+  async function persistConversationMessages(
+    nextRepoPath: string,
+    conversationId: string,
+    messages: ConversationMessage[],
+  ) {
+    try {
+      const response = await updateProjectConversation(nextRepoPath, conversationId, {
+        messages,
+      });
+      setActiveConversationRepoPath(response.repo_path);
+      setActiveConversationId(response.conversation.id);
+      setConsoleMessages(response.conversation.messages);
+      await refreshProjectsTree();
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -368,17 +509,29 @@ export default function Home() {
       return;
     }
 
-    const userMessage: ConsoleMessage = {
+    const userMessage: ConversationMessage = {
       id: `user-${Date.now()}`,
       role: "user",
       title: "You",
       content: prompt,
+      created_at: new Date().toISOString(),
     };
-    setConsoleMessages((current) => [...current, userMessage]);
+    const pendingMessages = [...consoleMessages, userMessage];
+    setConsoleMessages(pendingMessages);
     setIsBuilding(true);
+    let ensuredConversationId: string | null = null;
     try {
       setErrorMessage(null);
       setComposerStatus("Building the project and refreshing notes...");
+      ensuredConversationId =
+        activeConversationId && activeConversationRepoPath === repoPath && activeConversationId !== "default"
+          ? activeConversationId
+          : await createConversationForProject(repoPath, deriveConversationTitle(prompt));
+      if (!ensuredConversationId) {
+        setIsBuilding(false);
+        return;
+      }
+      await persistConversationMessages(repoPath, ensuredConversationId, pendingMessages);
       const response = await buildProjectFromPrompt(
         repoPath,
         prompt,
@@ -387,28 +540,34 @@ export default function Home() {
       );
       setCanvasDocument(response.document);
       setComposerStatus(response.summary);
-      setConsoleMessages((current) => [
-        ...current,
-        {
-          id: `assistant-${Date.now()}`,
-          role: "assistant",
-          title: response.summary,
-          content: [response.code_summary, response.note_summary].filter(Boolean).join("\n\n"),
-        },
-      ]);
+      const assistantMessage: ConversationMessage = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        title: response.summary,
+        content: [response.code_summary, response.note_summary].filter(Boolean).join("\n\n"),
+        created_at: new Date().toISOString(),
+      };
+      const nextMessages = [...pendingMessages, assistantMessage];
+      setConsoleMessages(nextMessages);
+      await persistConversationMessages(repoPath, ensuredConversationId, nextMessages);
       setCodexPrompt("");
     } catch (error) {
       setComposerStatus("Build failed.");
       setErrorMessage(getErrorMessage(error));
-      setConsoleMessages((current) => [
-        ...current,
+      const nextMessages = [
+        ...pendingMessages,
         {
           id: `assistant-error-${Date.now()}`,
-          role: "assistant",
+          role: "assistant" as const,
           title: "Build failed.",
           content: getErrorMessage(error),
+          created_at: new Date().toISOString(),
         },
-      ]);
+      ];
+      setConsoleMessages(nextMessages);
+      if (ensuredConversationId) {
+        await persistConversationMessages(repoPath, ensuredConversationId, nextMessages);
+      }
     } finally {
       setIsBuilding(false);
     }
@@ -491,6 +650,46 @@ export default function Home() {
     setCodexPrompt("");
   }
 
+  async function openProjectConversation(repoPathToOpen: string, conversation?: ConversationSummary) {
+    const normalizedRepoPath = repoPathToOpen.trim();
+    if (!normalizedRepoPath) {
+      return;
+    }
+    const isProjectSwitch = (project?.repo_path ?? "").trim() !== normalizedRepoPath;
+
+    try {
+      setErrorMessage(null);
+      if (isProjectSwitch) {
+        const response = await updateProject({
+          repo_path: normalizedRepoPath,
+          name: "",
+          recent_projects: [],
+        });
+        setProject(response.project);
+        setCanvasDocument(null);
+        setSelectedCanvasNodeId(null);
+        setOpenCanvasNodeIds([]);
+        setSelectedCanvasNodeIds(new Set());
+        setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
+        setActiveTabId("view:notes");
+        setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
+      }
+      setRepoPath(normalizedRepoPath);
+      openViewTab("notes");
+      if (conversation) {
+        await loadConversation(normalizedRepoPath, conversation);
+      } else {
+        setActiveConversationRepoPath(normalizedRepoPath);
+        setActiveConversationId(null);
+        setConsoleMessages([]);
+        setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
+      }
+      await refreshProjectsTree();
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
   async function handleSaveProject() {
     startProjectTransition(() => {
       void (async () => {
@@ -502,7 +701,11 @@ export default function Home() {
             recent_projects: [],
           });
           setProject(response.project);
+          setActiveConversationId(null);
+          setActiveConversationRepoPath(response.project.repo_path || null);
+          setConsoleMessages([]);
           openViewTab("notes");
+          await refreshProjectsTree();
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -1373,6 +1576,113 @@ export default function Home() {
     );
   }
 
+  function renderProjectsTree() {
+    return (
+      <div className={styles.projectTreeSection}>
+        <button
+          className={styles.projectTreeHeaderButton}
+          onClick={() => setIsProjectsSectionExpanded((current) => !current)}
+          type="button"
+        >
+          <span className={styles.projectTreeLabel}>
+            <span className={styles.projectTreeChevron}>
+              <ChevronIcon expanded={isProjectsSectionExpanded} />
+            </span>
+            <span className={styles.railIcon}>
+              <FolderIcon />
+            </span>
+            {isRailExpanded ? <span>Projects</span> : null}
+          </span>
+        </button>
+
+        {isRailExpanded && isProjectsSectionExpanded ? (
+          <div className={styles.projectTreeList}>
+            {projectsTree.length === 0 ? (
+              <p className={styles.railMeta}>No recent projects yet.</p>
+            ) : (
+              projectsTree.map((item) => {
+                const isActiveProject = item.repo_path === (project?.repo_path ?? repoPath.trim());
+                const isActiveConversationProject = item.repo_path === activeConversationRepoPath;
+                const isProjectExpanded = expandedProjectPaths.has(item.repo_path);
+                return (
+                  <div className={styles.projectTreeItem} key={item.repo_path}>
+                    <div className={styles.projectTreeRow}>
+                      <button
+                        className={isActiveProject ? styles.projectTreeProjectActive : styles.projectTreeProject}
+                        onClick={() => {
+                          setExpandedProjectPaths((current) => {
+                            const next = new Set(current);
+                            if (next.has(item.repo_path)) {
+                              next.delete(item.repo_path);
+                            } else {
+                              next.add(item.repo_path);
+                            }
+                            return next;
+                          });
+                          startProjectTransition(() => {
+                            void openProjectConversation(item.repo_path);
+                          });
+                        }}
+                        type="button"
+                      >
+                        <span className={styles.projectTreeProjectChevron}>
+                          <ChevronIcon expanded={isProjectExpanded} />
+                        </span>
+                        <span className={styles.projectTreeProjectTitle}>{item.name}</span>
+                      </button>
+                      <button
+                        className={styles.projectTreeAddButton}
+                        onClick={() => {
+                          startProjectTransition(() => {
+                            void createConversationForProject(item.repo_path);
+                          });
+                        }}
+                        title={`New conversation in ${item.name}`}
+                        type="button"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {isProjectExpanded ? (
+                      <div className={styles.projectTreeConversations}>
+                        {item.conversations.map((conversation) => {
+                          const isActiveConversation =
+                            isActiveConversationProject && activeConversationId === conversation.id;
+                          return (
+                            <button
+                              className={
+                                isActiveConversation
+                                  ? styles.projectTreeConversationActive
+                                  : styles.projectTreeConversation
+                              }
+                              key={`${item.repo_path}:${conversation.id}`}
+                              onClick={() => {
+                                startProjectTransition(() => {
+                                  void openProjectConversation(item.repo_path, conversation);
+                                });
+                              }}
+                              type="button"
+                            >
+                              <span className={styles.projectTreeConversationTitle}>{conversation.title}</span>
+                              <span className={styles.projectTreeConversationMeta}>
+                                {conversation.message_count} msg{conversation.message_count === 1 ? "" : "s"}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderActiveView() {
     if (activeTab?.type === "note") {
       return renderNoteTabView(activeTab.nodeId);
@@ -1410,7 +1720,7 @@ export default function Home() {
   return (
     <div className={styles.page}>
       <div className={isRailExpanded ? styles.shellExpanded : styles.shell}>
-        <aside className={isRailExpanded ? styles.leftRailExpanded : styles.leftRail}>
+        <aside className={isRailExpanded ? styles.leftRailExpanded : styles.leftRail} style={{ width: currentRailWidth }}>
           <nav className={styles.railNav}>
             {VIEW_ITEMS.map((item) => (
               <button
@@ -1424,6 +1734,8 @@ export default function Home() {
                 {isRailExpanded ? <span className={styles.railLabel}>{item.label}</span> : null}
               </button>
             ))}
+            <div className={styles.railSectionDivider} />
+            {renderProjectsTree()}
           </nav>
 
           <div className={styles.railFooter}>
@@ -1446,9 +1758,20 @@ export default function Home() {
               {isRailExpanded ? <span className={styles.railLabel}>Collapse</span> : null}
             </button>
           </div>
+          {isRailExpanded ? (
+            <div
+              className={styles.railResizeHandle}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                setRailResizeStartX(event.clientX);
+                setRailResizeStartWidth(currentRailWidth);
+                setIsRailResizing(true);
+              }}
+            />
+          ) : null}
         </aside>
 
-        <main className={styles.workspace}>
+        <main className={styles.workspace} style={{ marginLeft: currentRailWidth }}>
           <div className={styles.tabStrip}>
             {openTabs.map((tab) => (
               <div className={activeTabId === tab.id ? styles.documentTabActive : styles.documentTab} key={tab.id}>
@@ -1554,10 +1877,58 @@ function ToggleIcon({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+function FolderIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16">
+      <path
+        d="M2.8 4.3h3l1.2 1.3h6.2v6.2a1.2 1.2 0 0 1-1.2 1.2H3.9a1.2 1.2 0 0 1-1.1-1.2z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ChevronIcon({ expanded }: { expanded: boolean }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16">
+      {expanded ? (
+        <path
+          d="m4 6 4 4 4-4"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+        />
+      ) : (
+        <path
+          d="m6 4 4 4-4 4"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.5"
+        />
+      )}
+    </svg>
+  );
+}
+
 function PathLabel(value: string) {
   const normalized = value.trim().replace(/\/+$/, "");
   const segments = normalized.split("/");
   return segments.at(-1) || normalized || value;
+}
+
+function deriveConversationTitle(prompt: string) {
+  const cleaned = prompt.replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    return "New conversation";
+  }
+  return cleaned.length > 42 ? `${cleaned.slice(0, 42).trim()}...` : cleaned;
 }
 
 function isSymbolRecord(value: Record<string, unknown> | SymbolRecord): value is SymbolRecord {

@@ -1,9 +1,21 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, UTC
 from pathlib import Path
+from uuid import uuid4
 
-from .models import ProjectProfile, ProjectProfileUpdateRequest
+from .models import (
+    ConversationCreateRequest,
+    ConversationDocument,
+    ConversationMessage,
+    ConversationRecord,
+    ConversationSummary,
+    ConversationUpdateRequest,
+    ProjectProfile,
+    ProjectProfileUpdateRequest,
+    ProjectTreeItem,
+)
 
 
 class ProjectStore:
@@ -32,7 +44,7 @@ class ProjectService:
         repo_path = request.repo_path.strip()
         derived_name = Path(repo_path).name if repo_path else ""
         current = self.store.load()
-        recent_candidates = [repo_path, *current.recent_projects]
+        recent_candidates = [*current.recent_projects, repo_path]
         recent_projects: list[str] = []
         seen: set[str] = set()
         for path in recent_candidates:
@@ -46,6 +58,73 @@ class ProjectService:
             recent_projects=recent_projects[:8],
         )
         return self.store.save(project)
+
+    def list_project_items(self) -> tuple[str | None, list[ProjectTreeItem]]:
+        project = self.store.load()
+        candidates = [*project.recent_projects]
+        if project.repo_path and project.repo_path not in candidates:
+            candidates.append(project.repo_path)
+        projects: list[ProjectTreeItem] = []
+        seen: set[str] = set()
+        for repo_path in candidates:
+            normalized = repo_path.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            conversations = self._list_conversation_summaries(normalized)
+            projects.append(
+                ProjectTreeItem(
+                    name=Path(normalized).name or normalized,
+                    repo_path=normalized,
+                    conversations=conversations,
+                )
+            )
+        return project.repo_path or None, projects
+
+    def list_conversations(self, repo_path: str) -> list[ConversationSummary]:
+        return self._list_conversation_summaries(repo_path)
+
+    def get_conversation(self, repo_path: str, conversation_id: str) -> ConversationRecord:
+        normalized_repo_path = self._normalize_repo_path(repo_path)
+        document = self._load_conversation_document(normalized_repo_path)
+        conversation = next((item for item in document.conversations if item.id == conversation_id), None)
+        if conversation is None:
+            raise ValueError(f"Conversation not found: {conversation_id}")
+        return conversation
+
+    def create_conversation(self, request: ConversationCreateRequest) -> ConversationRecord:
+        normalized_repo_path = self._normalize_repo_path(request.repo_path)
+        document = self._load_conversation_document(normalized_repo_path)
+        now = datetime.now(UTC)
+        conversation = ConversationRecord(
+            id=f"conv_{uuid4().hex[:10]}",
+            title=request.title.strip() or "New conversation",
+            created_at=now,
+            updated_at=now,
+            messages=[],
+        )
+        document.conversations.insert(0, conversation)
+        self._save_conversation_document(normalized_repo_path, document)
+        return conversation
+
+    def update_conversation(self, conversation_id: str, request: ConversationUpdateRequest) -> ConversationRecord:
+        normalized_repo_path = self._normalize_repo_path(request.repo_path)
+        document = self._load_conversation_document(normalized_repo_path)
+        for index, conversation in enumerate(document.conversations):
+            if conversation.id != conversation_id:
+                continue
+            updated = conversation.model_copy(
+                update={
+                    "title": request.title.strip() if request.title is not None and request.title.strip() else conversation.title,
+                    "messages": request.messages if request.messages is not None else conversation.messages,
+                    "updated_at": self._derive_updated_at(request.messages) if request.messages is not None else datetime.now(UTC),
+                }
+            )
+            document.conversations[index] = updated
+            document.conversations.sort(key=lambda item: item.updated_at, reverse=True)
+            self._save_conversation_document(normalized_repo_path, document)
+            return updated
+        raise ValueError(f"Conversation not found: {conversation_id}")
 
     def read_agents_document(self, repo_path: str | None = None) -> tuple[str, Path, str]:
         project = self.store.load()
@@ -71,3 +150,64 @@ class ProjectService:
         normalized = content.rstrip() + ("\n" if content.strip() else "")
         agents_path.write_text(normalized)
         return str(repo_root), agents_path, normalized
+
+    def _normalize_repo_path(self, repo_path: str) -> str:
+        normalized = repo_path.strip()
+        if not normalized:
+            raise ValueError("No project repository is configured.")
+        return str(Path(normalized).resolve())
+
+    def _konceptura_dir(self, repo_path: str) -> Path:
+        return Path(repo_path) / ".konceptura"
+
+    def _conversation_path(self, repo_path: str) -> Path:
+        return self._konceptura_dir(repo_path) / "conversations.json"
+
+    def _load_conversation_document(self, repo_path: str) -> ConversationDocument:
+        path = self._conversation_path(repo_path)
+        if not path.exists():
+            return ConversationDocument(repo_path=repo_path)
+        payload = json.loads(path.read_text())
+        payload["repo_path"] = repo_path
+        return ConversationDocument.model_validate(payload)
+
+    def _save_conversation_document(self, repo_path: str, document: ConversationDocument) -> ConversationDocument:
+        path = self._conversation_path(repo_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True))
+        return document
+
+    def _list_conversation_summaries(self, repo_path: str) -> list[ConversationSummary]:
+        normalized_repo_path = self._normalize_repo_path(repo_path)
+        document = self._load_conversation_document(normalized_repo_path)
+        if not document.conversations:
+            return [
+                ConversationSummary(
+                    id="default",
+                    title="Main",
+                    placeholder=True,
+                    message_count=0,
+                )
+            ]
+        return [
+            ConversationSummary(
+                id=item.id,
+                title=item.title,
+                updated_at=item.updated_at,
+                message_count=len(item.messages),
+            )
+            for item in sorted(document.conversations, key=lambda current: current.updated_at, reverse=True)
+        ]
+
+    def _derive_updated_at(self, messages: list[ConversationMessage] | None) -> datetime:
+        if not messages:
+            return datetime.now(UTC)
+        latest = next(
+            (
+                message.created_at
+                for message in reversed(messages)
+                if message.created_at is not None
+            ),
+            None,
+        )
+        return latest or datetime.now(UTC)

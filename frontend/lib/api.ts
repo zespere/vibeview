@@ -37,6 +37,51 @@ export interface ProjectProfileResponse {
   is_configured: boolean;
 }
 
+export interface ConversationMessage {
+  id: string;
+  role: "user" | "assistant";
+  title?: string | null;
+  content: string;
+  created_at?: string | null;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  updated_at?: string | null;
+  message_count: number;
+  placeholder: boolean;
+}
+
+export interface ConversationRecord {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: ConversationMessage[];
+}
+
+export interface ConversationListResponse {
+  repo_path: string;
+  conversations: ConversationSummary[];
+}
+
+export interface ConversationResponse {
+  repo_path: string;
+  conversation: ConversationRecord;
+}
+
+export interface ProjectTreeItem {
+  name: string;
+  repo_path: string;
+  conversations: ConversationSummary[];
+}
+
+export interface ProjectTreeResponse {
+  active_repo_path: string | null;
+  projects: ProjectTreeItem[];
+}
+
 export interface AgentsDocumentResponse {
   repo_path: string;
   path: string;
@@ -210,10 +255,49 @@ export function fetchProject() {
   return apiRequest<ProjectProfileResponse>("/project", { cache: "no-store" });
 }
 
+export function fetchProjectsTree() {
+  return apiRequest<ProjectTreeResponse>("/projects/tree", { cache: "no-store" });
+}
+
 export function updateProject(payload: ProjectProfile) {
   return apiRequest<ProjectProfileResponse>("/project", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function fetchProjectConversations(repoPath: string) {
+  return apiRequest<ConversationListResponse>(
+    `/project/conversations?repo_path=${encodeURIComponent(repoPath)}`,
+    { cache: "no-store" },
+  );
+}
+
+export function fetchProjectConversation(repoPath: string, conversationId: string) {
+  return apiRequest<ConversationResponse>(
+    `/project/conversations/${encodeURIComponent(conversationId)}?repo_path=${encodeURIComponent(repoPath)}`,
+    { cache: "no-store" },
+  );
+}
+
+export function createProjectConversation(repoPath: string, title = "New conversation") {
+  return apiRequest<ConversationResponse>("/project/conversations", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, title }),
+  });
+}
+
+export function updateProjectConversation(
+  repoPath: string,
+  conversationId: string,
+  payload: Partial<{
+    title: string;
+    messages: ConversationMessage[];
+  }>,
+) {
+  return apiRequest<ConversationResponse>(`/project/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ repo_path: repoPath, ...payload }),
   });
 }
 

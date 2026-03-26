@@ -56,6 +56,67 @@ class ProjectProfileResponse(BaseModel):
     is_configured: bool
 
 
+class ConversationMessage(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    title: str | None = None
+    content: str
+    created_at: datetime | None = None
+
+
+class ConversationRecord(BaseModel):
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    messages: list[ConversationMessage] = Field(default_factory=list)
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str
+    updated_at: datetime | None = None
+    message_count: int = 0
+    placeholder: bool = False
+
+
+class ProjectTreeItem(BaseModel):
+    name: str
+    repo_path: str
+    conversations: list[ConversationSummary] = Field(default_factory=list)
+
+
+class ProjectTreeResponse(BaseModel):
+    active_repo_path: str | None = None
+    projects: list[ProjectTreeItem] = Field(default_factory=list)
+
+
+class ConversationDocument(BaseModel):
+    repo_path: str
+    conversations: list[ConversationRecord] = Field(default_factory=list)
+
+
+class ConversationListResponse(BaseModel):
+    repo_path: str
+    conversations: list[ConversationSummary] = Field(default_factory=list)
+
+
+class ConversationResponse(BaseModel):
+    repo_path: str
+    conversation: ConversationRecord
+
+
+class ConversationCreateRequest(BaseModel):
+    repo_path: str
+    title: str = Field(default="New conversation", max_length=120)
+
+
+class ConversationUpdateRequest(BaseModel):
+    repo_path: str
+    title: str | None = Field(default=None, max_length=120)
+    messages: list[ConversationMessage] | None = None
+
+
 class AgentsDocumentResponse(BaseModel):
     repo_path: str
     path: str

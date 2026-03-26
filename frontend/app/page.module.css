@@ -71,6 +71,7 @@
   background: #e6ded2;
   padding: 14px 8px;
   overflow: hidden;
+  user-select: none;
 }
 
 .leftRailExpanded {
@@ -87,6 +88,7 @@
   background: #e6ded2;
   padding: 14px 10px;
   overflow: hidden;
+  user-select: none;
 }
 
 .railMeta,
@@ -108,6 +110,204 @@
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.projectTreeSection {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.projectTreeHeader {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 8px;
+}
+
+.projectTreeHeaderButton {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  border: 0;
+  background: transparent;
+  padding: 0 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.projectTreeLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a6f60;
+}
+
+.projectTreeChevron {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  align-items: center;
+  justify-content: center;
+}
+
+.projectTreeChevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.projectTreeList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.projectTreeItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.projectTreeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+}
+
+.projectTreeProject,
+.projectTreeProjectActive,
+.projectTreeConversation,
+.projectTreeConversationActive,
+.projectTreeAddButton {
+  font: inherit;
+}
+
+.projectTreeProject,
+.projectTreeProjectActive {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: #4a3f34;
+  cursor: pointer;
+  min-height: 30px;
+  padding: 5px 9px;
+  text-align: left;
+}
+
+.projectTreeProject:hover {
+  background: rgba(255, 251, 244, 0.72);
+}
+
+.projectTreeProjectActive {
+  border-color: #cdbda9;
+  background: #f8f3eb;
+  color: #241d17;
+}
+
+.projectTreeProjectTitle {
+  flex: 1 1 auto;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.projectTreeProjectChevron {
+  display: inline-flex;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  align-items: center;
+  justify-content: center;
+  color: #7a6f60;
+}
+
+.projectTreeProjectChevron svg {
+  width: 10px;
+  height: 10px;
+}
+
+.projectTreeAddButton {
+  width: 24px;
+  height: 24px;
+  align-self: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #7a6f60;
+  cursor: pointer;
+}
+
+.projectTreeAddButton:hover {
+  background: rgba(255, 253, 249, 0.7);
+}
+
+.projectTreeConversations {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 12px;
+}
+
+.projectTreeConversation,
+.projectTreeConversationActive {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #5a4d40;
+  cursor: pointer;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.projectTreeConversation:hover {
+  background: rgba(255, 251, 244, 0.66);
+}
+
+.projectTreeConversationActive {
+  background: rgba(255, 252, 246, 0.78);
+  color: #241d17;
+}
+
+.projectTreeConversationTitle,
+.projectTreeConversationMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectTreeConversationTitle {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.projectTreeConversationMeta {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: #8a7a67;
+}
+
+.railSectionDivider {
+  height: 1px;
+  margin: 6px 8px 4px;
+  background: #d7cfc3;
 }
 
 .railButton,
@@ -193,6 +393,15 @@
   cursor: pointer;
   padding: 8px 10px;
   text-align: left;
+}
+
+.railResizeHandle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
 }
 
 .leftRail .railButton,

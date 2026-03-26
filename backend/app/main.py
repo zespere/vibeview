@@ -23,10 +23,15 @@ from .models import (
     CanvasNodeUpdateRequest,
     CodexChangeRequest,
     CodexChangeResponse,
+    ConversationCreateRequest,
+    ConversationListResponse,
+    ConversationResponse,
+    ConversationUpdateRequest,
     IndexRequest,
     ProjectBuildRequest,
     ProjectBuildResponse,
     ProjectProfileResponse,
+    ProjectTreeResponse,
     ProjectProfileUpdateRequest,
     QueryRequest,
     QueryResponse,
@@ -68,6 +73,7 @@ def root() -> dict[str, object]:
         "endpoints": [
             "/index",
             "/status",
+            "/projects/tree",
             "/symbols",
             "/relationships",
             "/structure",
@@ -111,12 +117,58 @@ def get_project() -> ProjectProfileResponse:
     return ProjectProfileResponse(project=project, is_configured=project.is_configured)
 
 
+@app.get("/projects/tree", response_model=ProjectTreeResponse)
+def get_projects_tree() -> ProjectTreeResponse:
+    active_repo_path, projects = project_service.list_project_items()
+    return ProjectTreeResponse(active_repo_path=active_repo_path, projects=projects)
+
+
 @app.put("/project", response_model=ProjectProfileResponse)
 def update_project(request: ProjectProfileUpdateRequest) -> ProjectProfileResponse:
     project = project_service.update_project(request)
     if project.repo_path:
         canvas_service.set_repo_path(project.repo_path)
     return ProjectProfileResponse(project=project, is_configured=project.is_configured)
+
+
+@app.get("/project/conversations", response_model=ConversationListResponse)
+def list_project_conversations(repo_path: str) -> ConversationListResponse:
+    try:
+        resolved_repo_path = str(Path(repo_path).resolve())
+        conversations = project_service.list_conversations(resolved_repo_path)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ConversationListResponse(repo_path=resolved_repo_path, conversations=conversations)
+
+
+@app.get("/project/conversations/{conversation_id}", response_model=ConversationResponse)
+def get_project_conversation(conversation_id: str, repo_path: str) -> ConversationResponse:
+    try:
+        resolved_repo_path = str(Path(repo_path).resolve())
+        conversation = project_service.get_conversation(resolved_repo_path, conversation_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return ConversationResponse(repo_path=resolved_repo_path, conversation=conversation)
+
+
+@app.post("/project/conversations", response_model=ConversationResponse)
+def create_project_conversation(request: ConversationCreateRequest) -> ConversationResponse:
+    try:
+        conversation = project_service.create_conversation(request)
+        resolved_repo_path = str(Path(request.repo_path).resolve())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ConversationResponse(repo_path=resolved_repo_path, conversation=conversation)
+
+
+@app.patch("/project/conversations/{conversation_id}", response_model=ConversationResponse)
+def update_project_conversation(conversation_id: str, request: ConversationUpdateRequest) -> ConversationResponse:
+    try:
+        conversation = project_service.update_conversation(conversation_id, request)
+        resolved_repo_path = str(Path(request.repo_path).resolve())
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return ConversationResponse(repo_path=resolved_repo_path, conversation=conversation)
 
 
 @app.get("/project/agents", response_model=AgentsDocumentResponse)
