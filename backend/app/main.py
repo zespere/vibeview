@@ -23,6 +23,9 @@ from .models import (
     CanvasNodeUpdateRequest,
     CodexChangeRequest,
     CodexChangeResponse,
+    CommitCreateRequest,
+    CommitCreateResponse,
+    CommitStatusResponse,
     ConversationCreateRequest,
     ConversationListResponse,
     ConversationResponse,
@@ -74,6 +77,7 @@ def root() -> dict[str, object]:
             "/index",
             "/status",
             "/projects/tree",
+            "/project/commit-status",
             "/symbols",
             "/relationships",
             "/structure",
@@ -190,6 +194,46 @@ def update_project_agents(request: AgentsDocumentUpdateRequest) -> AgentsDocumen
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return AgentsDocumentResponse(repo_path=resolved_repo_path, path=str(path), content=content)
+
+
+@app.get("/project/commit-status", response_model=CommitStatusResponse)
+def get_project_commit_status(repo_path: str) -> CommitStatusResponse:
+    resolved_repo_path = str(Path(repo_path).resolve())
+    status = project_service.get_commit_status(resolved_repo_path)
+    if status.is_git_repo and status.has_changes:
+        diff_result = project_service._run_git(Path(resolved_repo_path), ["diff", "--stat"])
+        suggested_message = codex_service.suggest_commit_message(
+            resolved_repo_path,
+            "\n".join(status.changed_files),
+            diff_result.stdout,
+        )
+        return status.model_copy(update={"suggested_message": suggested_message})
+    return status
+
+
+@app.post("/project/commit", response_model=CommitCreateResponse)
+def create_project_commit(request: CommitCreateRequest) -> CommitCreateResponse:
+    resolved_repo_path = str(Path(request.repo_path).resolve())
+    status = project_service.get_commit_status(resolved_repo_path)
+    if not status.is_git_repo:
+        raise HTTPException(status_code=400, detail="Repository is not a git repository.")
+    if not status.has_changes:
+        raise HTTPException(status_code=400, detail="There is nothing to commit.")
+
+    try:
+        diff_result = project_service._run_git(Path(resolved_repo_path), ["diff", "--stat"])
+        message = (
+            request.message.strip()
+            if request.message and request.message.strip()
+            else codex_service.suggest_commit_message(
+                resolved_repo_path,
+                "\n".join(status.changed_files),
+                diff_result.stdout,
+            )
+        )
+        return project_service.create_commit(resolved_repo_path, message)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.get("/symbols", response_model=SymbolsResponse)

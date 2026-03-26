@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime, UTC
 from pathlib import Path
 from uuid import uuid4
 
 from .models import (
+    CommitCreateResponse,
+    CommitStatusResponse,
     ConversationCreateRequest,
     ConversationDocument,
     ConversationMessage,
@@ -151,6 +154,50 @@ class ProjectService:
         agents_path.write_text(normalized)
         return str(repo_root), agents_path, normalized
 
+    def get_commit_status(self, repo_path: str) -> CommitStatusResponse:
+        normalized_repo_path = self._normalize_repo_path(repo_path)
+        repo_root = self._resolve_git_root(normalized_repo_path)
+        if repo_root is None:
+            return CommitStatusResponse(
+                repo_path=normalized_repo_path,
+                is_git_repo=False,
+                has_changes=False,
+                suggested_message=None,
+                changed_files=[],
+            )
+
+        status_result = self._run_git(repo_root, ["status", "--porcelain"])
+        changed_lines = [line for line in status_result.stdout.splitlines() if line.strip()]
+        changed_files = [line[3:].strip() for line in changed_lines if len(line) >= 4]
+        return CommitStatusResponse(
+            repo_path=normalized_repo_path,
+            is_git_repo=True,
+            has_changes=bool(changed_files),
+            changed_files=changed_files,
+        )
+
+    def create_commit(self, repo_path: str, message: str) -> CommitCreateResponse:
+        normalized_repo_path = self._normalize_repo_path(repo_path)
+        repo_root = self._resolve_git_root(normalized_repo_path)
+        if repo_root is None:
+            raise ValueError("Repository is not a git repository.")
+
+        status = self.get_commit_status(normalized_repo_path)
+        if not status.has_changes:
+            raise ValueError("There is nothing to commit.")
+
+        self._run_git(repo_root, ["add", "-A"])
+        commit_result = self._run_git(repo_root, ["commit", "-m", message])
+        sha_result = self._run_git(repo_root, ["rev-parse", "HEAD"])
+        commit_sha = sha_result.stdout.strip()
+        summary = commit_result.stdout.strip() or commit_result.stderr.strip() or f"Created commit {commit_sha[:7]}."
+        return CommitCreateResponse(
+            repo_path=normalized_repo_path,
+            commit_sha=commit_sha,
+            message=message,
+            summary=summary,
+        )
+
     def _normalize_repo_path(self, repo_path: str) -> str:
         normalized = repo_path.strip()
         if not normalized:
@@ -211,3 +258,30 @@ class ProjectService:
             None,
         )
         return latest or datetime.now(UTC)
+
+    def _run_git(self, repo_root: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or f"git {' '.join(args)} failed."
+            raise ValueError(message)
+        return result
+
+    def _resolve_git_root(self, repo_path: str) -> Path | None:
+        repo_root = Path(repo_path)
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        resolved = result.stdout.strip()
+        return Path(resolved) if resolved else None

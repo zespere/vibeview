@@ -817,6 +817,31 @@
   color: #6c6257;
 }
 
+.commitButton {
+  min-height: 30px;
+  border: 1px solid #d4c7b8;
+  border-radius: 7px;
+  background: #f4ede2;
+  color: #54483b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.commitButton:hover:not(:disabled) {
+  background: #efe6d8;
+  color: #2f261f;
+}
+
+.commitButton:disabled {
+  border-color: #ddd5ca;
+  background: #ebe5dc;
+  color: #a09384;
+  cursor: default;
+}
+
 .field {
   display: block;
   margin-top: 14px;

@@ -231,6 +231,39 @@ class CodexService:
             summary = f"Created {len(node_items)} architecture notes from the prompt."
         return node_items, edge_items, summary
 
+    def suggest_commit_message(
+        self,
+        repo_path: str,
+        status_text: str,
+        diff_text: str,
+    ) -> str:
+        fallback = self._fallback_commit_message(status_text, diff_text)
+        if not self.is_available():
+            return fallback
+
+        repo_dir = Path(repo_path)
+        prompt = (
+            "Read the git status and diff summary, then return exactly one concise conventional-style commit message.\n"
+            "Requirements:\n"
+            "- one line only\n"
+            "- lower case after the type prefix\n"
+            "- no quotes\n"
+            "- prefer prefixes like feat, fix, refactor, chore, docs, style\n\n"
+            f"Git status:\n{status_text.strip() or '(empty)'}\n\n"
+            f"Git diff summary:\n{diff_text.strip() or '(empty)'}\n"
+        )
+        command = self._build_command(repo_dir, prompt, True, True)
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        events = self._parse_jsonl_output(result.stdout)
+        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        candidate = raw_text.strip().splitlines()[0].strip() if raw_text.strip() else ""
+        if not candidate:
+            return fallback
+        candidate = candidate.strip("`").strip()
+        if len(candidate) > 96:
+            candidate = candidate[:96].rstrip()
+        return candidate or fallback
+
     def _build_command(
         self,
         repo_dir: Path,
@@ -394,3 +427,16 @@ class CodexService:
                 tags=["state"],
             ),
         ]
+
+    def _fallback_commit_message(self, status_text: str, diff_text: str) -> str:
+        combined = f"{status_text}\n{diff_text}"
+        lowered = combined.lower()
+        if any(token in lowered for token in ["package.json", "pnpm-lock", "requirements", "pyproject", "cargo.toml"]):
+            return "chore: update project dependencies"
+        if any(token in lowered for token in ["readme", "docs", "agents.md"]):
+            return "docs: update project documentation"
+        if any(token in lowered for token in ["css", "styles", ".tsx", ".jsx", "page.tsx", "component"]):
+            return "feat: refine app interface"
+        if any(token in lowered for token in ["test", "spec"]):
+            return "test: update project coverage"
+        return "feat: update project workspace"

@@ -9,8 +9,10 @@ import {
   API_BASE_URL,
   buildProjectFromPrompt,
   createCanvasNode,
+  createProjectCommit,
   deleteCanvasNode,
   fetchCanvas,
+  fetchCommitStatus,
   fetchProjectConversation,
   fetchProjectsTree,
   fetchProject,
@@ -31,6 +33,7 @@ import {
   type AssistImpactResponse,
   type CanvasDocument,
   type CanvasNode,
+  type CommitStatusResponse,
   type ConversationMessage,
   type ConversationSummary,
   type ProjectProfile,
@@ -91,6 +94,8 @@ export default function Home() {
   const [codexPrompt, setCodexPrompt] = useState("");
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
@@ -231,6 +236,7 @@ export default function Home() {
       setActiveConversationId(null);
       setActiveConversationRepoPath(null);
       setConsoleMessages([]);
+      setCommitStatus(null);
       return;
     }
     startAgentsTransition(() => {
@@ -242,7 +248,15 @@ export default function Home() {
     startProjectTransition(() => {
       void refreshProjectsTree();
     });
+    void refreshCommitStatus(project.repo_path);
   }, [project?.repo_path]);
+
+  useEffect(() => {
+    if (!canvasDocument?.repo_path) {
+      return;
+    }
+    void refreshCommitStatus(canvasDocument.repo_path);
+  }, [canvasDocument]);
 
   useEffect(() => {
     if (!project?.repo_path) {
@@ -340,6 +354,11 @@ export default function Home() {
       setErrorMessage(null);
       const response = await fetchProject();
       setProject(response.project);
+      if (response.project.repo_path) {
+        void refreshCommitStatus(response.project.repo_path);
+      } else {
+        setCommitStatus(null);
+      }
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -429,6 +448,21 @@ export default function Home() {
       const response = await fetchCanvas(targetRepoPath);
       setCanvasDocument(response.document);
     } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
+  async function refreshCommitStatus(nextRepoPath?: string) {
+    const targetRepoPath = nextRepoPath ?? repoPath.trim();
+    if (!targetRepoPath) {
+      setCommitStatus(null);
+      return;
+    }
+    try {
+      const response = await fetchCommitStatus(targetRepoPath);
+      setCommitStatus(response);
+    } catch (error) {
+      setCommitStatus(null);
       setErrorMessage(getErrorMessage(error));
     }
   }
@@ -551,6 +585,7 @@ export default function Home() {
       setConsoleMessages(nextMessages);
       await persistConversationMessages(repoPath, ensuredConversationId, nextMessages);
       setCodexPrompt("");
+      await refreshCommitStatus(repoPath);
     } catch (error) {
       setComposerStatus("Build failed.");
       setErrorMessage(getErrorMessage(error));
@@ -580,8 +615,36 @@ export default function Home() {
   }
 
   function handleCommitClick() {
-    setComposerStatus("Commit flow is not implemented yet.");
-    setIsConsoleExpanded(false);
+    if (!repoPath.trim() || !commitStatus?.has_changes || isCommitting) {
+      return;
+    }
+    startCodexTransition(() => {
+      void (async () => {
+        try {
+          setIsCommitting(true);
+          setErrorMessage(null);
+          setComposerStatus("Creating commit...");
+          const response = await createProjectCommit(repoPath.trim(), commitStatus.suggested_message ?? undefined);
+          setComposerStatus(response.summary);
+          await refreshCommitStatus(repoPath.trim());
+          setConsoleMessages((current) => [
+            ...current,
+            {
+              id: `assistant-commit-${Date.now()}`,
+              role: "assistant",
+              title: response.message,
+              content: response.summary,
+              created_at: new Date().toISOString(),
+            },
+          ]);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+          setComposerStatus("Commit failed.");
+        } finally {
+          setIsCommitting(false);
+        }
+      })();
+    });
   }
 
   async function inspectSymbol(symbol: SymbolRecord) {
@@ -989,7 +1052,19 @@ export default function Home() {
               />
               <div className={styles.consoleComposerActions}>
                 <div className={styles.consoleComposerLeft}>
-                  <button className={styles.secondaryButton} onClick={handleCommitClick} type="button">
+                  <button
+                    className={styles.commitButton}
+                    disabled={isCommitting || !commitStatus?.has_changes}
+                    onClick={handleCommitClick}
+                    title={
+                      !commitStatus?.is_git_repo
+                        ? "Repository is not a git repository"
+                        : !commitStatus?.has_changes
+                          ? "Nothing to commit"
+                          : commitStatus.suggested_message ?? "Create commit"
+                    }
+                    type="button"
+                  >
                     Commit
                   </button>
                   <span className={styles.buildComposerMeta}>

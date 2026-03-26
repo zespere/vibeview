@@ -128,6 +128,26 @@ class AgentsDocumentUpdateRequest(BaseModel):
     content: str = ""
 
 
+class CommitStatusResponse(BaseModel):
+    repo_path: str
+    is_git_repo: bool
+    has_changes: bool
+    suggested_message: str | None = None
+    changed_files: list[str] = Field(default_factory=list)
+
+
+class CommitCreateRequest(BaseModel):
+    repo_path: str
+    message: str | None = None
+
+
+class CommitCreateResponse(BaseModel):
+    repo_path: str
+    commit_sha: str
+    message: str
+    summary: str
+
+
 class SymbolRecord(BaseModel):
     labels: list[str]
     properties: dict[str, Any]

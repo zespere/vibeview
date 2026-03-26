@@ -88,6 +88,21 @@ export interface AgentsDocumentResponse {
   content: string;
 }
 
+export interface CommitStatusResponse {
+  repo_path: string;
+  is_git_repo: boolean;
+  has_changes: boolean;
+  suggested_message: string | null;
+  changed_files: string[];
+}
+
+export interface CommitCreateResponse {
+  repo_path: string;
+  commit_sha: string;
+  message: string;
+  summary: string;
+}
+
 export interface SymbolRecord {
   labels: string[];
   properties: Record<string, unknown>;
@@ -304,6 +319,20 @@ export function updateProjectConversation(
 export function fetchProjectAgents(repoPath?: string) {
   const suffix = repoPath ? `?repo_path=${encodeURIComponent(repoPath)}` : "";
   return apiRequest<AgentsDocumentResponse>(`/project/agents${suffix}`, { cache: "no-store" });
+}
+
+export function fetchCommitStatus(repoPath: string) {
+  return apiRequest<CommitStatusResponse>(
+    `/project/commit-status?repo_path=${encodeURIComponent(repoPath)}`,
+    { cache: "no-store" },
+  );
+}
+
+export function createProjectCommit(repoPath: string, message?: string) {
+  return apiRequest<CommitCreateResponse>("/project/commit", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath, message }),
+  });
 }
 
 export function updateProjectAgents(content: string, repoPath?: string) {
