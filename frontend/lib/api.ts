@@ -237,9 +237,17 @@ export interface ProjectBuildResponse {
   summary: string;
   code_summary: string;
   note_summary: string;
+  note_changes_summary: string;
   modified_files: string[];
   notes_created: number;
   document: CanvasDocument;
+}
+
+export interface ProjectPlanResponse {
+  repo_path: string;
+  prompt: string;
+  summary: string;
+  plan_text: string;
 }
 
 export const API_BASE_URL =
@@ -401,6 +409,7 @@ export function buildProjectFromPrompt(
   prompt: string,
   semanticContext?: string,
   selectedNoteIds: string[] = [],
+  conversationContext?: string,
 ) {
   return apiRequest<ProjectBuildResponse>("/project/build", {
     method: "POST",
@@ -409,6 +418,24 @@ export function buildProjectFromPrompt(
       prompt,
       semantic_context: semanticContext,
       selected_note_ids: selectedNoteIds,
+      conversation_context: conversationContext,
+    }),
+  });
+}
+
+export function planProjectFromPrompt(
+  repoPath: string,
+  prompt: string,
+  semanticContext?: string,
+  conversationContext?: string,
+) {
+  return apiRequest<ProjectPlanResponse>("/project/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      prompt,
+      semantic_context: semanticContext,
+      conversation_context: conversationContext,
     }),
   });
 }

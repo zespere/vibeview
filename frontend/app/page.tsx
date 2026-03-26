@@ -8,6 +8,7 @@ import { StructureTree } from "@/components/structure-tree";
 import {
   API_BASE_URL,
   buildProjectFromPrompt,
+  planProjectFromPrompt,
   createCanvasNode,
   createProjectCommit,
   deleteCanvasNode,
@@ -92,12 +93,20 @@ export default function Home() {
   const [impactPrompt, setImpactPrompt] = useState("create user");
   const [impactResult, setImpactResult] = useState<AssistImpactResponse | null>(null);
   const [codexPrompt, setCodexPrompt] = useState("");
+  const [isPlanMode, setIsPlanMode] = useState(false);
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
+  const [isPlanning, setIsPlanning] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
+  const [pendingPlan, setPendingPlan] = useState<{
+    messageId: string;
+    prompt: string;
+    planText: string;
+    summary: string;
+  } | null>(null);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
@@ -160,6 +169,9 @@ export default function Home() {
     [activeConversationId, activeConversationRepoPath, activeProjectTreeItem],
   );
   const latestConsoleSummary = useMemo(() => {
+    if (isPlanning) {
+      return "Preparing implementation plan...";
+    }
     if (isBuilding) {
       return "Building the project and refreshing notes...";
     }
@@ -170,7 +182,7 @@ export default function Home() {
       return activeConversationSummary.title;
     }
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
-  }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding]);
+  }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding, isPlanning]);
 
   useEffect(() => {
     startStatusTransition(() => {
@@ -237,6 +249,7 @@ export default function Home() {
       setActiveConversationId(null);
       setActiveConversationRepoPath(null);
       setConsoleMessages([]);
+      setPendingPlan(null);
       setCommitStatus(null);
       return;
     }
@@ -395,6 +408,7 @@ export default function Home() {
 
     if (conversation.placeholder || conversation.id === "default") {
       setConsoleMessages([]);
+      setPendingPlan(null);
       setComposerStatus(`Ready in ${PathLabel(resolvedRepoPath)}.`);
       return;
     }
@@ -403,6 +417,7 @@ export default function Home() {
       setErrorMessage(null);
       const response = await fetchProjectConversation(resolvedRepoPath, conversation.id);
       setConsoleMessages(response.conversation.messages);
+      setPendingPlan(null);
       setComposerStatus(`Opened ${response.conversation.title}.`);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -416,6 +431,7 @@ export default function Home() {
       setActiveConversationRepoPath(response.repo_path);
       setActiveConversationId(response.conversation.id);
       setConsoleMessages(response.conversation.messages);
+      setPendingPlan(null);
       setComposerStatus(`Created ${response.conversation.title}.`);
       await refreshProjectsTree();
       openViewTab("notes");
@@ -556,6 +572,7 @@ export default function Home() {
     setConsoleMessages(pendingMessages);
     setIsBuilding(true);
     setCodexPrompt("");
+    setPendingPlan(null);
     let ensuredConversationId: string | null = null;
     try {
       setErrorMessage(null);
@@ -574,6 +591,7 @@ export default function Home() {
         prompt,
         buildSelectedNoteContext(canvasDocument),
         [],
+        buildConversationContext(pendingMessages),
       );
       setCanvasDocument(response.document);
       setComposerStatus(response.summary);
@@ -581,7 +599,13 @@ export default function Home() {
         id: `assistant-${Date.now()}`,
         role: "assistant",
         title: response.summary,
-        content: [response.code_summary, response.note_summary].filter(Boolean).join("\n\n"),
+        content: [
+          response.code_summary,
+          response.note_summary,
+          `Notes changes summary:\n${response.note_changes_summary}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
         created_at: new Date().toISOString(),
       };
       const nextMessages = [...pendingMessages, assistantMessage];
@@ -612,8 +636,176 @@ export default function Home() {
 
   async function handleSubmitArchitecturePrompt() {
     startCodexTransition(() => {
-      void submitArchitecturePrompt();
+      void (isPlanMode ? submitPlanPrompt() : submitArchitecturePrompt());
     });
+  }
+
+  async function submitPlanPrompt() {
+    const prompt = codexPrompt.trim();
+    if (!prompt) {
+      return;
+    }
+
+    const userMessage: ConversationMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: prompt,
+      created_at: new Date().toISOString(),
+    };
+    const pendingMessages = [...consoleMessages, userMessage];
+    setConsoleMessages(pendingMessages);
+    setCodexPrompt("");
+    setIsPlanning(true);
+    setIsConsoleExpanded(true);
+    let ensuredConversationId: string | null = null;
+
+    try {
+      setErrorMessage(null);
+      setComposerStatus("Preparing implementation plan...");
+      ensuredConversationId =
+        activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
+          ? activeConversationId
+          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt));
+      if (!ensuredConversationId) {
+        setIsPlanning(false);
+        return;
+      }
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
+
+      const response = await planProjectFromPrompt(
+        activeRepoPath,
+        prompt,
+        buildSelectedNoteContext(canvasDocument),
+        buildConversationContext(pendingMessages),
+      );
+      const assistantMessage: ConversationMessage = {
+        id: `assistant-plan-${Date.now()}`,
+        role: "assistant",
+        title: response.summary,
+        content: response.plan_text,
+        created_at: new Date().toISOString(),
+      };
+      const nextMessages = [...pendingMessages, assistantMessage];
+      setConsoleMessages(nextMessages);
+      setPendingPlan({
+        messageId: assistantMessage.id,
+        prompt,
+        planText: response.plan_text,
+        summary: response.summary,
+      });
+      setComposerStatus("Plan ready.");
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+    } catch (error) {
+      setComposerStatus("Plan failed.");
+      setErrorMessage(getErrorMessage(error));
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: `assistant-plan-error-${Date.now()}`,
+          role: "assistant" as const,
+          title: "Plan failed.",
+          content: getErrorMessage(error),
+          created_at: new Date().toISOString(),
+        },
+      ];
+      setConsoleMessages(nextMessages);
+      if (ensuredConversationId) {
+        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      }
+    } finally {
+      setIsPlanning(false);
+    }
+  }
+
+  function handleApprovePlan() {
+    if (!pendingPlan || isBuilding || !activeRepoPath) {
+      return;
+    }
+    setIsPlanMode(false);
+    setCodexPrompt("");
+    startCodexTransition(() => {
+      void submitApprovedPlan(pendingPlan);
+    });
+  }
+
+  async function submitApprovedPlan(plan: NonNullable<typeof pendingPlan>) {
+    const approvalMessage: ConversationMessage = {
+      id: `user-approve-${Date.now()}`,
+      role: "user",
+      title: "Approved plan",
+      content: "Approve and implement the current plan.",
+      created_at: new Date().toISOString(),
+    };
+    const pendingMessages = [...consoleMessages, approvalMessage];
+    setConsoleMessages(pendingMessages);
+    setPendingPlan(null);
+    setIsBuilding(true);
+    let ensuredConversationId: string | null =
+      activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
+        ? activeConversationId
+        : null;
+
+    try {
+      setErrorMessage(null);
+      setComposerStatus("Building the approved plan and refreshing notes...");
+      if (!ensuredConversationId) {
+        ensuredConversationId = await createConversationForProject(activeRepoPath, deriveConversationTitle(plan.prompt));
+      }
+      if (!ensuredConversationId) {
+        setIsBuilding(false);
+        return;
+      }
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
+      const response = await buildProjectFromPrompt(
+        activeRepoPath,
+        [
+          "Implement this approved plan.",
+          `Original request:\n${plan.prompt}`,
+          `Approved plan:\n${plan.planText}`,
+        ].join("\n\n"),
+        buildSelectedNoteContext(canvasDocument),
+        [],
+        buildConversationContext(pendingMessages),
+      );
+      setCanvasDocument(response.document);
+      setComposerStatus(response.summary);
+      const assistantMessage: ConversationMessage = {
+        id: `assistant-${Date.now()}`,
+        role: "assistant",
+        title: response.summary,
+        content: [
+          response.code_summary,
+          response.note_summary,
+          `Notes changes summary:\n${response.note_changes_summary}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        created_at: new Date().toISOString(),
+      };
+      const nextMessages = [...pendingMessages, assistantMessage];
+      setConsoleMessages(nextMessages);
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      await refreshCommitStatus(activeRepoPath);
+    } catch (error) {
+      setComposerStatus("Build failed.");
+      setErrorMessage(getErrorMessage(error));
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: `assistant-error-${Date.now()}`,
+          role: "assistant" as const,
+          title: "Build failed.",
+          content: getErrorMessage(error),
+          created_at: new Date().toISOString(),
+        },
+      ];
+      setConsoleMessages(nextMessages);
+      if (ensuredConversationId) {
+        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      }
+    } finally {
+      setIsBuilding(false);
+    }
   }
 
   function handleCommitClick() {
@@ -1011,7 +1203,25 @@ export default function Home() {
                       >
                         <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
                         {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                        <p className={styles.consoleMessageBody}>{message.content}</p>
+                        <p className={styles.consoleMessageBody}>
+                          {renderConsoleMessageContent(
+                            message.content,
+                            message.role === "assistant" ? canvasDocument : null,
+                            openCanvasNode,
+                          )}
+                        </p>
+                        {pendingPlan?.messageId === message.id ? (
+                          <div className={styles.consoleMessageActions}>
+                            <button
+                              className={styles.secondaryButton}
+                              disabled={isBuilding}
+                              onClick={handleApprovePlan}
+                              type="button"
+                            >
+                              Approve
+                            </button>
+                          </div>
+                        ) : null}
                       </article>
                     ))
                   )}
@@ -1032,9 +1242,9 @@ export default function Home() {
             <label className={styles.consoleComposer}>
               <textarea
                 className={styles.consoleComposerInput}
-                disabled={isBuilding}
+                disabled={isBuilding || isPlanning}
                 onChange={(event) => setCodexPrompt(event.target.value)}
-                placeholder="Describe what to build in this project."
+                placeholder={isPlanMode ? "Describe what to plan in this project." : "Describe what to build in this project."}
                 rows={3}
                 value={codexPrompt}
               />
@@ -1061,21 +1271,37 @@ export default function Home() {
                       : "No notes available"}
                   </span>
                 </div>
-                <button
-                  className={styles.primaryButton}
-                  disabled={isBuilding || codexPending || !activeRepoPath || !codexPrompt.trim()}
-                  onClick={handleSubmitArchitecturePrompt}
-                  type="button"
-                >
-                  {isBuilding ? (
-                    <>
-                      <span aria-hidden="true" className={styles.buttonSpinner} />
-                      <span>Building...</span>
-                    </>
-                  ) : (
-                    "Build"
-                  )}
-                </button>
+                <div className={styles.consoleComposerRight}>
+                  <label className={styles.planModeToggle}>
+                    <input
+                      checked={isPlanMode}
+                      disabled={isBuilding || isPlanning}
+                      onChange={(event) => setIsPlanMode(event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Plan mode</span>
+                  </label>
+                  <button
+                    className={styles.primaryButton}
+                    disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
+                    onClick={handleSubmitArchitecturePrompt}
+                    type="button"
+                  >
+                    {isPlanning ? (
+                      <>
+                        <span aria-hidden="true" className={styles.buttonSpinner} />
+                        <span>Planning...</span>
+                      </>
+                    ) : isBuilding ? (
+                      <>
+                        <span aria-hidden="true" className={styles.buttonSpinner} />
+                        <span>Building...</span>
+                      </>
+                    ) : (
+                      isPlanMode ? "Plan" : "Build"
+                    )}
+                  </button>
+                </div>
               </div>
             </label>
           </div>
@@ -2106,6 +2332,20 @@ function buildSelectedNoteContext(document: CanvasDocument | null) {
     .join("\n\n");
 }
 
+function buildConversationContext(messages: ConversationMessage[]) {
+  if (messages.length === 0) {
+    return undefined;
+  }
+
+  return messages
+    .slice(-8)
+    .map((message) => {
+      const title = message.title?.trim() ? ` [${message.title.trim()}]` : "";
+      return `${message.role.toUpperCase()}${title}: ${message.content.trim()}`;
+    })
+    .join("\n\n");
+}
+
 function rankRelevantNotes(document: CanvasDocument) {
   return [...document.nodes].sort((left, right) => {
     const leftScore = scoreNote(left);
@@ -2133,6 +2373,78 @@ function summarizeNote(value: string) {
   }
   const collapsed = trimmed.replace(/\s+/g, " ");
   return collapsed.length > 120 ? `${collapsed.slice(0, 117).trim()}...` : collapsed;
+}
+
+function renderConsoleMessageContent(
+  content: string,
+  document: CanvasDocument | null,
+  onOpenNode: (nodeId: string) => void,
+) {
+  if (!document || document.nodes.length === 0) {
+    return content;
+  }
+
+  const titleToId = new Map(
+    document.nodes
+      .filter((node) => node.title.trim())
+      .map((node) => [node.title.trim(), node.id] as const),
+  );
+  const titles = [...titleToId.keys()].sort((left, right) => right.length - left.length);
+  if (titles.length === 0) {
+    return content;
+  }
+
+  const pattern = new RegExp(`\\b(${titles.map(escapeRegExp).join("|")})\\b`, "g");
+  const lines = content.split("\n");
+
+  return lines.map((line, lineIndex) => {
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    pattern.lastIndex = 0;
+
+    while ((match = pattern.exec(line)) !== null) {
+      const [matchedText] = match;
+      const start = match.index;
+      if (start > lastIndex) {
+        parts.push(line.slice(lastIndex, start));
+      }
+      const nodeId = titleToId.get(matchedText.trim());
+      if (nodeId) {
+        parts.push(
+          <button
+            className={styles.consoleNoteLink}
+            key={`${lineIndex}-${start}-${matchedText}`}
+            onClick={() => onOpenNode(nodeId)}
+            type="button"
+          >
+            {matchedText}
+          </button>,
+        );
+      } else {
+        parts.push(matchedText);
+      }
+      lastIndex = start + matchedText.length;
+    }
+
+    if (lastIndex < line.length) {
+      parts.push(line.slice(lastIndex));
+    }
+    if (parts.length === 0) {
+      parts.push(line);
+    }
+
+    return (
+      <span key={`line-${lineIndex}`}>
+        {parts}
+        {lineIndex < lines.length - 1 ? <br /> : null}
+      </span>
+    );
+  });
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function getErrorMessage(error: unknown) {

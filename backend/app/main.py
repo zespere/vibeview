@@ -33,6 +33,8 @@ from .models import (
     IndexRequest,
     ProjectBuildRequest,
     ProjectBuildResponse,
+    ProjectPlanRequest,
+    ProjectPlanResponse,
     ProjectProfileResponse,
     ProjectTreeResponse,
     ProjectProfileUpdateRequest,
@@ -339,12 +341,13 @@ def build_project(request: ProjectBuildRequest) -> ProjectBuildResponse:
             repo_path=resolved_repo_path,
             prompt=request.prompt,
             semantic_context=request.semantic_context,
+            conversation_context=request.conversation_context,
         )
         generated_nodes, generated_edges, note_summary = codex_service.generate_architecture_notes(
             repo_path=resolved_repo_path,
             prompt=request.prompt,
         )
-        document, notes_created = canvas_service.append_generated_map(generated_nodes, generated_edges)
+        document, notes_created, note_changes = canvas_service.append_generated_map(generated_nodes, generated_edges)
     except RuntimeError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
@@ -367,9 +370,39 @@ def build_project(request: ProjectBuildRequest) -> ProjectBuildResponse:
         summary=" ".join(summary_parts),
         code_summary=change_response.summary,
         note_summary=note_summary,
+        note_changes_summary=note_changes.summary,
         modified_files=modified_files,
         notes_created=notes_created,
         document=document,
+    )
+
+
+@app.post("/project/plan", response_model=ProjectPlanResponse)
+def plan_project(request: ProjectPlanRequest) -> ProjectPlanResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    canvas_service.set_repo_path(resolved_repo_path)
+
+    try:
+        summary, plan_text = codex_service.plan_project(
+            repo_path=resolved_repo_path,
+            prompt=request.prompt,
+            semantic_context=request.semantic_context,
+            conversation_context=request.conversation_context,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return ProjectPlanResponse(
+        repo_path=resolved_repo_path,
+        prompt=request.prompt,
+        summary=summary,
+        plan_text=plan_text,
     )
 
 
@@ -450,13 +483,13 @@ def generate_canvas_from_prompt(request: CanvasGenerateRequest) -> CanvasGenerat
             repo_path=str(repo_path.resolve()),
             prompt=request.prompt,
         )
-        document, created_count = canvas_service.append_generated_map(nodes, edges)
+        document, created_count, note_changes = canvas_service.append_generated_map(nodes, edges)
     except RuntimeError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
     return CanvasGenerateResponse(
         document=document,
-        summary=summary,
+        summary=f"{summary} {note_changes.summary}".strip(),
         created_count=created_count,
     )
 

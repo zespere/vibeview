@@ -767,6 +767,29 @@
   color: #4c4035;
 }
 
+.consoleNoteLink {
+  border: 0;
+  background: transparent;
+  color: #8b5c32;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(139, 92, 50, 0.3);
+  text-underline-offset: 2px;
+}
+
+.consoleNoteLink:hover {
+  color: #6f451f;
+  text-decoration-color: rgba(111, 69, 31, 0.5);
+}
+
+.consoleMessageActions {
+  display: flex;
+  margin-top: 4px;
+}
+
 .consoleComposer {
   display: block;
   border: 0;
@@ -811,6 +834,29 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.consoleComposerRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.planModeToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #5f5347;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.planModeToggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #8b5c32;
 }
 
 .buildComposerMeta {

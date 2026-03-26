@@ -11,6 +11,7 @@ from .models import (
     CanvasEdgeCreateRequest,
     GeneratedCanvasEdge,
     GeneratedCanvasNode,
+    NoteChangeSummary,
     CanvasNode,
     CanvasNodeCreateRequest,
     CanvasNodeUpdateRequest,
@@ -177,8 +178,9 @@ class CanvasService:
         self,
         nodes: list[GeneratedCanvasNode],
         edges: list[GeneratedCanvasEdge],
-    ) -> tuple[CanvasDocument, int]:
+    ) -> tuple[CanvasDocument, int, NoteChangeSummary]:
         document = self.store.load()
+        before_document = document.model_copy(deep=True)
         existing_titles = {node.title.strip().lower(): node for node in document.nodes}
         title_to_id: dict[str, str] = {}
         start_x = 120
@@ -234,7 +236,9 @@ class CanvasService:
 
         if created_count:
             logger.info("Generated %s canvas nodes from prompt workflow", created_count)
-        return self.store.save(document), created_count
+        saved = self.store.save(document)
+        note_changes = self._build_note_change_summary(before_document, saved)
+        return saved, created_count, note_changes
 
     def delete_edge(self, edge_id: str) -> CanvasDocument:
         document = self.store.load()
@@ -244,3 +248,76 @@ class CanvasService:
         document.edges = next_edges
         logger.info("Deleted canvas edge %s", edge_id)
         return self.store.save(document)
+
+    def _build_note_change_summary(
+        self,
+        before: CanvasDocument,
+        after: CanvasDocument,
+    ) -> NoteChangeSummary:
+        before_nodes_by_title = {node.title.strip().lower(): node for node in before.nodes}
+        after_nodes_by_title = {node.title.strip().lower(): node for node in after.nodes}
+
+        created_titles: list[str] = []
+        updated_titles: list[str] = []
+
+        for key, node in after_nodes_by_title.items():
+            previous = before_nodes_by_title.get(key)
+            if previous is None:
+                created_titles.append(node.title)
+                continue
+            if self._node_changed(previous, node):
+                updated_titles.append(node.title)
+
+        before_edge_keys = {
+            (edge.source_node_id, edge.target_node_id, edge.label.strip().lower()) for edge in before.edges
+        }
+        linked_titles: list[str] = []
+        seen_links: set[str] = set()
+        after_nodes_by_id = {node.id: node for node in after.nodes}
+        for edge in after.edges:
+            key = (edge.source_node_id, edge.target_node_id, edge.label.strip().lower())
+            if key in before_edge_keys:
+                continue
+            source = after_nodes_by_id.get(edge.source_node_id)
+            target = after_nodes_by_id.get(edge.target_node_id)
+            if source is None or target is None:
+                continue
+            label = edge.label.strip() or "linked to"
+            text = f"{source.title} {label} {target.title}"
+            if text in seen_links:
+                continue
+            seen_links.add(text)
+            linked_titles.append(text)
+
+        summary_parts: list[str] = []
+        if created_titles:
+            summary_parts.append(
+                "Created notes: " + ", ".join(created_titles[:4]) + ("." if len(created_titles) <= 4 else ", ...")
+            )
+        if updated_titles:
+            summary_parts.append(
+                "Updated notes: " + ", ".join(updated_titles[:4]) + ("." if len(updated_titles) <= 4 else ", ...")
+            )
+        if linked_titles:
+            summary_parts.append(
+                "Linked notes: " + "; ".join(linked_titles[:3]) + ("." if len(linked_titles) <= 3 else "; ...")
+            )
+        if not summary_parts:
+            summary_parts.append("No visible note changes were needed.")
+
+        return NoteChangeSummary(
+            summary=" ".join(summary_parts),
+            created_titles=created_titles,
+            updated_titles=updated_titles,
+            linked_titles=linked_titles,
+        )
+
+    def _node_changed(self, previous: CanvasNode, current: CanvasNode) -> bool:
+        return any(
+            [
+                previous.description.strip() != current.description.strip(),
+                previous.tags != current.tags,
+                previous.linked_files != current.linked_files,
+                previous.linked_symbols != current.linked_symbols,
+            ]
+        )

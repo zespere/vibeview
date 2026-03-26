@@ -278,6 +278,7 @@ class ProjectBuildRequest(BaseModel):
     prompt: str = Field(min_length=4)
     selected_note_ids: list[str] = Field(default_factory=list)
     semantic_context: str | None = None
+    conversation_context: str | None = None
 
 
 class ProjectBuildResponse(BaseModel):
@@ -286,9 +287,31 @@ class ProjectBuildResponse(BaseModel):
     summary: str
     code_summary: str
     note_summary: str
+    note_changes_summary: str
     modified_files: list[str]
     notes_created: int
     document: "CanvasDocument"
+
+
+class NoteChangeSummary(BaseModel):
+    summary: str
+    created_titles: list[str] = Field(default_factory=list)
+    updated_titles: list[str] = Field(default_factory=list)
+    linked_titles: list[str] = Field(default_factory=list)
+
+
+class ProjectPlanRequest(BaseModel):
+    repo_path: str
+    prompt: str = Field(min_length=4)
+    semantic_context: str | None = None
+    conversation_context: str | None = None
+
+
+class ProjectPlanResponse(BaseModel):
+    repo_path: str
+    prompt: str
+    summary: str
+    plan_text: str
 
 
 class CanvasNode(BaseModel):

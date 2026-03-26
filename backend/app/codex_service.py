@@ -140,6 +140,7 @@ class CodexService:
         repo_path: str,
         prompt: str,
         semantic_context: str | None,
+        conversation_context: str | None = None,
     ) -> CodexChangeResponse:
         implementation_prompt = (
             "Implement the user's request directly in the repository.\n"
@@ -156,8 +157,51 @@ class CodexService:
             dry_run=False,
             use_graph_context=True,
             bypass_sandbox=None,
-            semantic_context=semantic_context,
+            semantic_context=self._merge_context_blocks(
+                semantic_context,
+                conversation_context,
+            ),
         )
+
+    def plan_project(
+        self,
+        repo_path: str,
+        prompt: str,
+        semantic_context: str | None,
+        conversation_context: str | None = None,
+    ) -> tuple[str, str]:
+        if not self.is_available():
+            raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
+
+        repo_dir = Path(repo_path)
+        context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
+        planning_prompt = (
+            "You are preparing an implementation plan for the next coding run.\n"
+            "Inspect the repository and respond with a concise, practical implementation plan only.\n"
+            "Do not modify files.\n"
+            "Keep the response grounded in the current codebase.\n"
+            "Format:\n"
+            "1. Goal\n"
+            "2. Approach\n"
+            "3. Main implementation steps\n"
+            "4. Files or areas likely affected\n"
+            "5. Risks or open questions\n\n"
+            f"User request:\n{prompt.strip()}"
+        )
+        final_prompt = (
+            f"{context_prefix}\n\nTask:\n{planning_prompt}" if context_prefix else planning_prompt
+        )
+        command = self._build_command(repo_dir, final_prompt, True, True)
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        events = self._parse_jsonl_output(result.stdout)
+        plan_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        plan_text = plan_text.strip()
+        if result.returncode != 0 or not plan_text:
+            error_tail = _clean_log_output(result.stderr or result.stdout).strip()
+            raise RuntimeError(error_tail or "Could not generate an implementation plan.")
+
+        summary = self._summarize_plan(plan_text)
+        return summary, plan_text
 
     def generate_architecture_notes(
         self,
@@ -263,6 +307,33 @@ class CodexService:
         if len(candidate) > 96:
             candidate = candidate[:96].rstrip()
         return candidate or fallback
+
+    def _merge_context_blocks(
+        self,
+        semantic_context: str | None,
+        conversation_context: str | None,
+    ) -> str | None:
+        blocks: list[str] = []
+        if semantic_context and semantic_context.strip():
+            blocks.append(
+                "Use this semantic workspace context when planning and editing:\n"
+                f"{semantic_context.strip()}"
+            )
+        if conversation_context and conversation_context.strip():
+            blocks.append(
+                "Use this conversation context to continue the user's current thread naturally:\n"
+                f"{conversation_context.strip()}"
+            )
+        if not blocks:
+            return None
+        return "\n\n".join(blocks)
+
+    def _summarize_plan(self, plan_text: str) -> str:
+        for line in plan_text.splitlines():
+            stripped = line.strip().lstrip("#").strip()
+            if stripped:
+                return stripped[:140]
+        return "Implementation plan ready."
 
     def _build_command(
         self,
