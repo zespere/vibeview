@@ -1492,16 +1492,6 @@ export default function Home() {
             </div>
           ) : null}
 
-          {sampleRepos.length > 0 ? (
-            <div className={styles.sampleRepoList}>
-              {sampleRepos.map(([name, path]) => (
-                <button className={styles.secondaryButton} key={name} onClick={() => applySampleRepo(path)} type="button">
-                  {name}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
           <div className={styles.optionGrid}>
             <label className={styles.checkboxRow}>
               <input checked={cleanIndex} onChange={(event) => setCleanIndex(event.target.checked)} type="checkbox" />
