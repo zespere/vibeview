@@ -579,6 +579,11 @@ export default function Home() {
     });
   }
 
+  function handleCommitClick() {
+    setComposerStatus("Commit flow is not implemented yet.");
+    setIsConsoleExpanded(false);
+  }
+
   async function inspectSymbol(symbol: SymbolRecord) {
     const qualifiedName =
       typeof symbol.properties.qualified_name === "string"
@@ -983,11 +988,16 @@ export default function Home() {
                 value={codexPrompt}
               />
               <div className={styles.consoleComposerActions}>
-                <span className={styles.buildComposerMeta}>
-                  {selectedCanvasNodeIds.size > 0
-                    ? `${selectedCanvasNodeIds.size} note${selectedCanvasNodeIds.size === 1 ? "" : "s"} selected`
-                    : "No notes selected"}
-                </span>
+                <div className={styles.consoleComposerLeft}>
+                  <button className={styles.secondaryButton} onClick={handleCommitClick} type="button">
+                    Commit
+                  </button>
+                  <span className={styles.buildComposerMeta}>
+                    {selectedCanvasNodeIds.size > 0
+                      ? `${selectedCanvasNodeIds.size} note${selectedCanvasNodeIds.size === 1 ? "" : "s"} selected`
+                      : "No notes selected"}
+                  </span>
+                </div>
                 <button
                   className={styles.primaryButton}
                   disabled={isBuilding || codexPending || !repoPath.trim() || !codexPrompt.trim()}

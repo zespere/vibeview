@@ -805,6 +805,13 @@
   padding: 6px 2px 0;
 }
 
+.consoleComposerLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .buildComposerMeta {
   font-size: 12px;
   color: #6c6257;
