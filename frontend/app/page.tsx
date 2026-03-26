@@ -19,6 +19,7 @@ import {
   runImpactAnalysis,
   runIndex,
   runQuery,
+  resetCanvas,
   updateProject,
   updateProjectAgents,
   updateCanvasNode,
@@ -536,6 +537,25 @@ export default function Home() {
     });
   }
 
+  async function handleResetCanvas() {
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const targetRepoPath = repoPath.trim();
+          const response = await resetCanvas(targetRepoPath);
+          setCanvasDocument(response.document);
+          setSelectedCanvasNodeId(null);
+          setOpenCanvasNodeIds([]);
+          setSelectedCanvasNodeIds(new Set());
+          setComposerStatus("Canvas reset.");
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
   function openCanvasNode(nodeId: string) {
     setSelectedCanvasNodeId(nodeId);
     setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
@@ -649,18 +669,6 @@ export default function Home() {
         next.add(nodeId);
       }
       return next;
-    });
-  }
-
-  function handleMoveCanvasNode(nodeId: string, x: number, y: number) {
-    setCanvasDocument((current) => {
-      if (!current) {
-        return current;
-      }
-      return {
-        ...current,
-        nodes: current.nodes.map((item) => (item.id === nodeId ? { ...item, x, y } : item)),
-      };
     });
   }
 
@@ -817,13 +825,11 @@ export default function Home() {
             <CanvasBoard
               onDeleteNode={handleDeleteCanvasNode}
               document={canvasDocument}
-              fitViewSignal={canvasFitViewSignal}
               onCreateNodeAt={(x, y) => {
                 startCanvasTransition(() => {
                   void handleCreateCanvasNodeAt(x, y);
                 });
               }}
-              onMoveNode={handleMoveCanvasNode}
               onMoveNodeEnd={(nodeId, x, y) => {
                 startCanvasTransition(() => {
                   void handlePersistCanvasNodePosition(nodeId, x, y);
@@ -1258,6 +1264,9 @@ export default function Home() {
             </button>
             <button className={styles.secondaryButton} disabled={indexPending} onClick={handleIndex} type="button">
               {indexPending ? "Submitting..." : dryRunIndex ? "Preview index" : "Index repo"}
+            </button>
+            <button className={styles.secondaryButton} disabled={!repoPath.trim()} onClick={handleResetCanvas} type="button">
+              Reset canvas
             </button>
           </div>
         </div>

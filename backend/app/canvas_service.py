@@ -53,16 +53,13 @@ class CanvasStore:
             project_path = self._project_canvas_path(pointer.repo_path)
             if project_path.exists():
                 return self._read_document(project_path)
+            return CanvasDocument(repo_path=pointer.repo_path)
         return pointer
 
     def load_for_repo(self, repo_path: str) -> CanvasDocument:
         project_path = self._project_canvas_path(repo_path)
         if project_path.exists():
             return self._read_document(project_path)
-
-        pointer = self._read_document(self.path)
-        if pointer.repo_path == repo_path:
-            return pointer
         return CanvasDocument(repo_path=repo_path)
 
     def save(self, document: CanvasDocument) -> CanvasDocument:
@@ -70,9 +67,18 @@ class CanvasStore:
         self.path.write_text(payload)
         if document.repo_path:
             project_path = self._project_canvas_path(document.repo_path)
-            project_path.parent.mkdir(parents=True, exist_ok=True)
-            project_path.write_text(payload)
+            if document.nodes or document.edges or project_path.exists():
+                project_path.parent.mkdir(parents=True, exist_ok=True)
+                project_path.write_text(payload)
         return document
+
+    def delete_for_repo(self, repo_path: str) -> None:
+        project_path = self._project_canvas_path(repo_path)
+        if project_path.exists():
+            project_path.unlink()
+        kon_path = project_path.parent
+        if kon_path.exists() and not any(kon_path.iterdir()):
+            kon_path.rmdir()
 
 
 class CanvasService:
@@ -90,6 +96,11 @@ class CanvasService:
     def set_repo_path(self, repo_path: str) -> CanvasDocument:
         document = self.store.load_for_repo(repo_path)
         document.repo_path = repo_path
+        return self.store.save(document)
+
+    def reset_repo_canvas(self, repo_path: str) -> CanvasDocument:
+        self.store.delete_for_repo(repo_path)
+        document = CanvasDocument(repo_path=repo_path)
         return self.store.save(document)
 
     def create_node(self, request: CanvasNodeCreateRequest) -> CanvasDocument:

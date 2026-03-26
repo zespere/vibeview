@@ -305,6 +305,12 @@ export function fetchCanvas(repoPath?: string) {
   return apiRequest<CanvasResponse>(`/canvas${suffix}`, { cache: "no-store" });
 }
 
+export function resetCanvas(repoPath: string) {
+  return apiRequest<CanvasResponse>(`/canvas?repo_path=${encodeURIComponent(repoPath)}`, {
+    method: "DELETE",
+  });
+}
+
 export function createCanvasNode(payload: {
   title: string;
   description: string;

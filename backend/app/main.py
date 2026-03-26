@@ -289,6 +289,16 @@ def get_canvas(repo_path: str | None = None) -> CanvasResponse:
     return CanvasResponse(document=canvas_service.get_document())
 
 
+@app.delete("/canvas", response_model=CanvasResponse)
+def reset_canvas(repo_path: str) -> CanvasResponse:
+    resolved_path = Path(repo_path)
+    if not resolved_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {resolved_path}")
+    if not resolved_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {resolved_path}")
+    return CanvasResponse(document=canvas_service.reset_repo_canvas(str(resolved_path.resolve())))
+
+
 @app.post("/canvas/nodes", response_model=CanvasResponse)
 def create_canvas_node(request: CanvasNodeCreateRequest) -> CanvasResponse:
     return CanvasResponse(document=canvas_service.create_node(request))

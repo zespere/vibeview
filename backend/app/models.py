@@ -252,6 +252,79 @@ class CanvasDocument(BaseModel):
     nodes: list[CanvasNode] = Field(default_factory=list)
     edges: list[CanvasEdge] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_architecture_summary(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        if "nodes" in value or "edges" in value:
+            return value
+
+        project = value.get("project")
+        features = value.get("features")
+        files = value.get("files")
+        if not isinstance(project, dict) and not isinstance(features, list):
+            return value
+
+        project_name = str(project.get("name", "Project")).strip() if isinstance(project, dict) else "Project"
+        project_type = str(project.get("type", "")).strip() if isinstance(project, dict) else ""
+        entry = str(project.get("entry", "")).strip() if isinstance(project, dict) else ""
+        linked_files = [
+            str(item).strip()
+            for item in (files or [])
+            if isinstance(item, str) and str(item).strip() and not str(item).startswith(".konceptura/")
+        ]
+
+        nodes: list[dict[str, Any]] = [
+            {
+                "id": "node_project",
+                "title": project_name or "Project",
+                "description": " ".join(
+                    part for part in [
+                        f"{project_name} is the current app workspace." if project_name else "",
+                        f"It is a {project_type}." if project_type else "",
+                        f"The main entry file is {entry}." if entry else "",
+                    ] if part
+                ).strip() or "Project workspace.",
+                "tags": [tag for tag in ["project", project_type or None] if tag],
+                "x": 120,
+                "y": 120,
+                "linked_files": linked_files,
+                "linked_symbols": [entry] if entry else [],
+            }
+        ]
+        edges: list[dict[str, Any]] = []
+
+        for index, feature in enumerate(features or []):
+            if not isinstance(feature, str) or not feature.strip():
+                continue
+            nodes.append(
+                {
+                    "id": f"node_feature_{index}",
+                    "title": feature.strip(),
+                    "description": f"{feature.strip()} is part of the current app behavior and should be preserved or extended during implementation.",
+                    "tags": ["feature"],
+                    "x": 120 + (index % 3) * 320,
+                    "y": 340 + (index // 3) * 220,
+                    "linked_files": linked_files,
+                    "linked_symbols": [],
+                }
+            )
+            edges.append(
+                {
+                    "id": f"edge_project_{index}",
+                    "source_node_id": "node_project",
+                    "target_node_id": f"node_feature_{index}",
+                    "label": "includes",
+                }
+            )
+
+        return {
+            "repo_path": value.get("repo_path"),
+            "nodes": nodes,
+            "edges": edges,
+        }
+
 
 class CanvasNodeCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=120)

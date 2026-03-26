@@ -432,11 +432,11 @@
 }
 
 .canvasFrameWithConsoleCollapsed {
-  padding-bottom: 176px;
+  padding-bottom: 156px;
 }
 
 .canvasFrameWithConsoleExpanded {
-  padding-bottom: 438px;
+  padding-bottom: 360px;
 }
 
 .helperTextLoading {
@@ -460,14 +460,14 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   width: 100%;
   border: 0;
   border-radius: 0;
   background: rgba(248, 242, 232, 0.82);
   color: #241d17;
   cursor: pointer;
-  padding: 12px 14px;
+  padding: 10px 12px;
   pointer-events: auto;
 }
 
@@ -487,7 +487,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   color: #3b3026;
 }
 
@@ -500,7 +500,7 @@
   display: grid;
   grid-template-rows: minmax(0, 1fr);
   width: 100%;
-  height: 248px;
+  height: 182px;
   border: 0;
   background: rgba(255, 251, 245, 0.72);
   overflow: hidden;
@@ -510,19 +510,19 @@
 .notesConsoleMessages {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   overflow: auto;
-  padding: 14px;
+  padding: 10px 12px;
 }
 
 .consoleMessageUser,
 .consoleMessageAssistant {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   max-width: min(720px, 100%);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .consoleMessageUser {
@@ -537,7 +537,7 @@
 }
 
 .consoleMessageRole {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -545,14 +545,15 @@
 }
 
 .consoleMessageTitle {
-  font-size: 14px;
+  font-size: 13px;
   color: #2d241c;
 }
 
 .consoleMessageBody {
   margin: 0;
   white-space: pre-wrap;
-  line-height: 1.5;
+  line-height: 1.4;
+  font-size: 13px;
   color: #4c4035;
 }
 
@@ -560,7 +561,7 @@
   display: block;
   border: 0;
   background: transparent;
-  padding: 10px 12px 12px;
+  padding: 8px 10px 10px;
   pointer-events: auto;
 }
 
@@ -571,9 +572,9 @@
   color: #241d17;
   font: inherit;
   line-height: 1.5;
-  min-height: 28px;
-  max-height: 92px;
-  padding: 6px 8px 4px;
+  min-height: 24px;
+  max-height: 72px;
+  padding: 4px 6px 2px;
   resize: none;
 }
 
@@ -590,9 +591,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 8px;
+  margin-top: 6px;
   border-top: 1px solid #e2d8cb;
-  padding: 8px 4px 0;
+  padding: 6px 2px 0;
 }
 
 .buildComposerMeta {
@@ -1293,7 +1294,8 @@
 
 .canvasNode,
 .canvasNodeActive {
-  position: absolute;
+  display: flex;
+  flex-direction: column;
   width: 240px;
   min-height: 148px;
   border: 1px solid #cebfae;

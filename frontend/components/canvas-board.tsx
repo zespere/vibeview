@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import "@xyflow/react/dist/style.css";
 import {
@@ -19,12 +19,10 @@ import type { CanvasDocument, CanvasNode } from "@/lib/api";
 
 interface CanvasBoardProps {
   document: CanvasDocument | null;
-  fitViewSignal: number;
   selectedNodeId: string | null;
   selectedNodeIds: Set<string>;
   onCreateNodeAt: (x: number, y: number) => void;
   onDeleteNode: (nodeId: string) => void;
-  onMoveNode: (nodeId: string, x: number, y: number) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
   onOpenNode: (nodeId: string) => void;
@@ -56,20 +54,28 @@ const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
 
 export function CanvasBoard({
   document,
-  fitViewSignal,
   selectedNodeId,
   selectedNodeIds,
   onCreateNodeAt,
   onDeleteNode,
-  onMoveNode,
   onMoveNodeEnd,
   onSelectNode,
   onOpenNode,
   onToggleNodeForCodex,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
-  const [flowReady, setFlowReady] = useState(false);
+  const isDraggingRef = useRef(false);
+  const openNodeRef = useRef(onOpenNode);
+  const selectNodeRef = useRef(onSelectNode);
+  const toggleNodeForCodexRef = useRef(onToggleNodeForCodex);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [localNodes, setLocalNodes] = useState<Array<Node<NoteNodeData>>>([]);
+
+  useEffect(() => {
+    openNodeRef.current = onOpenNode;
+    selectNodeRef.current = onSelectNode;
+    toggleNodeForCodexRef.current = onToggleNodeForCodex;
+  }, [onOpenNode, onSelectNode, onToggleNodeForCodex]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -94,32 +100,29 @@ export function CanvasBoard({
     };
   }, [contextMenu]);
 
+  const derivedNodes = useMemo<Array<Node<NoteNodeData>>>(() => {
+    return (document?.nodes ?? []).map((node) => ({
+      id: node.id,
+      type: "note",
+      position: { x: node.x, y: node.y },
+      data: {
+        node,
+        isCodexSelected: selectedNodeIds.has(node.id),
+        onOpenNode: (nodeId: string) => openNodeRef.current(nodeId),
+        onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
+        onToggleNodeForCodex: (nodeId: string) => toggleNodeForCodexRef.current(nodeId),
+      },
+      selected: node.id === selectedNodeId,
+      draggable: true,
+    }));
+  }, [document, selectedNodeIds, selectedNodeId]);
+
   useEffect(() => {
-    if (!flowReady || !flowRef.current || !document || document.nodes.length === 0 || fitViewSignal === 0) {
+    if (isDraggingRef.current) {
       return;
     }
-    window.requestAnimationFrame(() => {
-      flowRef.current?.fitView({
-        duration: 240,
-        padding: 0.2,
-      });
-    });
-  }, [document, fitViewSignal, flowReady]);
-
-  const nodes: Array<Node<NoteNodeData>> = (document?.nodes ?? []).map((node) => ({
-    id: node.id,
-    type: "note",
-    position: { x: node.x, y: node.y },
-    data: {
-      node,
-      isCodexSelected: selectedNodeIds.has(node.id),
-      onOpenNode,
-      onSelectNode,
-      onToggleNodeForCodex,
-    },
-    selected: node.id === selectedNodeId,
-    draggable: true,
-  }));
+    setLocalNodes(derivedNodes);
+  }, [derivedNodes]);
 
   const edges: Edge[] = (document?.edges ?? []).map((edge) => ({
     id: edge.id,
@@ -130,11 +133,29 @@ export function CanvasBoard({
     animated: false,
   }));
 
+  const handleNodeDragStart: NodeMouseHandler<Node<NoteNodeData>> = () => {
+    isDraggingRef.current = true;
+  };
+
   const handleNodeDrag: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
-    onMoveNode(node.id, Math.round(node.position.x), Math.round(node.position.y));
+    setLocalNodes((current) =>
+      current.map((item) =>
+        item.id === node.id
+          ? { ...item, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) } }
+          : item,
+      ),
+    );
   };
 
   const handleNodeDragStop: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
+    isDraggingRef.current = false;
+    setLocalNodes((current) =>
+      current.map((item) =>
+        item.id === node.id
+          ? { ...item, position: { x: Math.round(node.position.x), y: Math.round(node.position.y) } }
+          : item,
+      ),
+    );
     onMoveNodeEnd(node.id, Math.round(node.position.x), Math.round(node.position.y));
   };
 
@@ -191,14 +212,14 @@ export function CanvasBoard({
         maxZoom={1.8}
         minZoom={0.35}
         nodeOrigin={[0, 0]}
-        nodes={nodes}
+        nodes={localNodes}
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           flowRef.current = instance;
-          setFlowReady(true);
         }}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
+        onNodeDragStart={handleNodeDragStart}
         onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStop}
         onNodeContextMenu={(event, node) => {
@@ -216,7 +237,9 @@ export function CanvasBoard({
             nodeId: node.id,
           });
         }}
-        panOnDrag={[1, 2]}
+        autoPanOnNodeDrag
+        autoPanSpeed={8}
+        panOnDrag={[2]}
         panOnScroll
         panOnScrollMode={PanOnScrollMode.Free}
         proOptions={{ hideAttribution: true }}

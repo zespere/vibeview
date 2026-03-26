@@ -146,6 +146,7 @@ class CodexService:
             "Make real file changes when they are needed.\n"
             "If the repository is empty or effectively empty, scaffold the smallest practical web app that satisfies the request.\n"
             "Prefer a simple local-first web stack already implied by the repository. If there is no stack yet, choose the minimum practical setup.\n"
+            "Do not modify files inside .konceptura/. The system manages that workspace metadata.\n"
             "Do not stop at a plan. Write the code.\n\n"
             f"User request:\n{prompt.strip()}"
         )
