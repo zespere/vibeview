@@ -22,13 +22,11 @@ import type { CanvasDocument, CanvasNode } from "@/lib/api";
 interface CanvasBoardProps {
   document: CanvasDocument | null;
   selectedNodeId: string | null;
-  selectedNodeIds: Set<string>;
   onCreateNodeAt: (x: number, y: number) => void;
   onDeleteNode: (nodeId: string) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
   onOpenNode: (nodeId: string) => void;
-  onToggleNodeForCodex: (nodeId: string) => void;
 }
 
 interface ContextMenuState {
@@ -41,10 +39,8 @@ interface ContextMenuState {
 
 interface NoteNodeData extends Record<string, unknown> {
   node: CanvasNode;
-  isCodexSelected: boolean;
   onOpenNode: (nodeId: string) => void;
   onSelectNode: (nodeId: string) => void;
-  onToggleNodeForCodex: (nodeId: string) => void;
 }
 
 const NODE_WIDTH = 240;
@@ -57,27 +53,23 @@ const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
 export function CanvasBoard({
   document,
   selectedNodeId,
-  selectedNodeIds,
   onCreateNodeAt,
   onDeleteNode,
   onMoveNodeEnd,
   onSelectNode,
   onOpenNode,
-  onToggleNodeForCodex,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
   const isDraggingRef = useRef(false);
   const openNodeRef = useRef(onOpenNode);
   const selectNodeRef = useRef(onSelectNode);
-  const toggleNodeForCodexRef = useRef(onToggleNodeForCodex);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [localNodes, setLocalNodes] = useState<Array<Node<NoteNodeData>>>([]);
 
   useEffect(() => {
     openNodeRef.current = onOpenNode;
     selectNodeRef.current = onSelectNode;
-    toggleNodeForCodexRef.current = onToggleNodeForCodex;
-  }, [onOpenNode, onSelectNode, onToggleNodeForCodex]);
+  }, [onOpenNode, onSelectNode]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -109,15 +101,13 @@ export function CanvasBoard({
       position: { x: node.x, y: node.y },
       data: {
         node,
-        isCodexSelected: selectedNodeIds.has(node.id),
         onOpenNode: (nodeId: string) => openNodeRef.current(nodeId),
         onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
-        onToggleNodeForCodex: (nodeId: string) => toggleNodeForCodexRef.current(nodeId),
       },
       selected: node.id === selectedNodeId,
       draggable: true,
     }));
-  }, [document, selectedNodeIds, selectedNodeId]);
+  }, [document, selectedNodeId]);
 
   useEffect(() => {
     if (isDraggingRef.current) {
@@ -278,7 +268,7 @@ export function CanvasBoard({
 }
 
 function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boolean }) {
-  const { node, isCodexSelected, onOpenNode, onSelectNode, onToggleNodeForCodex } = data;
+  const { node, onOpenNode, onSelectNode } = data;
 
   return (
     <button
@@ -296,14 +286,6 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
             </span>
           ))}
         </div>
-        <label className={styles.canvasToggle} onClick={(event) => event.stopPropagation()}>
-          <input
-            checked={isCodexSelected}
-            onChange={() => onToggleNodeForCodex(node.id)}
-            type="checkbox"
-          />
-          <span>Codex</span>
-        </label>
       </div>
       <strong className={styles.canvasNodeTitle}>{node.title}</strong>
       <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>

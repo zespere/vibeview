@@ -101,7 +101,6 @@ export default function Home() {
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
-  const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<Set<string>>(new Set());
   const [canvasDraftTitle, setCanvasDraftTitle] = useState("");
   const [canvasDraftDescription, setCanvasDraftDescription] = useState("");
   const [canvasDraftTags, setCanvasDraftTags] = useState("");
@@ -147,9 +146,10 @@ export default function Home() {
     canvasDocument?.edges.filter((edge) => edge.target_node_id === selectedCanvasNodeId) ?? [];
   const sampleRepos = Object.entries(status?.sample_repos ?? {});
   const currentRailWidth = isRailExpanded ? railWidth : 72;
+  const activeRepoPath = (project?.repo_path || repoPath).trim();
   const activeProjectTreeItem = useMemo(
-    () => projectsTree.find((item) => item.repo_path === (project?.repo_path ?? repoPath.trim())) ?? null,
-    [project?.repo_path, projectsTree, repoPath],
+    () => projectsTree.find((item) => item.repo_path === activeRepoPath) ?? null,
+    [activeRepoPath, projectsTree],
   );
   const activeConversationSummary = useMemo(
     () =>
@@ -298,15 +298,6 @@ export default function Home() {
     setOpenTabs((current) =>
       current.filter((tab) => tab.type === "view" || validNodeIds.has(tab.nodeId)),
     );
-    setSelectedCanvasNodeIds((current) => {
-      const next = new Set<string>();
-      current.forEach((nodeId) => {
-        if (validNodeIds.has(nodeId)) {
-          next.add(nodeId);
-        }
-      });
-      return next;
-    });
 
     if (selectedCanvasNodeId && !validNodeIds.has(selectedCanvasNodeId)) {
       const fallbackNodeId = canvasDocument.nodes[0]?.id ?? null;
@@ -558,19 +549,19 @@ export default function Home() {
       setErrorMessage(null);
       setComposerStatus("Building the project and refreshing notes...");
       ensuredConversationId =
-        activeConversationId && activeConversationRepoPath === repoPath && activeConversationId !== "default"
+        activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
           ? activeConversationId
-          : await createConversationForProject(repoPath, deriveConversationTitle(prompt));
+          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt));
       if (!ensuredConversationId) {
         setIsBuilding(false);
         return;
       }
-      await persistConversationMessages(repoPath, ensuredConversationId, pendingMessages);
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
       const response = await buildProjectFromPrompt(
-        repoPath,
+        activeRepoPath,
         prompt,
-        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeIds),
-        [...selectedCanvasNodeIds],
+        buildSelectedNoteContext(canvasDocument),
+        [],
       );
       setCanvasDocument(response.document);
       setComposerStatus(response.summary);
@@ -583,9 +574,9 @@ export default function Home() {
       };
       const nextMessages = [...pendingMessages, assistantMessage];
       setConsoleMessages(nextMessages);
-      await persistConversationMessages(repoPath, ensuredConversationId, nextMessages);
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
       setCodexPrompt("");
-      await refreshCommitStatus(repoPath);
+      await refreshCommitStatus(activeRepoPath);
     } catch (error) {
       setComposerStatus("Build failed.");
       setErrorMessage(getErrorMessage(error));
@@ -601,7 +592,7 @@ export default function Home() {
       ];
       setConsoleMessages(nextMessages);
       if (ensuredConversationId) {
-        await persistConversationMessages(repoPath, ensuredConversationId, nextMessages);
+        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
       }
     } finally {
       setIsBuilding(false);
@@ -615,7 +606,7 @@ export default function Home() {
   }
 
   function handleCommitClick() {
-    if (!repoPath.trim() || !commitStatus?.has_changes || isCommitting) {
+    if (!activeRepoPath || !commitStatus?.has_changes || isCommitting) {
       return;
     }
     startCodexTransition(() => {
@@ -624,9 +615,9 @@ export default function Home() {
           setIsCommitting(true);
           setErrorMessage(null);
           setComposerStatus("Creating commit...");
-          const response = await createProjectCommit(repoPath.trim(), commitStatus.suggested_message ?? undefined);
+          const response = await createProjectCommit(activeRepoPath, commitStatus.suggested_message ?? undefined);
           setComposerStatus(response.summary);
-          await refreshCommitStatus(repoPath.trim());
+          await refreshCommitStatus(activeRepoPath);
           setConsoleMessages((current) => [
             ...current,
             {
@@ -809,7 +800,6 @@ export default function Home() {
           setCanvasDocument(response.document);
           setSelectedCanvasNodeId(null);
           setOpenCanvasNodeIds([]);
-          setSelectedCanvasNodeIds(new Set());
           setComposerStatus("Canvas reset.");
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
@@ -917,18 +907,6 @@ export default function Home() {
       const next = current.filter((item) => item.id !== tabId);
       if (activeTabId === tabId) {
         setActiveTabId(next.at(-1)?.id ?? "view:notes");
-      }
-      return next;
-    });
-  }
-
-  function handleToggleCanvasNodeForCodex(nodeId: string) {
-    setSelectedCanvasNodeIds((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
       }
       return next;
     });
@@ -1068,14 +1046,14 @@ export default function Home() {
                     Commit
                   </button>
                   <span className={styles.buildComposerMeta}>
-                    {selectedCanvasNodeIds.size > 0
-                      ? `${selectedCanvasNodeIds.size} note${selectedCanvasNodeIds.size === 1 ? "" : "s"} selected`
-                      : "No notes selected"}
+                    {canvasDocument?.nodes.length
+                      ? `Using top ${Math.min(canvasDocument.nodes.length, 12)} notes automatically`
+                      : "No notes available"}
                   </span>
                 </div>
                 <button
                   className={styles.primaryButton}
-                  disabled={isBuilding || codexPending || !repoPath.trim() || !codexPrompt.trim()}
+                  disabled={isBuilding || codexPending || !activeRepoPath || !codexPrompt.trim()}
                   onClick={handleSubmitArchitecturePrompt}
                   type="button"
                 >
@@ -1116,9 +1094,7 @@ export default function Home() {
               }}
               onOpenNode={openCanvasNode}
               onSelectNode={setSelectedCanvasNodeId}
-              onToggleNodeForCodex={handleToggleCanvasNodeForCodex}
               selectedNodeId={selectedCanvasNodeId}
-              selectedNodeIds={selectedCanvasNodeIds}
             />
           )}
         </div>
@@ -1828,7 +1804,6 @@ export default function Home() {
               <>
                 <span className={styles.railMeta}>Nodes {canvasDocument?.nodes.length ?? 0}</span>
                 <span className={styles.railMeta}>Open {openCanvasNodes.length}</span>
-                <span className={styles.railMeta}>Codex {selectedCanvasNodeIds.size}</span>
               </>
             ) : null}
             <button
@@ -2109,17 +2084,13 @@ function findCanvasNodeTitle(document: CanvasDocument | null, nodeId: string) {
   return document?.nodes.find((item) => item.id === nodeId)?.title ?? nodeId;
 }
 
-function buildSelectedNoteContext(document: CanvasDocument | null, selectedNodeIds: Set<string>) {
-  if (!document || selectedNodeIds.size === 0) {
+function buildSelectedNoteContext(document: CanvasDocument | null) {
+  if (!document || document.nodes.length === 0) {
     return undefined;
   }
 
-  const selectedNodes: CanvasNode[] = document.nodes.filter((node) => selectedNodeIds.has(node.id));
-  if (selectedNodes.length === 0) {
-    return undefined;
-  }
-
-  return selectedNodes
+  return rankRelevantNotes(document)
+    .slice(0, 12)
     .map((node) => {
       const tags = node.tags.length > 0 ? node.tags.join(", ") : "untagged";
       const files = node.linked_files.length > 0 ? node.linked_files.join(", ") : "none";
@@ -2129,10 +2100,39 @@ function buildSelectedNoteContext(document: CanvasDocument | null, selectedNodeI
         `Tags: ${tags}`,
         `Files: ${files}`,
         `Symbols: ${symbols}`,
-        `Description: ${node.description || "No description yet."}`,
+        `Summary: ${summarizeNote(node.description)}`,
       ].join("\n");
     })
     .join("\n\n");
+}
+
+function rankRelevantNotes(document: CanvasDocument) {
+  return [...document.nodes].sort((left, right) => {
+    const leftScore = scoreNote(left);
+    const rightScore = scoreNote(right);
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore;
+    }
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function scoreNote(node: CanvasNode) {
+  return (
+    node.linked_files.length * 5 +
+    node.linked_symbols.length * 6 +
+    node.tags.length * 2 +
+    Math.min(node.description.trim().length, 220) / 55
+  );
+}
+
+function summarizeNote(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "No description yet.";
+  }
+  const collapsed = trimmed.replace(/\s+/g, " ");
+  return collapsed.length > 120 ? `${collapsed.slice(0, 117).trim()}...` : collapsed;
 }
 
 function getErrorMessage(error: unknown) {
