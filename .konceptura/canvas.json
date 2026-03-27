@@ -1,0 +1,152 @@
+{
+  "edges": [
+    {
+      "id": "edge_295f7f3b3f",
+      "label": "configures",
+      "source_node_id": "node_d17c099775",
+      "target_node_id": "node_94ac63ebd6"
+    },
+    {
+      "id": "edge_3907248e90",
+      "label": "opens",
+      "source_node_id": "node_94ac63ebd6",
+      "target_node_id": "node_42d0720a90"
+    },
+    {
+      "id": "edge_d31854ffbd",
+      "label": "switches to",
+      "source_node_id": "node_94ac63ebd6",
+      "target_node_id": "node_18788602b7"
+    },
+    {
+      "id": "edge_cc21517783",
+      "label": "persists through",
+      "source_node_id": "node_42d0720a90",
+      "target_node_id": "node_d17c099775"
+    },
+    {
+      "id": "edge_722de93b77",
+      "label": "depends on",
+      "source_node_id": "node_18788602b7",
+      "target_node_id": "node_d17c099775"
+    },
+    {
+      "id": "edge_d80a2a7ff6",
+      "label": "styles",
+      "source_node_id": "node_b6a86351cc",
+      "target_node_id": "node_94ac63ebd6"
+    }
+  ],
+  "nodes": [
+    {
+      "description": "The main frontend screen is a single client-side workspace that switches between Notes, Inspect, and Project views while also managing tabs, side rail state, active repository, and console activity. It eagerly refreshes status, project data, structure, search, impact results, and canvas content on load, so most user flows are coordinated here. This file acts as the orchestration layer rather than a thin page wrapper.",
+      "id": "node_94ac63ebd6",
+      "linked_files": [
+        "frontend/app/page.tsx"
+      ],
+      "linked_symbols": [
+        "Home"
+      ],
+      "tags": [
+        "screen",
+        "state",
+        "orchestration"
+      ],
+      "title": "Workspace Shell",
+      "x": 120,
+      "y": 120
+    },
+    {
+      "description": "The notes view is an editable architecture canvas where nodes can be created, moved, opened, updated, and deleted, with edges describing relationships between notes. The frontend board handles spatial interaction and selection, while the backend persists per-repository canvas data under `.konceptura/canvas.json`. This makes the architecture map a first-class workspace artifact tied to the current repo.",
+      "id": "node_42d0720a90",
+      "linked_files": [
+        "frontend/components/canvas-board.tsx",
+        "backend/app/canvas_service.py",
+        "backend/data/canvas.json"
+      ],
+      "linked_symbols": [
+        "CanvasBoard",
+        "CanvasService.get_document_for_repo",
+        "CanvasService.create_node",
+        "CanvasService.append_generated_map"
+      ],
+      "tags": [
+        "feature",
+        "canvas",
+        "workspace"
+      ],
+      "title": "Notes Canvas",
+      "x": 440,
+      "y": 120
+    },
+    {
+      "description": "The inspect area exposes structure browsing, symbol search, relationship lookup, raw query execution, and heuristic impact analysis over the indexed code graph. The tree component renders hierarchical structure state from the frontend, while backend graph services translate that into Memgraph-backed symbol and relationship queries. This is the read-heavy analysis side of the product.",
+      "id": "node_18788602b7",
+      "linked_files": [
+        "frontend/components/structure-tree.tsx",
+        "frontend/lib/api.ts",
+        "backend/app/services.py",
+        "backend/app/main.py"
+      ],
+      "linked_symbols": [
+        "StructureTree",
+        "GraphService.list_symbols",
+        "GraphService.get_relationships",
+        "GraphService.search_symbols_ranked"
+      ],
+      "tags": [
+        "feature",
+        "graph",
+        "analysis"
+      ],
+      "title": "Code Inspect",
+      "x": 760,
+      "y": 120
+    },
+    {
+      "description": "Project selection, workspace health, conversation history, AGENTS.md editing, commit status, planning, and build flows are centered around the project endpoints and services. The backend tracks the active repo, recent projects, workspace file visibility, and conversation metadata, then layers Codex-based planning and code-change execution on top. This is the operational layer that turns a repo into an editable working session.",
+      "id": "node_d17c099775",
+      "linked_files": [
+        "backend/app/project_service.py",
+        "backend/app/codex_service.py",
+        "backend/app/main.py",
+        "frontend/lib/api.ts"
+      ],
+      "linked_symbols": [
+        "ProjectService.get_workspace_status",
+        "ProjectService.list_project_items",
+        "CodexService.plan_project",
+        "CodexService.build_project"
+      ],
+      "tags": [
+        "feature",
+        "project",
+        "automation"
+      ],
+      "title": "Project Control",
+      "x": 120,
+      "y": 340
+    },
+    {
+      "description": "The interface uses a small but consistent styling system based on global CSS variables, IBM Plex fonts, and one large page-scoped CSS module that defines the workspace shell, rail, panels, tree, and canvas presentation. Styling is centralized enough that the app reads as one cohesive tool rather than separate screens. Layout and theme decisions are driven from the App Router root and shared CSS tokens.",
+      "id": "node_b6a86351cc",
+      "linked_files": [
+        "frontend/app/layout.tsx",
+        "frontend/app/globals.css",
+        "frontend/app/page.module.css"
+      ],
+      "linked_symbols": [
+        "RootLayout"
+      ],
+      "tags": [
+        "styling",
+        "layout",
+        "frontend"
+      ],
+      "title": "UI System",
+      "x": 440,
+      "y": 340
+    }
+  ],
+  "repo_path": "/home/wniak/konceptura"
+}
