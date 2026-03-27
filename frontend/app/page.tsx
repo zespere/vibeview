@@ -17,13 +17,14 @@ import {
   fetchProjectConversation,
   fetchProjectsTree,
   fetchProject,
+  fetchProjectWorkspaceStatus,
   fetchProjectAgents,
   fetchRelationships,
   fetchStatus,
   fetchStructure,
   createProjectConversation,
+  generateCanvasFromPrompt,
   runImpactAnalysis,
-  runIndex,
   runQuery,
   resetCanvas,
   updateProject,
@@ -39,6 +40,7 @@ import {
   type ConversationSummary,
   type ProjectProfile,
   type ProjectTreeItem,
+  type ProjectWorkspaceStatusResponse,
   type QueryMode,
   type QueryResponse,
   type RelationshipRecord,
@@ -70,6 +72,7 @@ export default function Home() {
   const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:notes");
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [project, setProject] = useState<ProjectProfile | null>(null);
+  const [workspaceStatus, setWorkspaceStatus] = useState<ProjectWorkspaceStatusResponse | null>(null);
   const [projectsTree, setProjectsTree] = useState<ProjectTreeItem[]>([]);
   const [isProjectsSectionExpanded, setIsProjectsSectionExpanded] = useState(true);
   const [expandedProjectPaths, setExpandedProjectPaths] = useState<Set<string>>(new Set());
@@ -78,8 +81,6 @@ export default function Home() {
   const [agentsDocument, setAgentsDocument] = useState<AgentsDocumentResponse | null>(null);
   const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
-  const [cleanIndex, setCleanIndex] = useState(true);
-  const [dryRunIndex, setDryRunIndex] = useState(false);
   const [inspectView, setInspectView] = useState<"structure" | "search" | "impact">("structure");
   const [queryMode, setQueryMode] = useState<QueryMode>("search");
   const [queryInput, setQueryInput] = useState("create user");
@@ -98,6 +99,7 @@ export default function Home() {
   const [isBuilding, setIsBuilding] = useState(false);
   const [isPlanning, setIsPlanning] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
+  const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
@@ -121,7 +123,6 @@ export default function Home() {
   const [statusPending, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
   const [agentsPending, startAgentsTransition] = useTransition();
-  const [indexPending, startIndexTransition] = useTransition();
   const [queryPending, startQueryTransition] = useTransition();
   const [relationshipsPending, startRelationshipsTransition] = useTransition();
   const [, startStructureTransition] = useTransition();
@@ -251,6 +252,7 @@ export default function Home() {
       setConsoleMessages([]);
       setPendingPlan(null);
       setCommitStatus(null);
+      setWorkspaceStatus(null);
       return;
     }
     startAgentsTransition(() => {
@@ -263,6 +265,7 @@ export default function Home() {
       void refreshProjectsTree();
     });
     void refreshCommitStatus(project.repo_path);
+    void refreshWorkspaceStatus(project.repo_path);
   }, [project?.repo_path]);
 
   useEffect(() => {
@@ -270,6 +273,7 @@ export default function Home() {
       return;
     }
     void refreshCommitStatus(canvasDocument.repo_path);
+    void refreshWorkspaceStatus(canvasDocument.repo_path);
   }, [canvasDocument]);
 
   useEffect(() => {
@@ -390,6 +394,15 @@ export default function Home() {
     }
   }
 
+  async function refreshWorkspaceStatus(nextRepoPath: string) {
+    try {
+      const response = await fetchProjectWorkspaceStatus(nextRepoPath);
+      setWorkspaceStatus(response);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }
+
   async function refreshAgentsDocument(nextRepoPath?: string) {
     try {
       setErrorMessage(null);
@@ -471,6 +484,35 @@ export default function Home() {
     }
   }
 
+  async function handleGenerateCanvas() {
+    const targetRepoPath = activeRepoPath;
+    if (!targetRepoPath) {
+      return;
+    }
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setIsGeneratingCanvas(true);
+          setErrorMessage(null);
+          setComposerStatus("Generating project canvas...");
+          const response = await generateCanvasFromPrompt(
+            targetRepoPath,
+            buildCanvasSetupPrompt(targetRepoPath, workspaceStatus?.visible_file_count ?? 0),
+          );
+          setCanvasDocument(response.document);
+          setComposerStatus(response.summary);
+          await refreshWorkspaceStatus(targetRepoPath);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+          setComposerStatus("Canvas generation failed.");
+        } finally {
+          setIsGeneratingCanvas(false);
+        }
+      })();
+    });
+  }
+
   async function refreshCommitStatus(nextRepoPath?: string) {
     const targetRepoPath = nextRepoPath ?? repoPath.trim();
     if (!targetRepoPath) {
@@ -500,26 +542,6 @@ export default function Home() {
       setStructureRelationships([]);
       setErrorMessage(getErrorMessage(error));
     }
-  }
-
-  async function handleIndex() {
-    startIndexTransition(() => {
-      void (async () => {
-        try {
-          setErrorMessage(null);
-          const nextStatus = await runIndex(repoPath, cleanIndex, dryRunIndex);
-          setStatus(nextStatus);
-          if (!dryRunIndex) {
-            setStructure(null);
-            setSelectedTreeNode(null);
-            setStructureRelationships([]);
-          }
-          void refreshCanvas(repoPath);
-        } catch (error) {
-          setErrorMessage(getErrorMessage(error));
-        }
-      })();
-    });
   }
 
   async function submitQuery(input: string, mode: QueryMode) {
@@ -1314,6 +1336,24 @@ export default function Home() {
         >
           {!canvasDocument ? (
             <EmptyState message="Load or create a canvas for this repo. Double-click empty space to add a node." />
+          ) : canvasDocument.nodes.length === 0 && workspaceStatus?.has_project_files ? (
+            <div className={styles.canvasSetupCard}>
+              <strong className={styles.resultTitle}>Do you want to set up the canvas?</strong>
+              <p className={styles.resultMeta}>
+                This project already has {workspaceStatus.visible_file_count} file
+                {workspaceStatus.visible_file_count === 1 ? "" : "s"}, but the canvas is blank.
+              </p>
+              <div className={styles.actionsRow}>
+                <button
+                  className={styles.primaryButton}
+                  disabled={isGeneratingCanvas}
+                  onClick={handleGenerateCanvas}
+                  type="button"
+                >
+                  {isGeneratingCanvas ? "Generating..." : "Set up canvas"}
+                </button>
+              </div>
+            </div>
           ) : (
             <CanvasBoard
               onDeleteNode={handleDeleteCanvasNode}
@@ -1728,23 +1768,21 @@ export default function Home() {
             </div>
           ) : null}
 
-          <div className={styles.optionGrid}>
-            <label className={styles.checkboxRow}>
-              <input checked={cleanIndex} onChange={(event) => setCleanIndex(event.target.checked)} type="checkbox" />
-              <span>Clean rebuild</span>
-            </label>
-            <label className={styles.checkboxRow}>
-              <input checked={dryRunIndex} onChange={(event) => setDryRunIndex(event.target.checked)} type="checkbox" />
-              <span>Dry run only</span>
-            </label>
-          </div>
-
           <div className={styles.actionsRow}>
             <button className={styles.primaryButton} disabled={projectPending} onClick={handleSaveProject} type="button">
               {projectPending ? "Saving..." : "Open project"}
             </button>
-            <button className={styles.secondaryButton} disabled={indexPending} onClick={handleIndex} type="button">
-              {indexPending ? "Submitting..." : dryRunIndex ? "Preview index" : "Index repo"}
+            <button
+              className={styles.secondaryButton}
+              disabled={!repoPath.trim() || isGeneratingCanvas}
+              onClick={handleGenerateCanvas}
+              type="button"
+            >
+              {isGeneratingCanvas
+                ? "Generating..."
+                : canvasDocument?.nodes.length
+                  ? "Regenerate canvas"
+                  : "Set up canvas"}
             </button>
             <button className={styles.secondaryButton} disabled={!repoPath.trim()} onClick={handleResetCanvas} type="button">
               Reset canvas
@@ -2344,6 +2382,16 @@ function buildConversationContext(messages: ConversationMessage[]) {
       return `${message.role.toUpperCase()}${title}: ${message.content.trim()}`;
     })
     .join("\n\n");
+}
+
+function buildCanvasSetupPrompt(repoPath: string, visibleFileCount: number) {
+  const projectName = PathLabel(repoPath);
+  return [
+    `Map the existing project "${projectName}" into a compact visual workspace.`,
+    "Create a clean architecture map for the current codebase, not a speculative redesign.",
+    "Prefer nodes for screens, feature areas, state, data flow, services, and styling system.",
+    `The repository currently has about ${visibleFileCount} visible project file${visibleFileCount === 1 ? "" : "s"}.`,
+  ].join(" ");
 }
 
 function rankRelevantNotes(document: CanvasDocument) {

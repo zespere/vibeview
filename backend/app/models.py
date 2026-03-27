@@ -56,6 +56,13 @@ class ProjectProfileResponse(BaseModel):
     is_configured: bool
 
 
+class ProjectWorkspaceStatusResponse(BaseModel):
+    repo_path: str
+    has_project_files: bool
+    visible_file_count: int
+    has_canvas_nodes: bool
+
+
 class ConversationMessage(BaseModel):
     id: str
     role: Literal["user", "assistant"]

@@ -18,6 +18,7 @@ from .models import (
     ProjectProfile,
     ProjectProfileUpdateRequest,
     ProjectTreeItem,
+    ProjectWorkspaceStatusResponse,
 )
 
 
@@ -198,6 +199,17 @@ class ProjectService:
             summary=summary,
         )
 
+    def get_workspace_status(self, repo_path: str, has_canvas_nodes: bool) -> ProjectWorkspaceStatusResponse:
+        normalized_repo_path = self._normalize_repo_path(repo_path)
+        repo_root = Path(normalized_repo_path)
+        visible_file_count = self._count_visible_project_files(repo_root)
+        return ProjectWorkspaceStatusResponse(
+            repo_path=normalized_repo_path,
+            has_project_files=visible_file_count > 0,
+            visible_file_count=visible_file_count,
+            has_canvas_nodes=has_canvas_nodes,
+        )
+
     def _normalize_repo_path(self, repo_path: str) -> str:
         normalized = repo_path.strip()
         if not normalized:
@@ -285,3 +297,18 @@ class ProjectService:
             return None
         resolved = result.stdout.strip()
         return Path(resolved) if resolved else None
+
+    def _count_visible_project_files(self, repo_root: Path) -> int:
+        ignored_dir_names = {".git", ".konceptura", "node_modules", ".next", "dist", "build", ".venv", "__pycache__"}
+        count = 0
+        for path in repo_root.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(repo_root)
+            parts = relative.parts
+            if any(part in ignored_dir_names for part in parts[:-1]):
+                continue
+            if parts and parts[0].startswith("."):
+                continue
+            count += 1
+        return count

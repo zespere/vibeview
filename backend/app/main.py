@@ -38,6 +38,7 @@ from .models import (
     ProjectProfileResponse,
     ProjectTreeResponse,
     ProjectProfileUpdateRequest,
+    ProjectWorkspaceStatusResponse,
     QueryRequest,
     QueryResponse,
     RelationshipsResponse,
@@ -121,6 +122,13 @@ def get_status() -> StatusResponse:
 def get_project() -> ProjectProfileResponse:
     project = project_service.get_project()
     return ProjectProfileResponse(project=project, is_configured=project.is_configured)
+
+
+@app.get("/project/workspace-status", response_model=ProjectWorkspaceStatusResponse)
+def get_project_workspace_status(repo_path: str) -> ProjectWorkspaceStatusResponse:
+    resolved_repo_path = str(Path(repo_path).resolve())
+    has_canvas_nodes = len(canvas_service.get_document_for_repo(resolved_repo_path).nodes) > 0
+    return project_service.get_workspace_status(resolved_repo_path, has_canvas_nodes)
 
 
 @app.get("/projects/tree", response_model=ProjectTreeResponse)

@@ -37,6 +37,13 @@ export interface ProjectProfileResponse {
   is_configured: boolean;
 }
 
+export interface ProjectWorkspaceStatusResponse {
+  repo_path: string;
+  has_project_files: boolean;
+  visible_file_count: number;
+  has_canvas_nodes: boolean;
+}
+
 export interface ConversationMessage {
   id: string;
   role: "user" | "assistant";
@@ -276,6 +283,13 @@ export function fetchStatus() {
 
 export function fetchProject() {
   return apiRequest<ProjectProfileResponse>("/project", { cache: "no-store" });
+}
+
+export function fetchProjectWorkspaceStatus(repoPath: string) {
+  return apiRequest<ProjectWorkspaceStatusResponse>(
+    `/project/workspace-status?repo_path=${encodeURIComponent(repoPath)}`,
+    { cache: "no-store" },
+  );
 }
 
 export function fetchProjectsTree() {
