@@ -557,7 +557,11 @@ export default function Home() {
     }
   }
 
-  async function createConversationForProject(nextRepoPath: string, title = "New conversation") {
+  async function createConversationForProject(
+    nextRepoPath: string,
+    title = "New conversation",
+    options?: { preserveActiveView?: boolean },
+  ) {
     try {
       setErrorMessage(null);
       const response = await createProjectConversation(nextRepoPath, title);
@@ -567,7 +571,9 @@ export default function Home() {
       setPendingPlan(null);
       setComposerStatus(`Created ${response.conversation.title}.`);
       await refreshProjectsTree();
-      openViewTab("notes");
+      if (!options?.preserveActiveView) {
+        openViewTab("notes");
+      }
       return response.conversation.id;
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -707,7 +713,10 @@ export default function Home() {
     });
   }
 
-  async function submitBuildPrompt(promptValue = codexPrompt.trim()) {
+  async function submitBuildPrompt(
+    promptValue = codexPrompt.trim(),
+    options?: { preserveActiveView?: boolean },
+  ) {
     const prompt = promptValue.trim();
     if (!prompt) {
       return;
@@ -733,7 +742,7 @@ export default function Home() {
       ensuredConversationId =
         activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
           ? activeConversationId
-          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt));
+          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
       if (!ensuredConversationId) {
         setIsBuilding(false);
         return;
@@ -843,7 +852,10 @@ export default function Home() {
     });
   }
 
-  async function submitPlanPrompt(promptValue = codexPrompt.trim()) {
+  async function submitPlanPrompt(
+    promptValue = codexPrompt.trim(),
+    options?: { preserveActiveView?: boolean },
+  ) {
     const prompt = promptValue.trim();
     if (!prompt) {
       return;
@@ -872,7 +884,7 @@ export default function Home() {
       ensuredConversationId =
         activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
           ? activeConversationId
-          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt));
+          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
       if (!ensuredConversationId) {
         setIsPlanning(false);
         return;
@@ -963,7 +975,7 @@ export default function Home() {
     }
   }
 
-  async function submitAskPrompt(promptValue: string) {
+  async function submitAskPrompt(promptValue: string, options?: { preserveActiveView?: boolean }) {
     const prompt = promptValue.trim();
     if (!prompt || !activeRepoPath) {
       return;
@@ -985,7 +997,7 @@ export default function Home() {
       ensuredConversationId =
         activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
           ? activeConversationId
-          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt));
+          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
       if (!ensuredConversationId) {
         return;
       }
@@ -1561,7 +1573,7 @@ export default function Home() {
           run: () => {
             setCommandInput("");
             startCodexTransition(() => {
-              void submitAskPrompt(question);
+              void submitAskPrompt(question, { preserveActiveView: true });
             });
             setCommandPaletteMode("chat");
           },
@@ -1587,7 +1599,7 @@ export default function Home() {
               setIsCommandPaletteOpen(true);
               setCommandPaletteMode("chat");
               startCodexTransition(() => {
-                void submitBuildPrompt(buildPrompt);
+                void submitBuildPrompt(buildPrompt, { preserveActiveView: true });
               });
             },
           },
@@ -1606,7 +1618,7 @@ export default function Home() {
               setIsCommandPaletteOpen(true);
               setCommandPaletteMode("chat");
               startCodexTransition(() => {
-                void submitPlanPrompt(planPrompt);
+                void submitPlanPrompt(planPrompt, { preserveActiveView: true });
               });
             },
           },
