@@ -1760,16 +1760,12 @@
   background: transparent;
 }
 
-.canvasBoard :global(.react-flow__edges),
-.canvasBoard :global(.react-flow__viewport),
-.canvasBoard :global(.react-flow__nodes) {
-  position: relative;
-  z-index: 2;
+.canvasBoard :global(.react-flow__edges) {
+  z-index: 1;
 }
 
-.canvasBoard :global(.react-flow__node) {
-  position: relative;
-  z-index: 3;
+.canvasBoard :global(.react-flow__nodes) {
+  z-index: 2;
 }
 
 .canvasBoard :global(.react-flow__pane) {

@@ -140,27 +140,39 @@ export function CanvasBoard({
   }, [derivedNodes]);
 
   const edges: Edge[] = useMemo(
-    () =>
-      (document?.edges ?? [])
+    () => {
+      const nodesById = new Map((document?.nodes ?? []).map((node) => [node.id, node]));
+
+      return (document?.edges ?? [])
         .filter((edge) =>
           selectedNodeIds.length > 0
             ? selectedNodeIds.includes(edge.source_node_id) || selectedNodeIds.includes(edge.target_node_id)
             : false,
         )
-        .map((edge) => ({
+        .map((edge) => {
+          const sourceNode = nodesById.get(edge.source_node_id);
+          const targetNode = nodesById.get(edge.target_node_id);
+          const sourceSide = sourceNode && targetNode ? resolveHandleSide(sourceNode, targetNode) : "bottom";
+          const targetSide = sourceNode && targetNode ? resolveHandleSide(targetNode, sourceNode) : "top";
+
+          return {
           id: edge.id,
           source: edge.source_node_id,
+          sourceHandle: `${edge.source_node_id}-source-${sourceSide}`,
           target: edge.target_node_id,
+          targetHandle: `${edge.target_node_id}-target-${targetSide}`,
           label: edge.label || undefined,
-          type: "default",
+          type: "smoothstep",
           animated: false,
           style: { stroke: "#8b5c32", strokeWidth: 2.25 },
           labelStyle: { fill: "#6f451f", fontWeight: 600 },
           labelBgStyle: { fill: "#fff8ef", fillOpacity: 0.92 },
           labelBgPadding: [6, 4],
           labelBgBorderRadius: 6,
-        })),
-    [document?.edges, selectedNodeIds],
+          };
+        });
+    },
+    [document?.edges, document?.nodes, selectedNodeIds],
   );
 
   const handleNodeDragStart: NodeMouseHandler<Node<NoteNodeData>> = () => {
@@ -399,8 +411,14 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
 
   return (
     <div className={styles.canvasNodeShell}>
-      <Handle className={styles.canvasNodeHandle} id={`${node.id}-target`} position={Position.Top} type="target" />
-      <Handle className={styles.canvasNodeHandle} id={`${node.id}-source`} position={Position.Bottom} type="source" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-source-top`} position={Position.Top} type="source" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-source-right`} position={Position.Right} type="source" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-source-bottom`} position={Position.Bottom} type="source" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-source-left`} position={Position.Left} type="source" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-top`} position={Position.Top} type="target" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-right`} position={Position.Right} type="target" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-bottom`} position={Position.Bottom} type="target" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-left`} position={Position.Left} type="target" />
       <button
         className={
           selected
@@ -443,6 +461,17 @@ function compactDescription(value: string) {
     return "No description yet.";
   }
   return value.length > 180 ? `${value.slice(0, 177)}...` : value;
+}
+
+function resolveHandleSide(from: CanvasNode, to: CanvasNode) {
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+
+  if (Math.abs(deltaX) > Math.abs(deltaY)) {
+    return deltaX >= 0 ? "right" : "left";
+  }
+
+  return deltaY >= 0 ? "bottom" : "top";
 }
 
 function buildViewportStorageKey(repoPath: string) {
