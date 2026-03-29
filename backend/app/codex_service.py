@@ -214,7 +214,8 @@ class CodexService:
 
         repo_dir = Path(repo_path)
         generation_prompt = (
-            "You are mapping product architecture into editable workspace notes.\n"
+            "You are mapping a software project into editable workspace notes on a visual canvas.\n"
+            "The notes should represent business logic and architecture with only the most relevant implementation details.\n"
             "Inspect the repository and the user prompt, then return JSON only.\n"
             "Do not modify files.\n\n"
             "Return exactly this shape:\n"
@@ -223,8 +224,8 @@ class CodexService:
             '  "nodes": [\n'
             '    {\n'
             '      "title": "string",\n'
-            '      "description": "2-4 sentence note about responsibility and behavior",\n'
-            '      "tags": ["feature"],\n'
+            '      "description": "2-4 sentence note about responsibility, business behavior, and only the most relevant implementation evidence",\n'
+            '      "tags": ["workflow"],\n'
             '      "linked_files": ["src/app.tsx"],\n'
             '      "linked_symbols": ["app.main"]\n'
             '    }\n'
@@ -238,9 +239,18 @@ class CodexService:
             "  ]\n"
             "}\n\n"
             "Rules:\n"
-            "- 3 to 6 nodes only.\n"
+            "- There is no fixed low node limit. Create as many nodes as needed to represent the architecture clearly.\n"
+            "- For a small or medium app, 7 to 16 nodes is usually a good range.\n"
+            "- Each node should represent one meaningful responsibility, not a vague summary blob.\n"
             "- Titles must be short and human-readable.\n"
-            "- Focus on app architecture, features, screens, state, and data flow.\n"
+            "- Prefer domain and product language over implementation jargon.\n"
+            "- Focus on business capabilities, workflows, stateful areas, policies, boundaries, UI surfaces, integrations, and data flow.\n"
+            "- Good tag families are: domain, workflow, ui-surface, state, boundary, policy, integration, entity.\n"
+            "- A note may include limited implementation detail only to ground it in the codebase.\n"
+            "- Avoid catch-all notes when the responsibility can be split into clearer nodes.\n"
+            "- Avoid one note per file; map logical responsibilities instead.\n"
+            "- Every node should link to the most relevant files and symbols when evidence exists.\n"
+            "- Edges should describe how responsibilities interact, such as drives, validates, persists, renders, coordinates, or depends on.\n"
             "- If the repo is empty, propose a sensible first-pass architecture for the prompt.\n"
             "- JSON only. No markdown fences.\n\n"
             f"User prompt:\n{prompt.strip()}\n"
@@ -267,7 +277,6 @@ class CodexService:
             nodes = self._fallback_architecture_notes(prompt)
             return nodes, [], f"Created {len(nodes)} architecture notes from the prompt."
 
-        node_items = node_items[:6]
         summary = str(payload.get("summary") or f"Created {len(node_items)} architecture notes.").strip()
         if not node_items:
             node_items = self._fallback_architecture_notes(prompt)
@@ -478,24 +487,24 @@ class CodexService:
         root = prompt_value[:80]
         return [
             GeneratedCanvasNode(
-                title="App shell",
-                description=f"The main application shell for {root}. It owns routing, layout, and top-level composition.",
-                tags=["shell"],
+                title="Core workflow",
+                description=f"The central business workflow for {root}. This note should explain the main user outcome, what steps the system coordinates, and where implementation evidence currently lives.",
+                tags=["workflow", "domain"],
             ),
             GeneratedCanvasNode(
-                title="Primary screen",
-                description="The main screen users interact with first. It should present the core workflow in the simplest possible way.",
-                tags=["screen"],
+                title="Primary interface",
+                description="The main UI surface that exposes the core workflow to the user. It should describe what the screen or entry point lets the user do and how it connects to underlying logic.",
+                tags=["ui-surface"],
             ),
             GeneratedCanvasNode(
-                title="Data model",
-                description="The central data shape and CRUD behavior for the app. This note should track create, read, update, and delete expectations.",
-                tags=["data", "crud"],
+                title="State and rules",
+                description="The central stateful area and business rules for the app. This note should track the core data transitions, validations, and invariants that the implementation must preserve.",
+                tags=["state", "policy"],
             ),
             GeneratedCanvasNode(
-                title="UI state",
-                description="Local state, form state, loading state, and error handling for the main flow.",
-                tags=["state"],
+                title="External boundary",
+                description="The main persistence, API, or integration boundary the app depends on. This note should explain what crosses the boundary and how the core workflow relies on it.",
+                tags=["boundary", "integration"],
             ),
         ]
 

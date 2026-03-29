@@ -2389,7 +2389,8 @@ function buildCanvasSetupPrompt(repoPath: string, visibleFileCount: number) {
   return [
     `Map the existing project "${projectName}" into a compact visual workspace.`,
     "Create a clean architecture map for the current codebase, not a speculative redesign.",
-    "Prefer nodes for screens, feature areas, state, data flow, services, and styling system.",
+    "Represent business logic and architecture with only the most relevant implementation details.",
+    "Prefer nodes for domain areas, workflows, UI surfaces, stateful areas, boundaries, integrations, and policies.",
     `The repository currently has about ${visibleFileCount} visible project file${visibleFileCount === 1 ? "" : "s"}.`,
   ].join(" ");
 }
