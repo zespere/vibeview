@@ -183,27 +183,25 @@ class CanvasService:
         before_document = document.model_copy(deep=True)
         existing_titles = {node.title.strip().lower(): node for node in document.nodes}
         title_to_id: dict[str, str] = {}
-        start_x = 120
-        start_y = 120
-        gap_x = 320
-        gap_y = 220
         created_count = 0
-
-        index = len(document.nodes)
         for generated in nodes:
             normalized_title = generated.title.strip().lower()
             if not normalized_title or normalized_title in existing_titles or normalized_title in title_to_id:
                 continue
 
-            col = index % 3
-            row = index // 3
+            x, y = self._resolve_generated_node_position(
+                generated=generated,
+                generated_edges=edges,
+                existing_titles=existing_titles,
+                document=document,
+            )
             node = CanvasNode(
                 id=f"node_{uuid4().hex[:10]}",
                 title=generated.title.strip(),
                 description=generated.description.strip(),
                 tags=_normalize_tags(generated.tags),
-                x=start_x + col * gap_x,
-                y=start_y + row * gap_y,
+                x=x,
+                y=y,
                 linked_files=generated.linked_files,
                 linked_symbols=generated.linked_symbols,
             )
@@ -211,7 +209,6 @@ class CanvasService:
             title_to_id[normalized_title] = node.id
             existing_titles[normalized_title] = node
             created_count += 1
-            index += 1
 
         edge_keys = {
             (edge.source_node_id, edge.target_node_id, edge.label.strip().lower())
@@ -321,3 +318,64 @@ class CanvasService:
                 previous.linked_symbols != current.linked_symbols,
             ]
         )
+
+    def _resolve_generated_node_position(
+        self,
+        generated: GeneratedCanvasNode,
+        generated_edges: list[GeneratedCanvasEdge],
+        existing_titles: dict[str, CanvasNode],
+        document: CanvasDocument,
+    ) -> tuple[int, int]:
+        normalized_title = generated.title.strip().lower()
+        neighbor_positions: list[tuple[int, int]] = []
+        for edge in generated_edges:
+            source_title = edge.source_title.strip().lower()
+            target_title = edge.target_title.strip().lower()
+            if normalized_title not in {source_title, target_title}:
+                continue
+            other_title = target_title if source_title == normalized_title else source_title
+            existing = existing_titles.get(other_title)
+            if existing is not None:
+                neighbor_positions.append((existing.x, existing.y))
+
+        if neighbor_positions:
+            center_x = round(sum(x for x, _ in neighbor_positions) / len(neighbor_positions))
+            center_y = round(sum(y for _, y in neighbor_positions) / len(neighbor_positions))
+            return self._find_open_position(document, center_x + 280, center_y)
+
+        zone_x, zone_y = self._tag_zone_origin(generated.tags)
+        return self._find_open_position(document, zone_x, zone_y)
+
+    def _tag_zone_origin(self, tags: list[str]) -> tuple[int, int]:
+        tag_set = {tag.strip().lower() for tag in tags if tag.strip()}
+        if {"ui-surface", "screen", "layout", "shell"} & tag_set:
+            return (120, 120)
+        if {"workflow", "feature", "domain"} & tag_set:
+            return (460, 160)
+        if {"state", "entity", "policy"} & tag_set:
+            return (820, 140)
+        if {"boundary", "integration", "data", "persistence"} & tag_set:
+            return (1120, 220)
+        return (420, 420)
+
+    def _find_open_position(self, document: CanvasDocument, start_x: int, start_y: int) -> tuple[int, int]:
+        gap_x = 300
+        gap_y = 220
+        occupied = [(node.x, node.y) for node in document.nodes]
+        for col in range(0, 8):
+            x_candidates = [start_x] if col == 0 else [start_x + col * gap_x, start_x - col * gap_x]
+            for x in x_candidates:
+                for row in range(0, 12):
+                    y = start_y + row * gap_y
+                    if self._position_is_open(x, y, occupied):
+                        return (x, y)
+                    y_up = start_y - row * gap_y
+                    if row != 0 and self._position_is_open(x, y_up, occupied):
+                        return (x, y_up)
+        return (start_x, start_y)
+
+    def _position_is_open(self, x: int, y: int, occupied: list[tuple[int, int]]) -> bool:
+        for other_x, other_y in occupied:
+            if abs(other_x - x) < 220 and abs(other_y - y) < 140:
+                return False
+        return True

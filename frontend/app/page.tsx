@@ -119,6 +119,7 @@ export default function Home() {
   const [canvasDraftSymbols, setCanvasDraftSymbols] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
+  const expectedRepoPathRef = useRef("");
 
   const [statusPending, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
@@ -162,6 +163,12 @@ export default function Home() {
     () => projectsTree.find((item) => item.repo_path === activeRepoPath) ?? null,
     [activeRepoPath, projectsTree],
   );
+  const shouldShowCanvasSetup =
+    !!canvasDocument &&
+    canvasDocument.nodes.length === 0 &&
+    !!activeRepoPath &&
+    workspaceStatus?.repo_path === activeRepoPath &&
+    workspaceStatus.has_project_files;
   const activeConversationSummary = useMemo(
     () =>
       activeProjectTreeItem?.conversations.find(
@@ -184,6 +191,10 @@ export default function Home() {
     }
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
   }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding, isPlanning]);
+
+  useEffect(() => {
+    expectedRepoPathRef.current = activeRepoPath;
+  }, [activeRepoPath]);
 
   useEffect(() => {
     startStatusTransition(() => {
@@ -267,14 +278,6 @@ export default function Home() {
     void refreshCommitStatus(project.repo_path);
     void refreshWorkspaceStatus(project.repo_path);
   }, [project?.repo_path]);
-
-  useEffect(() => {
-    if (!canvasDocument?.repo_path) {
-      return;
-    }
-    void refreshCommitStatus(canvasDocument.repo_path);
-    void refreshWorkspaceStatus(canvasDocument.repo_path);
-  }, [canvasDocument]);
 
   useEffect(() => {
     if (!project?.repo_path) {
@@ -396,7 +399,15 @@ export default function Home() {
 
   async function refreshWorkspaceStatus(nextRepoPath: string) {
     try {
-      const response = await fetchProjectWorkspaceStatus(nextRepoPath);
+      const targetRepoPath = nextRepoPath.trim();
+      if (!targetRepoPath) {
+        setWorkspaceStatus(null);
+        return;
+      }
+      const response = await fetchProjectWorkspaceStatus(targetRepoPath);
+      if (expectedRepoPathRef.current && expectedRepoPathRef.current !== targetRepoPath) {
+        return;
+      }
       setWorkspaceStatus(response);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -406,7 +417,11 @@ export default function Home() {
   async function refreshAgentsDocument(nextRepoPath?: string) {
     try {
       setErrorMessage(null);
-      const response = await fetchProjectAgents(nextRepoPath);
+      const targetRepoPath = (nextRepoPath ?? activeRepoPath).trim();
+      const response = await fetchProjectAgents(targetRepoPath || undefined);
+      if (targetRepoPath && expectedRepoPathRef.current && expectedRepoPathRef.current !== targetRepoPath) {
+        return;
+      }
       setAgentsDocument(response);
       setAgentsContent(response.content);
     } catch (error) {
@@ -429,6 +444,9 @@ export default function Home() {
     try {
       setErrorMessage(null);
       const response = await fetchProjectConversation(resolvedRepoPath, conversation.id);
+      if (expectedRepoPathRef.current && expectedRepoPathRef.current !== resolvedRepoPath) {
+        return;
+      }
       setConsoleMessages(response.conversation.messages);
       setPendingPlan(null);
       setComposerStatus(`Opened ${response.conversation.title}.`);
@@ -476,8 +494,11 @@ export default function Home() {
   async function refreshCanvas(nextRepoPath?: string) {
     try {
       setErrorMessage(null);
-      const targetRepoPath = nextRepoPath ?? (repoPath.trim() || project?.repo_path || undefined);
+      const targetRepoPath = (nextRepoPath ?? activeRepoPath).trim() || undefined;
       const response = await fetchCanvas(targetRepoPath);
+      if (targetRepoPath && expectedRepoPathRef.current && expectedRepoPathRef.current !== targetRepoPath) {
+        return;
+      }
       setCanvasDocument(response.document);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -501,8 +522,11 @@ export default function Home() {
             buildCanvasSetupPrompt(targetRepoPath, workspaceStatus?.visible_file_count ?? 0),
           );
           setCanvasDocument(response.document);
-          setComposerStatus(response.summary);
-          await refreshWorkspaceStatus(targetRepoPath);
+          setComposerStatus(response.summary?.trim() ? response.summary : "Canvas ready.");
+          await Promise.all([
+            refreshCanvas(targetRepoPath),
+            refreshWorkspaceStatus(targetRepoPath),
+          ]);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
           setComposerStatus("Canvas generation failed.");
@@ -514,13 +538,16 @@ export default function Home() {
   }
 
   async function refreshCommitStatus(nextRepoPath?: string) {
-    const targetRepoPath = nextRepoPath ?? repoPath.trim();
+    const targetRepoPath = (nextRepoPath ?? activeRepoPath).trim();
     if (!targetRepoPath) {
       setCommitStatus(null);
       return;
     }
     try {
       const response = await fetchCommitStatus(targetRepoPath);
+      if (expectedRepoPathRef.current && expectedRepoPathRef.current !== targetRepoPath) {
+        return;
+      }
       setCommitStatus(response);
     } catch (error) {
       setCommitStatus(null);
@@ -611,7 +638,7 @@ export default function Home() {
       const response = await buildProjectFromPrompt(
         activeRepoPath,
         prompt,
-        buildSelectedNoteContext(canvasDocument),
+        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeId),
         [],
         buildConversationContext(pendingMessages),
       );
@@ -697,7 +724,7 @@ export default function Home() {
       const response = await planProjectFromPrompt(
         activeRepoPath,
         prompt,
-        buildSelectedNoteContext(canvasDocument),
+        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeId),
         buildConversationContext(pendingMessages),
       );
       const assistantMessage: ConversationMessage = {
@@ -785,7 +812,7 @@ export default function Home() {
           `Original request:\n${plan.prompt}`,
           `Approved plan:\n${plan.planText}`,
         ].join("\n\n"),
-        buildSelectedNoteContext(canvasDocument),
+        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeId),
         [],
         buildConversationContext(pendingMessages),
       );
@@ -940,6 +967,7 @@ export default function Home() {
       return;
     }
     const isProjectSwitch = (project?.repo_path ?? "").trim() !== normalizedRepoPath;
+    expectedRepoPathRef.current = normalizedRepoPath;
 
     try {
       setErrorMessage(null);
@@ -950,6 +978,8 @@ export default function Home() {
           recent_projects: [],
         });
         setProject(response.project);
+        void refreshProjectsTree();
+        setWorkspaceStatus(null);
         setCanvasDocument(null);
         setSelectedCanvasNodeId(null);
         setOpenCanvasNodeIds([]);
@@ -965,9 +995,9 @@ export default function Home() {
         setActiveConversationRepoPath(normalizedRepoPath);
         setActiveConversationId(null);
         setConsoleMessages([]);
+        setPendingPlan(null);
         setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
       }
-      await refreshProjectsTree();
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -984,11 +1014,20 @@ export default function Home() {
             recent_projects: [],
           });
           setProject(response.project);
+          void refreshProjectsTree();
+          setWorkspaceStatus(null);
+          setCanvasDocument(null);
+          setSelectedCanvasNodeId(null);
+          setOpenCanvasNodeIds([]);
+          setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
+          setActiveTabId("view:notes");
           setActiveConversationId(null);
           setActiveConversationRepoPath(response.project.repo_path || null);
           setConsoleMessages([]);
           openViewTab("notes");
-          await refreshProjectsTree();
+          if (response.project.repo_path) {
+            expectedRepoPathRef.current = response.project.repo_path;
+          }
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -1001,7 +1040,7 @@ export default function Home() {
       void (async () => {
         try {
           setErrorMessage(null);
-          const response = await updateProjectAgents(agentsContent, repoPath.trim() || undefined);
+          const response = await updateProjectAgents(agentsContent, activeRepoPath || undefined);
           setAgentsDocument(response);
           if (!project?.repo_path && response.repo_path) {
             const nextProject = await updateProject({ name: "", repo_path: response.repo_path, recent_projects: [] });
@@ -1019,12 +1058,21 @@ export default function Home() {
       void (async () => {
         try {
           setErrorMessage(null);
-          const targetRepoPath = repoPath.trim();
+          const targetRepoPath = activeRepoPath;
+          if (!targetRepoPath) {
+            return;
+          }
           const response = await resetCanvas(targetRepoPath);
           setCanvasDocument(response.document);
           setSelectedCanvasNodeId(null);
           setOpenCanvasNodeIds([]);
+          setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
+          setActiveTabId("view:notes");
           setComposerStatus("Canvas reset.");
+          await Promise.all([
+            refreshCanvas(targetRepoPath),
+            refreshWorkspaceStatus(targetRepoPath),
+          ]);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -1225,13 +1273,13 @@ export default function Home() {
                       >
                         <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
                         {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                        <p className={styles.consoleMessageBody}>
+                        <div className={styles.consoleMessageBody}>
                           {renderConsoleMessageContent(
                             message.content,
                             message.role === "assistant" ? canvasDocument : null,
                             openCanvasNode,
                           )}
-                        </p>
+                        </div>
                         {pendingPlan?.messageId === message.id ? (
                           <div className={styles.consoleMessageActions}>
                             <button
@@ -1336,7 +1384,7 @@ export default function Home() {
         >
           {!canvasDocument ? (
             <EmptyState message="Load or create a canvas for this repo. Double-click empty space to add a node." />
-          ) : canvasDocument.nodes.length === 0 && workspaceStatus?.has_project_files ? (
+          ) : shouldShowCanvasSetup ? (
             <div className={styles.canvasSetupCard}>
               <strong className={styles.resultTitle}>Do you want to set up the canvas?</strong>
               <p className={styles.resultMeta}>
@@ -1774,7 +1822,7 @@ export default function Home() {
             </button>
             <button
               className={styles.secondaryButton}
-              disabled={!repoPath.trim() || isGeneratingCanvas}
+              disabled={!activeRepoPath || isGeneratingCanvas}
               onClick={handleGenerateCanvas}
               type="button"
             >
@@ -1784,7 +1832,7 @@ export default function Home() {
                   ? "Regenerate canvas"
                   : "Set up canvas"}
             </button>
-            <button className={styles.secondaryButton} disabled={!repoPath.trim()} onClick={handleResetCanvas} type="button">
+            <button className={styles.secondaryButton} disabled={!activeRepoPath} onClick={handleResetCanvas} type="button">
               Reset canvas
             </button>
           </div>
@@ -1797,7 +1845,7 @@ export default function Home() {
           </label>
 
           <div className={styles.actionsRow}>
-            <button className={styles.primaryButton} disabled={agentsPending || !repoPath.trim()} onClick={handleSaveAgentsDocument} type="button">
+            <button className={styles.primaryButton} disabled={agentsPending || !activeRepoPath} onClick={handleSaveAgentsDocument} type="button">
               {agentsPending ? "Saving..." : "Save AGENTS.md"}
             </button>
             {agentsDocument?.path ? <span className={styles.helperText}>{agentsDocument.path}</span> : null}
@@ -2348,12 +2396,17 @@ function findCanvasNodeTitle(document: CanvasDocument | null, nodeId: string) {
   return document?.nodes.find((item) => item.id === nodeId)?.title ?? nodeId;
 }
 
-function buildSelectedNoteContext(document: CanvasDocument | null) {
+function buildSelectedNoteContext(document: CanvasDocument | null, selectedNodeId: string | null) {
   if (!document || document.nodes.length === 0) {
     return undefined;
   }
 
-  return rankRelevantNotes(document)
+  const nodes = rankRelevantNotes(document, selectedNodeId).slice(0, 12);
+  const selectedRelationLines = selectedNodeId
+    ? describeRelevantEdges(document, selectedNodeId)
+    : [];
+
+  const noteBlocks = nodes
     .slice(0, 12)
     .map((node) => {
       const tags = node.tags.length > 0 ? node.tags.join(", ") : "untagged";
@@ -2368,6 +2421,12 @@ function buildSelectedNoteContext(document: CanvasDocument | null) {
       ].join("\n");
     })
     .join("\n\n");
+
+  if (selectedRelationLines.length === 0) {
+    return noteBlocks;
+  }
+
+  return [noteBlocks, "Relevant note relationships:", ...selectedRelationLines].join("\n\n");
 }
 
 function buildConversationContext(messages: ConversationMessage[]) {
@@ -2395,10 +2454,10 @@ function buildCanvasSetupPrompt(repoPath: string, visibleFileCount: number) {
   ].join(" ");
 }
 
-function rankRelevantNotes(document: CanvasDocument) {
+function rankRelevantNotes(document: CanvasDocument, selectedNodeId: string | null) {
   return [...document.nodes].sort((left, right) => {
-    const leftScore = scoreNote(left);
-    const rightScore = scoreNote(right);
+    const leftScore = scoreNote(document, left, selectedNodeId);
+    const rightScore = scoreNote(document, right, selectedNodeId);
     if (leftScore !== rightScore) {
       return rightScore - leftScore;
     }
@@ -2406,13 +2465,49 @@ function rankRelevantNotes(document: CanvasDocument) {
   });
 }
 
-function scoreNote(node: CanvasNode) {
-  return (
+function scoreNote(document: CanvasDocument, node: CanvasNode, selectedNodeId: string | null) {
+  let score =
     node.linked_files.length * 5 +
     node.linked_symbols.length * 6 +
     node.tags.length * 2 +
-    Math.min(node.description.trim().length, 220) / 55
-  );
+    Math.min(node.description.trim().length, 220) / 55;
+
+  if (selectedNodeId && node.id === selectedNodeId) {
+    score += 100;
+  }
+
+  if (selectedNodeId) {
+    for (const edge of document.edges) {
+      const touchesSelected =
+        edge.source_node_id === selectedNodeId || edge.target_node_id === selectedNodeId;
+      const touchesCurrent = edge.source_node_id === node.id || edge.target_node_id === node.id;
+      if (!touchesSelected || !touchesCurrent) {
+        continue;
+      }
+      score += 24;
+      if (edge.label.trim()) {
+        score += 4;
+      }
+    }
+  }
+
+  return score;
+}
+
+function describeRelevantEdges(document: CanvasDocument, selectedNodeId: string) {
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node] as const));
+  return document.edges
+    .filter((edge) => edge.source_node_id === selectedNodeId || edge.target_node_id === selectedNodeId)
+    .map((edge) => {
+      const source = nodesById.get(edge.source_node_id);
+      const target = nodesById.get(edge.target_node_id);
+      if (!source || !target) {
+        return null;
+      }
+      const label = edge.label.trim() || "connects to";
+      return `${source.title} --${label}--> ${target.title}`;
+    })
+    .filter((value): value is string => Boolean(value));
 }
 
 function summarizeNote(value: string) {

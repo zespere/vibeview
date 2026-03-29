@@ -644,10 +644,11 @@
   display: flex;
   min-height: 100%;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   gap: 12px;
   padding: 32px;
+  text-align: center;
 }
 
 .canvasFrameWithConsoleCollapsed {
@@ -1604,6 +1605,17 @@
   text-align: left;
 }
 
+.canvasNodeCompact {
+  min-height: 92px;
+  padding: 10px 11px;
+}
+
+.canvasNodeMinimal {
+  min-height: 64px;
+  padding: 10px 11px;
+  justify-content: center;
+}
+
 .canvasNodeActive {
   border-color: #8b5c32;
   background: #fff4e7;
@@ -1625,6 +1637,16 @@
   font-size: 15px;
   line-height: 1.35;
   color: #241d17;
+}
+
+.canvasNodeCompact .canvasNodeTitle,
+.canvasNodeMinimal .canvasNodeTitle {
+  margin-top: 0;
+}
+
+.canvasNodeMinimal .canvasNodeTitle {
+  font-size: 14px;
+  line-height: 1.25;
 }
 
 .canvasNodeDescription,

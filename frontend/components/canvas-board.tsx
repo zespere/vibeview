@@ -14,6 +14,7 @@ import {
   type ReactFlowInstance,
   ReactFlow,
   type ReactFlowProps,
+  type Viewport,
 } from "@xyflow/react";
 
 import styles from "@/app/page.module.css";
@@ -41,10 +42,12 @@ interface NoteNodeData extends Record<string, unknown> {
   node: CanvasNode;
   onOpenNode: (nodeId: string) => void;
   onSelectNode: (nodeId: string) => void;
+  detailLevel: "minimal" | "compact" | "full";
 }
 
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 148;
+const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
 
 const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
   note: NoteFlowNode,
@@ -63,8 +66,10 @@ export function CanvasBoard({
   const isDraggingRef = useRef(false);
   const openNodeRef = useRef(onOpenNode);
   const selectNodeRef = useRef(onSelectNode);
+  const repoPath = document?.repo_path ?? "";
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [localNodes, setLocalNodes] = useState<Array<Node<NoteNodeData>>>([]);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     openNodeRef.current = onOpenNode;
@@ -94,6 +99,16 @@ export function CanvasBoard({
     };
   }, [contextMenu]);
 
+  const detailLevel: NoteNodeData["detailLevel"] = useMemo(() => {
+    if (zoom < 0.68) {
+      return "minimal";
+    }
+    if (zoom < 0.95) {
+      return "compact";
+    }
+    return "full";
+  }, [zoom]);
+
   const derivedNodes = useMemo<Array<Node<NoteNodeData>>>(() => {
     return (document?.nodes ?? []).map((node) => ({
       id: node.id,
@@ -103,11 +118,12 @@ export function CanvasBoard({
         node,
         onOpenNode: (nodeId: string) => openNodeRef.current(nodeId),
         onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
+        detailLevel,
       },
       selected: node.id === selectedNodeId,
       draggable: true,
     }));
-  }, [document, selectedNodeId]);
+  }, [detailLevel, document, selectedNodeId]);
 
   useEffect(() => {
     if (isDraggingRef.current) {
@@ -116,14 +132,29 @@ export function CanvasBoard({
     setLocalNodes(derivedNodes);
   }, [derivedNodes]);
 
-  const edges: Edge[] = (document?.edges ?? []).map((edge) => ({
-    id: edge.id,
-    source: edge.source_node_id,
-    target: edge.target_node_id,
-    label: edge.label || undefined,
-    type: "default",
-    animated: false,
-  }));
+  const edges: Edge[] = useMemo(
+    () =>
+      (document?.edges ?? [])
+        .filter((edge) =>
+          selectedNodeId
+            ? edge.source_node_id === selectedNodeId || edge.target_node_id === selectedNodeId
+            : false,
+        )
+        .map((edge) => ({
+          id: edge.id,
+          source: edge.source_node_id,
+          target: edge.target_node_id,
+          label: edge.label || undefined,
+          type: "default",
+          animated: false,
+          style: { stroke: "#8b5c32", strokeWidth: 2.25 },
+          labelStyle: { fill: "#6f451f", fontWeight: 600 },
+          labelBgStyle: { fill: "#fff8ef", fillOpacity: 0.92 },
+          labelBgPadding: [6, 4],
+          labelBgBorderRadius: 6,
+        })),
+    [document?.edges, selectedNodeId],
+  );
 
   const handleNodeDragStart: NodeMouseHandler<Node<NoteNodeData>> = () => {
     isDraggingRef.current = true;
@@ -152,6 +183,22 @@ export function CanvasBoard({
   const handleNodeDoubleClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
     onOpenNode(node.id);
   };
+
+  useEffect(() => {
+    if (!flowRef.current || !repoPath) {
+      return;
+    }
+
+    const storedViewport = readStoredViewport(repoPath);
+    if (storedViewport) {
+      flowRef.current.setViewport(storedViewport, { duration: 0 });
+      setZoom(storedViewport.zoom);
+      return;
+    }
+
+    flowRef.current.setViewport(DEFAULT_VIEWPORT, { duration: 0 });
+    setZoom(DEFAULT_VIEWPORT.zoom);
+  }, [repoPath]);
 
   return (
     <div
@@ -202,6 +249,26 @@ export function CanvasBoard({
         nodeTypes={nodeTypes}
         onInit={(instance) => {
           flowRef.current = instance;
+          const storedViewport = repoPath ? readStoredViewport(repoPath) : null;
+          if (storedViewport) {
+            instance.setViewport(storedViewport, { duration: 0 });
+            setZoom(storedViewport.zoom);
+            return;
+          }
+          setZoom(instance.getZoom());
+        }}
+        onMove={(_event, viewport) => {
+          setZoom(viewport.zoom);
+        }}
+        onMoveEnd={(_event, viewport) => {
+          if (!repoPath) {
+            return;
+          }
+          writeStoredViewport(repoPath, {
+            x: viewport.x,
+            y: viewport.y,
+            zoom: viewport.zoom,
+          });
         }}
         onNodesChange={handleNodesChange}
         onNodeClick={handleNodeClick}
@@ -268,31 +335,43 @@ export function CanvasBoard({
 }
 
 function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boolean }) {
-  const { node, onOpenNode, onSelectNode } = data;
+  const { node, onOpenNode, onSelectNode, detailLevel } = data;
+  const isMinimal = detailLevel === "minimal";
+  const isCompact = detailLevel === "compact";
 
   return (
     <button
-      className={selected ? styles.canvasNodeActive : styles.canvasNode}
+      className={
+        selected
+          ? `${styles.canvasNodeActive} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
+          : `${styles.canvasNode} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
+      }
       onClick={() => onSelectNode(node.id)}
       onDoubleClick={() => onOpenNode(node.id)}
       type="button"
     >
-      <div className={styles.canvasNodeHeader}>
-        <div className={styles.canvasTagList}>
-          {node.tags.length === 0 ? <span className={styles.canvasTag}>untagged</span> : null}
-          {node.tags.slice(0, 3).map((tag) => (
-            <span className={styles.canvasTag} key={tag}>
-              {tag}
-            </span>
-          ))}
+      {!isMinimal ? (
+        <div className={styles.canvasNodeHeader}>
+          <div className={styles.canvasTagList}>
+            {node.tags.length === 0 ? <span className={styles.canvasTag}>untagged</span> : null}
+            {node.tags.slice(0, isCompact ? 2 : 3).map((tag) => (
+              <span className={styles.canvasTag} key={tag}>
+                {tag}
+              </span>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
       <strong className={styles.canvasNodeTitle}>{node.title}</strong>
-      <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
-      <div className={styles.canvasNodeMeta}>
-        <span>{node.linked_files.length} files</span>
-        <span>{node.linked_symbols.length} symbols</span>
-      </div>
+      {detailLevel === "full" ? (
+        <>
+          <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
+          <div className={styles.canvasNodeMeta}>
+            <span>{node.linked_files.length} files</span>
+            <span>{node.linked_symbols.length} symbols</span>
+          </div>
+        </>
+      ) : null}
     </button>
   );
 }
@@ -302,4 +381,51 @@ function compactDescription(value: string) {
     return "No description yet.";
   }
   return value.length > 180 ? `${value.slice(0, 177)}...` : value;
+}
+
+function buildViewportStorageKey(repoPath: string) {
+  return `konceptura.viewport:${repoPath}`;
+}
+
+function readStoredViewport(repoPath: string): Viewport | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(buildViewportStorageKey(repoPath));
+    if (!rawValue) {
+      return null;
+    }
+    const parsed = JSON.parse(rawValue) as { x?: number; y?: number; zoom?: number };
+    if (
+      typeof parsed.x !== "number" ||
+      typeof parsed.y !== "number" ||
+      typeof parsed.zoom !== "number"
+    ) {
+      return null;
+    }
+    return {
+      x: parsed.x,
+      y: parsed.y,
+      zoom: parsed.zoom,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredViewport(
+  repoPath: string,
+  viewport: Viewport,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(buildViewportStorageKey(repoPath), JSON.stringify(viewport));
+  } catch {
+    // Ignore localStorage failures and keep the canvas usable.
+  }
 }
