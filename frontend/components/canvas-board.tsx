@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import "@xyflow/react/dist/style.css";
 import {
   applyNodeChanges,
-  Background,
-  BackgroundVariant,
   Handle,
   type Edge,
   type Node,
@@ -25,11 +23,12 @@ import type { CanvasDocument, CanvasNode } from "@/lib/api";
 
 interface CanvasBoardProps {
   document: CanvasDocument | null;
-  selectedNodeId: string | null;
+  selectedNodeIds: string[];
   onCreateNodeAt: (x: number, y: number) => void;
   onDeleteNode: (nodeId: string) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
   onOpenNode: (nodeId: string) => void;
 }
 
@@ -51,6 +50,7 @@ interface NoteNodeData extends Record<string, unknown> {
 const NODE_WIDTH = 240;
 const NODE_HEIGHT = 148;
 const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 1 };
+const DOT_GAP = 24;
 
 const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
   note: NoteFlowNode,
@@ -58,11 +58,12 @@ const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
 
 export function CanvasBoard({
   document,
-  selectedNodeId,
+  selectedNodeIds,
   onCreateNodeAt,
   onDeleteNode,
   onMoveNodeEnd,
   onSelectNode,
+  onSelectNodes,
   onOpenNode,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
@@ -73,6 +74,9 @@ export function CanvasBoard({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [localNodes, setLocalNodes] = useState<Array<Node<NoteNodeData>>>([]);
   const [zoom, setZoom] = useState(1);
+  const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
+  const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
+  const gridSize = Math.max(DOT_GAP * viewport.zoom, 8);
 
   useEffect(() => {
     openNodeRef.current = onOpenNode;
@@ -123,10 +127,10 @@ export function CanvasBoard({
         onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
         detailLevel,
       },
-      selected: node.id === selectedNodeId,
+      selected: selectedNodeIds.includes(node.id),
       draggable: true,
     }));
-  }, [detailLevel, document, selectedNodeId]);
+  }, [detailLevel, document, selectedNodeIds]);
 
   useEffect(() => {
     if (isDraggingRef.current) {
@@ -139,8 +143,8 @@ export function CanvasBoard({
     () =>
       (document?.edges ?? [])
         .filter((edge) =>
-          selectedNodeId
-            ? edge.source_node_id === selectedNodeId || edge.target_node_id === selectedNodeId
+          selectedNodeIds.length > 0
+            ? selectedNodeIds.includes(edge.source_node_id) || selectedNodeIds.includes(edge.target_node_id)
             : false,
         )
         .map((edge) => ({
@@ -156,7 +160,7 @@ export function CanvasBoard({
           labelBgPadding: [6, 4],
           labelBgBorderRadius: 6,
         })),
-    [document?.edges, selectedNodeId],
+    [document?.edges, selectedNodeIds],
   );
 
   const handleNodeDragStart: NodeMouseHandler<Node<NoteNodeData>> = () => {
@@ -176,7 +180,26 @@ export function CanvasBoard({
   };
 
   const handleNodesChange = (changes: NodeChange<Node<NoteNodeData>>[]) => {
-    setLocalNodes((current) => applyNodeChanges(changes, current));
+    setLocalNodes((current) => {
+      const nextNodes = applyNodeChanges(changes, current);
+
+      if (changes.some((change) => change.type === "select")) {
+        const nextNodeIds = nextNodes
+          .filter((node) => !!node.selected)
+          .map((node) => node.id)
+          .sort();
+        const currentNodeIds = [...selectedNodeIds].sort();
+
+        if (
+          nextNodeIds.length !== currentNodeIds.length ||
+          nextNodeIds.some((nodeId, index) => nodeId !== currentNodeIds[index])
+        ) {
+          onSelectNodes(nextNodeIds);
+        }
+      }
+
+      return nextNodes;
+    });
   };
 
   const handleNodeClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
@@ -206,6 +229,14 @@ export function CanvasBoard({
   return (
     <div
       className={styles.canvasBoard}
+      onMouseLeave={() => setCursorPosition(null)}
+      onMouseMove={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        setCursorPosition({
+          x: event.clientX - bounds.left,
+          y: event.clientY - bounds.top,
+        });
+      }}
       onDoubleClick={(event) => {
         if (!flowRef.current) {
           return;
@@ -241,6 +272,29 @@ export function CanvasBoard({
         });
       }}
     >
+      <div
+        className={styles.canvasDotField}
+        style={
+          {
+            "--grid-size": `${gridSize}px`,
+            "--grid-x": `${normalizeGridOffset(viewport.x, gridSize)}px`,
+            "--grid-y": `${normalizeGridOffset(viewport.y, gridSize)}px`,
+          } as CSSProperties
+        }
+      />
+      <div
+        className={styles.canvasDotHighlight}
+        style={
+          {
+            "--grid-size": `${gridSize}px`,
+            "--grid-x": `${normalizeGridOffset(viewport.x, gridSize)}px`,
+            "--grid-y": `${normalizeGridOffset(viewport.y, gridSize)}px`,
+            "--cursor-x": cursorPosition ? `${cursorPosition.x}px` : "50%",
+            "--cursor-y": cursorPosition ? `${cursorPosition.y}px` : "50%",
+            opacity: cursorPosition ? 1 : 0,
+          } as CSSProperties
+        }
+      />
       <ReactFlow
         defaultEdgeOptions={{ style: { stroke: "#b6a391", strokeWidth: 2 } }}
         edges={edges}
@@ -256,12 +310,15 @@ export function CanvasBoard({
           if (storedViewport) {
             instance.setViewport(storedViewport, { duration: 0 });
             setZoom(storedViewport.zoom);
+            setViewport(storedViewport);
             return;
           }
           setZoom(instance.getZoom());
+          setViewport(DEFAULT_VIEWPORT);
         }}
         onMove={(_event, viewport) => {
           setZoom(viewport.zoom);
+          setViewport(viewport);
         }}
         onMoveEnd={(_event, viewport) => {
           if (!repoPath) {
@@ -299,10 +356,8 @@ export function CanvasBoard({
         panOnScroll
         panOnScrollMode={PanOnScrollMode.Free}
         proOptions={{ hideAttribution: true }}
-        selectionOnDrag={false}
-      >
-        <Background color="#e6ddd2" gap={24} variant={BackgroundVariant.Lines} />
-      </ReactFlow>
+        selectionOnDrag
+      />
       {contextMenu ? (
         <div
           className={styles.canvasContextMenu}
@@ -435,4 +490,13 @@ function writeStoredViewport(
   } catch {
     // Ignore localStorage failures and keep the canvas usable.
   }
+}
+
+function normalizeGridOffset(offset: number, gridSize: number) {
+  if (!Number.isFinite(offset) || !Number.isFinite(gridSize) || gridSize <= 0) {
+    return 0;
+  }
+
+  const normalized = offset % gridSize;
+  return normalized < 0 ? normalized + gridSize : normalized;
 }

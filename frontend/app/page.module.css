@@ -1708,12 +1708,50 @@
   min-width: 100%;
   min-height: 100%;
   background-color: #fffdf9;
+  overflow: hidden;
+  isolation: isolate;
+  cursor: auto;
 }
 
 .canvasBoard :global(.react-flow) {
+  position: relative;
   width: 100%;
   height: 100%;
   background: transparent;
+  z-index: 1;
+}
+
+.canvasDotField,
+.canvasDotHighlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.canvasDotField {
+  z-index: 0;
+  background-image: radial-gradient(circle, rgba(185, 169, 149, 0.58) 0.9px, transparent 1.15px);
+  background-size: var(--grid-size) var(--grid-size);
+  background-position: var(--grid-x) var(--grid-y);
+}
+
+.canvasDotHighlight {
+  z-index: 0;
+  background-image: radial-gradient(circle, rgba(122, 103, 82, 0.68) 1px, transparent 1.22px);
+  background-size: var(--grid-size) var(--grid-size);
+  background-position: var(--grid-x) var(--grid-y);
+  mask-image: radial-gradient(
+    64px circle at var(--cursor-x) var(--cursor-y),
+    rgba(0, 0, 0, 0.82) 0,
+    rgba(0, 0, 0, 0.34) 54%,
+    transparent 100%
+  );
+  -webkit-mask-image: radial-gradient(
+    64px circle at var(--cursor-x) var(--cursor-y),
+    rgba(0, 0, 0, 0.82) 0,
+    rgba(0, 0, 0, 0.34) 54%,
+    transparent 100%
+  );
 }
 
 .canvasBoard :global(.react-flow__renderer),
@@ -1722,13 +1760,25 @@
   background: transparent;
 }
 
+.canvasBoard :global(.react-flow__edges),
+.canvasBoard :global(.react-flow__viewport),
+.canvasBoard :global(.react-flow__nodes) {
+  position: relative;
+  z-index: 2;
+}
+
+.canvasBoard :global(.react-flow__node) {
+  position: relative;
+  z-index: 3;
+}
+
 .canvasBoard :global(.react-flow__pane) {
-  cursor: grab;
+  cursor: auto;
 }
 
 .canvasBoard :global(.react-flow__pane.dragging),
 .canvasBoard :global(.react-flow__viewport-portal) {
-  cursor: grabbing;
+  cursor: auto;
 }
 
 .canvasBoard :global(.react-flow__node) {
@@ -1823,24 +1873,25 @@
   display: flex;
   flex-direction: column;
   width: 240px;
-  min-height: 148px;
+  height: 148px;
   border: 1px solid #cebfae;
   border-radius: 10px;
   background: #fffaf3;
-  cursor: grab;
+  cursor: pointer;
   padding: 12px;
   text-align: left;
+  overflow: hidden;
 }
 
 .canvasNodeCompact {
-  min-height: 92px;
-  padding: 10px 11px;
+  height: 148px;
+  padding: 12px;
 }
 
 .canvasNodeMinimal {
-  min-height: 64px;
-  padding: 10px 11px;
-  justify-content: center;
+  height: 148px;
+  padding: 12px;
+  justify-content: flex-start;
 }
 
 .canvasNodeActive {

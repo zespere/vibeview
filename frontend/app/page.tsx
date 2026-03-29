@@ -124,6 +124,7 @@ export default function Home() {
   } | null>(null);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
+  const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<string[]>([]);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
   const [canvasDraftTitle, setCanvasDraftTitle] = useState("");
   const [canvasDraftDescription, setCanvasDraftDescription] = useState("");
@@ -194,11 +195,14 @@ export default function Home() {
     if (focusedCanvasNodeId) {
       ids.add(focusedCanvasNodeId);
     }
+    for (const nodeId of selectedCanvasNodeIds) {
+      ids.add(nodeId);
+    }
     for (const nodeId of pinnedCanvasNodeIds) {
       ids.add(nodeId);
     }
     return [...ids];
-  }, [focusedCanvasNodeId, pinnedCanvasNodeIds]);
+  }, [focusedCanvasNodeId, pinnedCanvasNodeIds, selectedCanvasNodeIds]);
   const pinnedCanvasNodes = useMemo(() => {
     if (!canvasDocument) {
       return [];
@@ -436,6 +440,7 @@ export default function Home() {
     if (selectedCanvasNodeId && !validNodeIds.has(selectedCanvasNodeId)) {
       const fallbackNodeId = canvasDocument.nodes[0]?.id ?? null;
       setSelectedCanvasNodeId(fallbackNodeId);
+      setSelectedCanvasNodeIds(fallbackNodeId ? [fallbackNodeId] : []);
       if (fallbackNodeId) {
         setOpenCanvasNodeIds((current) =>
           current.includes(fallbackNodeId) ? current : [fallbackNodeId, ...current],
@@ -1488,7 +1493,10 @@ export default function Home() {
   }
 
   function openCanvasNode(nodeId: string) {
-    setSelectedCanvasNodeId(nodeId);
+    setSelectedCanvasNodeId((current) => (current === nodeId ? current : nodeId));
+    setSelectedCanvasNodeIds((current) =>
+      current.length === 1 && current[0] === nodeId ? current : [nodeId],
+    );
     setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
     setOpenTabs((current) =>
       current.some((tab) => tab.id === `note:${nodeId}`)
@@ -1514,6 +1522,7 @@ export default function Home() {
       const next = current.filter((item) => item !== nodeId);
       if (selectedCanvasNodeId === nodeId) {
         setSelectedCanvasNodeId(next.at(-1) ?? null);
+        setSelectedCanvasNodeIds(next.at(-1) ? [next.at(-1) as string] : []);
       }
       return next;
     });
@@ -1558,6 +1567,24 @@ export default function Home() {
       return next;
     });
     setActiveTabId(id);
+  }
+
+  function handleSelectCanvasNodes(nodeIds: string[]) {
+    const normalized = [...nodeIds].sort();
+    setSelectedCanvasNodeIds((current) => {
+      const currentNormalized = [...current].sort();
+      if (
+        currentNormalized.length === normalized.length &&
+        currentNormalized.every((nodeId, index) => nodeId === normalized[index])
+      ) {
+        return current;
+      }
+      return nodeIds;
+    });
+    setSelectedCanvasNodeId((current) => {
+      const nextPrimary = nodeIds[0] ?? null;
+      return current === nextPrimary ? current : nextPrimary;
+    });
   }
 
   const commandResults = useMemo<CommandResultItem[]>(() => {
@@ -1927,7 +1954,10 @@ export default function Home() {
       pinPreviewTab(tab.id);
     }
     if (tab.type === "note") {
-      setSelectedCanvasNodeId(tab.nodeId);
+      setSelectedCanvasNodeId((current) => (current === tab.nodeId ? current : tab.nodeId));
+      setSelectedCanvasNodeIds((current) =>
+        current.length === 1 && current[0] === tab.nodeId ? current : [tab.nodeId],
+      );
     }
     setActiveTabId(tab.id);
   }
@@ -2186,8 +2216,9 @@ export default function Home() {
                 });
               }}
               onOpenNode={openCanvasNode}
-              onSelectNode={setSelectedCanvasNodeId}
-              selectedNodeId={selectedCanvasNodeId}
+              onSelectNode={(nodeId) => handleSelectCanvasNodes([nodeId])}
+              onSelectNodes={handleSelectCanvasNodes}
+              selectedNodeIds={selectedCanvasNodeIds}
             />
           )}
         </div>
