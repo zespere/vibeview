@@ -33,6 +33,8 @@ from .models import (
     IndexRequest,
     ProjectBuildRequest,
     ProjectBuildResponse,
+    ProjectAskRequest,
+    ProjectAskResponse,
     ProjectPlanRequest,
     ProjectPlanResponse,
     ProjectProfileResponse,
@@ -411,6 +413,33 @@ def plan_project(request: ProjectPlanRequest) -> ProjectPlanResponse:
         prompt=request.prompt,
         summary=summary,
         plan_text=plan_text,
+    )
+
+
+@app.post("/project/ask", response_model=ProjectAskResponse)
+def ask_project(request: ProjectAskRequest) -> ProjectAskResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    try:
+        summary, answer_text = codex_service.ask_project(
+            resolved_repo_path,
+            request.prompt,
+            request.semantic_context,
+            conversation_context=request.conversation_context,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return ProjectAskResponse(
+        repo_path=resolved_repo_path,
+        prompt=request.prompt,
+        summary=summary,
+        answer_text=answer_text,
     )
 
 

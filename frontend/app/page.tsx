@@ -7,6 +7,7 @@ import { CanvasBoard } from "@/components/canvas-board";
 import { StructureTree } from "@/components/structure-tree";
 import {
   API_BASE_URL,
+  askProjectQuestion,
   buildProjectFromPrompt,
   planProjectFromPrompt,
   createCanvasNode,
@@ -49,16 +50,29 @@ import {
   type SymbolRecord,
 } from "@/lib/api";
 
-type WorkspaceView = "notes" | "inspect" | "project";
+type WorkspaceView = "notes" | "inspect" | "project" | "chat";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `note:${string}`; type: "note"; nodeId: string };
 
-const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
+const RAIL_VIEW_ITEMS: Array<{ id: Exclude<WorkspaceView, "chat">; label: string }> = [
   { id: "notes", label: "Notes" },
   { id: "inspect", label: "Inspect" },
   { id: "project", label: "Project" },
 ];
+
+interface CommandPalettePosition {
+  x: number;
+  y: number;
+}
+
+interface CommandResultItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  group: "navigate" | "action" | "ask" | "execute";
+  run: () => void;
+}
 
 export default function Home() {
   const [isRailExpanded, setIsRailExpanded] = useState(true);
@@ -117,8 +131,19 @@ export default function Home() {
   const [canvasDraftTags, setCanvasDraftTags] = useState("");
   const [canvasDraftFiles, setCanvasDraftFiles] = useState("");
   const [canvasDraftSymbols, setCanvasDraftSymbols] = useState("");
+  const [pinnedCanvasNodeIds, setPinnedCanvasNodeIds] = useState<string[]>([]);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [commandInput, setCommandInput] = useState("");
+  const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
+  const [commandPalettePosition, setCommandPalettePosition] = useState<CommandPalettePosition>({
+    x: 360,
+    y: 92,
+  });
+  const [isCommandDragging, setIsCommandDragging] = useState(false);
+  const [commandDragOffset, setCommandDragOffset] = useState<{ x: number; y: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
+  const commandInputRef = useRef<HTMLInputElement | null>(null);
   const expectedRepoPathRef = useRef("");
 
   const [statusPending, startStatusTransition] = useTransition();
@@ -159,16 +184,40 @@ export default function Home() {
   const sampleRepos = Object.entries(status?.sample_repos ?? {});
   const currentRailWidth = isRailExpanded ? railWidth : 72;
   const activeRepoPath = (project?.repo_path || repoPath).trim();
+  const focusedCanvasNodeId = activeTab?.type === "note" ? activeTab.nodeId : selectedCanvasNodeId;
   const activeProjectTreeItem = useMemo(
     () => projectsTree.find((item) => item.repo_path === activeRepoPath) ?? null,
     [activeRepoPath, projectsTree],
   );
+  const visibleContextNodeIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (focusedCanvasNodeId) {
+      ids.add(focusedCanvasNodeId);
+    }
+    for (const nodeId of pinnedCanvasNodeIds) {
+      ids.add(nodeId);
+    }
+    return [...ids];
+  }, [focusedCanvasNodeId, pinnedCanvasNodeIds]);
+  const pinnedCanvasNodes = useMemo(() => {
+    if (!canvasDocument) {
+      return [];
+    }
+    return pinnedCanvasNodeIds
+      .map((nodeId) => canvasDocument.nodes.find((item) => item.id === nodeId) ?? null)
+      .filter((item): item is CanvasNode => item !== null);
+  }, [canvasDocument, pinnedCanvasNodeIds]);
   const shouldShowCanvasSetup =
     !!canvasDocument &&
     canvasDocument.nodes.length === 0 &&
     !!activeRepoPath &&
     workspaceStatus?.repo_path === activeRepoPath &&
     workspaceStatus.has_project_files;
+  const commandMode = commandInput.startsWith("?")
+    ? "ask"
+    : commandInput.startsWith("!")
+      ? "action"
+      : "navigate";
   const activeConversationSummary = useMemo(
     () =>
       activeProjectTreeItem?.conversations.find(
@@ -321,11 +370,63 @@ export default function Home() {
   }, [consoleMessages, isConsoleExpanded]);
 
   useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setIsCommandPaletteOpen(true);
+        window.setTimeout(() => {
+          commandInputRef.current?.focus();
+          commandInputRef.current?.select();
+        }, 0);
+        return;
+      }
+
+      if (event.key === "Escape" && isCommandPaletteOpen) {
+        setIsCommandPaletteOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCommandPaletteOpen]);
+
+  useEffect(() => {
+    if (!isCommandDragging || !commandDragOffset) {
+      return;
+    }
+
+    const dragOffset = commandDragOffset;
+
+    function handleMouseMove(event: MouseEvent) {
+      const nextX = Math.max(20, Math.min(window.innerWidth - 560, event.clientX - dragOffset.x));
+      const nextY = Math.max(20, Math.min(window.innerHeight - 280, event.clientY - dragOffset.y));
+      setCommandPalettePosition({ x: nextX, y: nextY });
+    }
+
+    function handleMouseUp() {
+      setIsCommandDragging(false);
+      setCommandDragOffset(null);
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [commandDragOffset, isCommandDragging]);
+
+  useEffect(() => {
+    setCommandSelectedIndex(0);
+  }, [commandInput, isCommandPaletteOpen]);
+
+  useEffect(() => {
     if (!canvasDocument) {
       return;
     }
 
     const validNodeIds = new Set(canvasDocument.nodes.map((node) => node.id));
+    setPinnedCanvasNodeIds((current) => current.filter((nodeId) => validNodeIds.has(nodeId)));
     setOpenCanvasNodeIds((current) => current.filter((nodeId) => validNodeIds.has(nodeId)));
     setOpenTabs((current) =>
       current.filter((tab) => tab.type === "view" || validNodeIds.has(tab.nodeId)),
@@ -605,8 +706,8 @@ export default function Home() {
     });
   }
 
-  async function submitArchitecturePrompt() {
-    const prompt = codexPrompt.trim();
+  async function submitBuildPrompt(promptValue = codexPrompt.trim()) {
+    const prompt = promptValue.trim();
     if (!prompt) {
       return;
     }
@@ -620,7 +721,9 @@ export default function Home() {
     const pendingMessages = [...consoleMessages, userMessage];
     setConsoleMessages(pendingMessages);
     setIsBuilding(true);
-    setCodexPrompt("");
+    if (promptValue === codexPrompt.trim()) {
+      setCodexPrompt("");
+    }
     setPendingPlan(null);
     let ensuredConversationId: string | null = null;
     try {
@@ -638,7 +741,7 @@ export default function Home() {
       const response = await buildProjectFromPrompt(
         activeRepoPath,
         prompt,
-        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeId),
+        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
         [],
         buildConversationContext(pendingMessages),
       );
@@ -685,12 +788,12 @@ export default function Home() {
 
   async function handleSubmitArchitecturePrompt() {
     startCodexTransition(() => {
-      void (isPlanMode ? submitPlanPrompt() : submitArchitecturePrompt());
+      void (isPlanMode ? submitPlanPrompt() : submitBuildPrompt());
     });
   }
 
-  async function submitPlanPrompt() {
-    const prompt = codexPrompt.trim();
+  async function submitPlanPrompt(promptValue = codexPrompt.trim()) {
+    const prompt = promptValue.trim();
     if (!prompt) {
       return;
     }
@@ -703,7 +806,9 @@ export default function Home() {
     };
     const pendingMessages = [...consoleMessages, userMessage];
     setConsoleMessages(pendingMessages);
-    setCodexPrompt("");
+    if (promptValue === codexPrompt.trim()) {
+      setCodexPrompt("");
+    }
     setIsPlanning(true);
     setIsConsoleExpanded(true);
     let ensuredConversationId: string | null = null;
@@ -724,7 +829,7 @@ export default function Home() {
       const response = await planProjectFromPrompt(
         activeRepoPath,
         prompt,
-        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeId),
+        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
       );
       const assistantMessage: ConversationMessage = {
@@ -763,6 +868,71 @@ export default function Home() {
       }
     } finally {
       setIsPlanning(false);
+    }
+  }
+
+  async function submitAskPrompt(promptValue: string) {
+    const prompt = promptValue.trim();
+    if (!prompt || !activeRepoPath) {
+      return;
+    }
+
+    const userMessage: ConversationMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: prompt,
+      created_at: new Date().toISOString(),
+    };
+    const pendingMessages = [...consoleMessages, userMessage];
+    setConsoleMessages(pendingMessages);
+    setComposerStatus("Answering your question...");
+    setIsConsoleExpanded(true);
+    let ensuredConversationId: string | null = null;
+
+    try {
+      setErrorMessage(null);
+      ensuredConversationId =
+        activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
+          ? activeConversationId
+          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt));
+      if (!ensuredConversationId) {
+        return;
+      }
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
+      const response = await askProjectQuestion(
+        activeRepoPath,
+        prompt,
+        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
+        buildConversationContext(pendingMessages),
+      );
+      setComposerStatus(response.summary);
+      const assistantMessage: ConversationMessage = {
+        id: `assistant-ask-${Date.now()}`,
+        role: "assistant",
+        title: response.summary,
+        content: response.answer_text,
+        created_at: new Date().toISOString(),
+      };
+      const nextMessages = [...pendingMessages, assistantMessage];
+      setConsoleMessages(nextMessages);
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+    } catch (error) {
+      setComposerStatus("Question failed.");
+      setErrorMessage(getErrorMessage(error));
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: `assistant-ask-error-${Date.now()}`,
+          role: "assistant" as const,
+          title: "Question failed.",
+          content: getErrorMessage(error),
+          created_at: new Date().toISOString(),
+        },
+      ];
+      setConsoleMessages(nextMessages);
+      if (ensuredConversationId) {
+        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      }
     }
   }
 
@@ -812,7 +982,7 @@ export default function Home() {
           `Original request:\n${plan.prompt}`,
           `Approved plan:\n${plan.planText}`,
         ].join("\n\n"),
-        buildSelectedNoteContext(canvasDocument, selectedCanvasNodeId),
+        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
         [],
         buildConversationContext(pendingMessages),
       );
@@ -1080,6 +1250,21 @@ export default function Home() {
     });
   }
 
+  function pinCanvasNode(nodeId: string) {
+    setPinnedCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
+    const title = canvasDocument?.nodes.find((node) => node.id === nodeId)?.title ?? "note";
+    setComposerStatus(`Pinned ${title}.`);
+  }
+
+  function unpinCanvasNode(nodeId: string) {
+    setPinnedCanvasNodeIds((current) => current.filter((item) => item !== nodeId));
+  }
+
+  function clearPinnedCanvasNodes() {
+    setPinnedCanvasNodeIds([]);
+    setComposerStatus("Cleared pinned context.");
+  }
+
   function openCanvasNode(nodeId: string) {
     setSelectedCanvasNodeId(nodeId);
     setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
@@ -1089,6 +1274,11 @@ export default function Home() {
         : [...current, { id: `note:${nodeId}`, type: "note", nodeId }],
     );
     setActiveTabId(`note:${nodeId}`);
+  }
+
+  function openChatViewTab() {
+    openViewTab("chat");
+    setIsCommandPaletteOpen(false);
   }
 
   function handleCloseCanvasTab(nodeId: string) {
@@ -1141,6 +1331,354 @@ export default function Home() {
     });
     setActiveTabId(id);
   }
+
+  const commandResults = useMemo<CommandResultItem[]>(() => {
+    const trimmed = commandInput.trim();
+
+    if (commandMode === "ask") {
+      const question = trimmed.slice(1).trim();
+      if (!question) {
+        return [];
+      }
+      return [
+        {
+          id: "ask-current-context",
+          title: `Ask AI: ${question}`,
+          subtitle: visibleContextNodeIds.length
+            ? `Uses ${visibleContextNodeIds.length} visible/pinned note context item${visibleContextNodeIds.length === 1 ? "" : "s"}`
+            : "Uses the current project and visible screen context",
+          group: "ask",
+          run: () => {
+            setCommandInput("");
+            startCodexTransition(() => {
+              void submitAskPrompt(question);
+            });
+          },
+        },
+      ];
+    }
+
+    if (commandMode === "action") {
+      const rawAction = trimmed.slice(1).trim();
+      const loweredAction = rawAction.toLowerCase();
+      const buildPrompt = loweredAction.startsWith("build ") ? rawAction.slice(6).trim() : "";
+      const planPrompt = loweredAction.startsWith("plan ") ? rawAction.slice(5).trim() : "";
+
+      if (buildPrompt) {
+        return [
+          {
+            id: "execute-build",
+            title: `Build: ${buildPrompt}`,
+            subtitle: "Runs a real build/edit pass and refreshes notes afterward",
+            group: "execute",
+            run: () => {
+              setCommandInput("");
+              setIsCommandPaletteOpen(true);
+              startCodexTransition(() => {
+                void submitBuildPrompt(buildPrompt);
+              });
+            },
+          },
+        ];
+      }
+
+      if (planPrompt) {
+        return [
+          {
+            id: "execute-plan",
+            title: `Plan: ${planPrompt}`,
+            subtitle: "Creates an implementation plan in the current conversation",
+            group: "execute",
+            run: () => {
+              setCommandInput("");
+              setIsCommandPaletteOpen(true);
+              startCodexTransition(() => {
+                void submitPlanPrompt(planPrompt);
+              });
+            },
+          },
+        ];
+      }
+
+      const currentNode = canvasDocument?.nodes.find((node) => node.id === focusedCanvasNodeId) ?? null;
+      const actionItems: Array<CommandResultItem & { keywords: string[]; enabled?: boolean }> = [
+        {
+          id: "action-create-note",
+          title: "Create note",
+          subtitle: "Adds a new note to the current canvas",
+          group: "action",
+          keywords: ["create", "note", "new"],
+          enabled: !!activeRepoPath,
+          run: () => {
+            setCommandInput("");
+            setIsCommandPaletteOpen(false);
+            startCanvasTransition(() => {
+              void handleCreateCanvasNodeAt();
+            });
+          },
+        },
+        {
+          id: "action-setup-canvas",
+          title: canvasDocument?.nodes.length ? "Regenerate canvas" : "Set up canvas",
+          subtitle: "Maps the current project into notes on the canvas",
+          group: "action",
+          keywords: ["canvas", "map", "generate", "setup", "regenerate"],
+          enabled: !!activeRepoPath,
+          run: () => {
+            setCommandInput("");
+            startCanvasTransition(() => {
+              void handleGenerateCanvas();
+            });
+          },
+        },
+        {
+          id: "action-reset-canvas",
+          title: "Reset canvas",
+          subtitle: "Clears all notes for the current project",
+          group: "action",
+          keywords: ["canvas", "reset", "clear"],
+          enabled: !!activeRepoPath,
+          run: () => {
+            setCommandInput("");
+            startCanvasTransition(() => {
+              void handleResetCanvas();
+            });
+          },
+        },
+        {
+          id: "action-commit",
+          title: "Commit changes",
+          subtitle: commitStatus?.suggested_message ?? "Create a git commit for the current repo",
+          group: "action",
+          keywords: ["commit", "git", "save"],
+          enabled: !!activeRepoPath && !!commitStatus?.has_changes,
+          run: () => {
+            setCommandInput("");
+            handleCommitClick();
+          },
+        },
+        {
+          id: "action-new-conversation",
+          title: "New conversation",
+          subtitle: "Starts a new project conversation",
+          group: "action",
+          keywords: ["conversation", "chat", "new"],
+          enabled: !!activeRepoPath,
+          run: () => {
+            setCommandInput("");
+            startProjectTransition(() => {
+              void createConversationForProject(activeRepoPath);
+            });
+          },
+        },
+        {
+          id: "action-open-chat-page",
+          title: "Open chat page",
+          subtitle: "Turns the current conversation into a regular workspace tab",
+          group: "action",
+          keywords: ["chat", "page", "open", "conversation", "tab"],
+          enabled: true,
+          run: () => {
+            setCommandInput("");
+            openChatViewTab();
+          },
+        },
+        {
+          id: "action-open-notes",
+          title: "Open Notes",
+          subtitle: "Switches to the Notes workspace",
+          group: "action",
+          keywords: ["open", "notes", "view"],
+          enabled: true,
+          run: () => {
+            setCommandInput("");
+            setIsCommandPaletteOpen(false);
+            openViewTab("notes");
+          },
+        },
+        {
+          id: "action-open-inspect",
+          title: "Open Inspect",
+          subtitle: "Switches to the Inspect workspace",
+          group: "action",
+          keywords: ["open", "inspect", "view"],
+          enabled: true,
+          run: () => {
+            setCommandInput("");
+            setIsCommandPaletteOpen(false);
+            openViewTab("inspect");
+          },
+        },
+        {
+          id: "action-open-project",
+          title: "Open Project",
+          subtitle: "Switches to the Project workspace",
+          group: "action",
+          keywords: ["open", "project", "view", "settings"],
+          enabled: true,
+          run: () => {
+            setCommandInput("");
+            setIsCommandPaletteOpen(false);
+            openViewTab("project");
+          },
+        },
+      ];
+
+      if (currentNode && !pinnedCanvasNodeIds.includes(currentNode.id)) {
+        actionItems.push({
+          id: "action-pin-current-note",
+          title: `Pin ${currentNode.title}`,
+          subtitle: "Keeps this note in context while you move around the project",
+          group: "action",
+          keywords: ["pin", "current", "note", currentNode.title.toLowerCase()],
+          enabled: true,
+          run: () => {
+            setCommandInput("");
+            pinCanvasNode(currentNode.id);
+          },
+        });
+      }
+
+      if (currentNode && pinnedCanvasNodeIds.includes(currentNode.id)) {
+        actionItems.push({
+          id: "action-unpin-current-note",
+          title: `Unpin ${currentNode.title}`,
+          subtitle: "Removes this note from persistent context",
+          group: "action",
+          keywords: ["unpin", "current", "note", currentNode.title.toLowerCase()],
+          enabled: true,
+          run: () => {
+            setCommandInput("");
+            unpinCanvasNode(currentNode.id);
+          },
+        });
+      }
+
+      if (pinnedCanvasNodeIds.length > 0) {
+        actionItems.push({
+          id: "action-clear-pinned",
+          title: "Clear pinned context",
+          subtitle: `Removes ${pinnedCanvasNodeIds.length} pinned note${pinnedCanvasNodeIds.length === 1 ? "" : "s"}`,
+          group: "action",
+          keywords: ["clear", "pinned", "context", "unpin"],
+          enabled: true,
+          run: () => {
+            setCommandInput("");
+            clearPinnedCanvasNodes();
+          },
+        });
+      }
+
+      return actionItems
+        .filter((item) => item.enabled !== false)
+        .filter((item) => {
+          if (!rawAction) {
+            return true;
+          }
+          const haystack = [item.title, item.subtitle ?? "", ...item.keywords].join(" ").toLowerCase();
+          return haystack.includes(loweredAction);
+        });
+    }
+
+    const query = trimmed.toLowerCase();
+    const noteItems = (canvasDocument?.nodes ?? [])
+      .filter((node) => {
+        if (!query) {
+          return true;
+        }
+        const haystack = [node.title, node.description, node.tags.join(" ")].join(" ").toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, 8)
+      .map<CommandResultItem>((node) => ({
+        id: `note:${node.id}`,
+        title: node.title,
+        subtitle: node.tags.join(", ") || "note",
+        group: "navigate",
+        run: () => {
+          setCommandInput("");
+          setIsCommandPaletteOpen(false);
+          openCanvasNode(node.id);
+        },
+      }));
+
+    const projectItems = projectsTree
+      .filter((item) => {
+        if (!query) {
+          return true;
+        }
+        return [item.name, item.repo_path].join(" ").toLowerCase().includes(query);
+      })
+      .slice(0, 6)
+      .map<CommandResultItem>((item) => ({
+        id: `project:${item.repo_path}`,
+        title: item.name,
+        subtitle: item.repo_path,
+        group: "navigate",
+        run: () => {
+          setCommandInput("");
+          setIsCommandPaletteOpen(false);
+          startProjectTransition(() => {
+            void openProjectConversation(item.repo_path);
+          });
+        },
+      }));
+
+    const conversationItems = projectsTree
+      .flatMap((item) =>
+        item.conversations.map((conversation) => ({
+          projectName: item.name,
+          repoPath: item.repo_path,
+          conversation,
+        })),
+      )
+      .filter((item) => {
+        if (!query) {
+          return false;
+        }
+        return [item.conversation.title, item.projectName, item.repoPath].join(" ").toLowerCase().includes(query);
+      })
+      .slice(0, 8)
+      .map<CommandResultItem>((item) => ({
+        id: `conversation:${item.repoPath}:${item.conversation.id}`,
+        title: item.conversation.title,
+        subtitle: `${item.projectName} · ${item.conversation.message_count} msg${item.conversation.message_count === 1 ? "" : "s"}`,
+        group: "navigate",
+        run: () => {
+          setCommandInput("");
+          setIsCommandPaletteOpen(false);
+          startProjectTransition(() => {
+            void openProjectConversation(item.repoPath, item.conversation);
+          });
+        },
+      }));
+
+    const viewItems = (["notes", "inspect", "project", "chat"] as WorkspaceView[])
+      .filter((view) => !query || viewLabel(view).toLowerCase().includes(query))
+      .map<CommandResultItem>((view) => ({
+        id: `view:${view}`,
+        title: viewLabel(view),
+        subtitle: "workspace view",
+        group: "navigate",
+        run: () => {
+          setCommandInput("");
+          setIsCommandPaletteOpen(false);
+          openViewTab(view);
+        },
+      }));
+
+    return [...noteItems, ...projectItems, ...conversationItems, ...viewItems].slice(0, 14);
+  }, [
+    activeRepoPath,
+    canvasDocument,
+    commandInput,
+    commandMode,
+    commitStatus,
+    focusedCanvasNodeId,
+    pinnedCanvasNodeIds,
+    projectsTree,
+    visibleContextNodeIds,
+  ]);
 
   function pinPreviewTab(tabId: OpenTab["id"]) {
     setOpenTabs((current) =>
@@ -1881,6 +2419,110 @@ export default function Home() {
     );
   }
 
+  function renderChatView() {
+    return (
+      <div className={styles.chatWorkspace}>
+        <div className={styles.chatPageSurface}>
+          <div className={styles.chatPageHeader}>
+            <div>
+              <strong className={styles.resultTitle}>
+                {activeConversationSummary?.title ?? "Conversation"}
+              </strong>
+              <p className={styles.resultMeta}>
+                {latestConsoleSummary}
+              </p>
+            </div>
+            <button className={styles.secondaryButton} onClick={() => setIsCommandPaletteOpen(true)} type="button">
+              Open command bar
+            </button>
+          </div>
+
+          <div className={styles.chatPageMessages}>
+            {consoleMessages.length === 0 ? (
+              <p className={styles.helperText}>Ask about the current project, notes, or visible context.</p>
+            ) : (
+              consoleMessages.map((message) => (
+                <article
+                  className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
+                  key={message.id}
+                >
+                  <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
+                  {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                  <div className={styles.consoleMessageBody}>
+                    {renderConsoleMessageContent(
+                      message.content,
+                      message.role === "assistant" ? canvasDocument : null,
+                      openCanvasNode,
+                    )}
+                  </div>
+                  {pendingPlan?.messageId === message.id ? (
+                    <div className={styles.consoleMessageActions}>
+                      <button
+                        className={styles.secondaryButton}
+                        disabled={isBuilding}
+                        onClick={handleApprovePlan}
+                        type="button"
+                      >
+                        Approve
+                      </button>
+                    </div>
+                  ) : null}
+                </article>
+              ))
+            )}
+          </div>
+
+          <label className={styles.chatComposer}>
+            <textarea
+              className={styles.consoleComposerInput}
+              disabled={isBuilding || isPlanning}
+              onChange={(event) => setCodexPrompt(event.target.value)}
+              placeholder={isPlanMode ? "Describe what to plan in this project." : "Describe what to build in this project."}
+              rows={4}
+              value={codexPrompt}
+            />
+            <div className={styles.consoleComposerActions}>
+              <div className={styles.consoleComposerLeft}>
+                <button
+                  className={styles.commitButton}
+                  disabled={isCommitting || !commitStatus?.has_changes}
+                  onClick={handleCommitClick}
+                  type="button"
+                >
+                  Commit
+                </button>
+                <span className={styles.buildComposerMeta}>
+                  {visibleContextNodeIds.length
+                    ? `Using ${visibleContextNodeIds.length} focused/pinned notes`
+                    : "Using project context"}
+                </span>
+              </div>
+              <div className={styles.consoleComposerRight}>
+                <label className={styles.planModeToggle}>
+                  <input
+                    checked={isPlanMode}
+                    disabled={isBuilding || isPlanning}
+                    onChange={(event) => setIsPlanMode(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Plan mode</span>
+                </label>
+                <button
+                  className={styles.primaryButton}
+                  disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
+                  onClick={handleSubmitArchitecturePrompt}
+                  type="button"
+                >
+                  {isPlanning ? "Planning..." : isBuilding ? "Building..." : isPlanMode ? "Plan" : "Build"}
+                </button>
+              </div>
+            </div>
+          </label>
+        </div>
+      </div>
+    );
+  }
+
   function renderInspectView() {
     return (
       <div className={styles.inspectPane}>
@@ -1898,6 +2540,155 @@ export default function Home() {
         {inspectView === "structure" ? renderStructureView() : null}
         {inspectView === "search" ? renderSearchView() : null}
         {inspectView === "impact" ? renderImpactView() : null}
+      </div>
+    );
+  }
+
+  function renderCommandPalette() {
+    if (!isCommandPaletteOpen) {
+      return null;
+    }
+
+    const selectedResult = commandResults[commandSelectedIndex] ?? null;
+
+    return (
+      <div
+        className={styles.commandPalette}
+        style={{ left: commandPalettePosition.x, top: commandPalettePosition.y }}
+      >
+        <div
+          className={styles.commandPaletteBar}
+          onMouseDown={(event) => {
+            setIsCommandDragging(true);
+            setCommandDragOffset({
+              x: event.clientX - commandPalettePosition.x,
+              y: event.clientY - commandPalettePosition.y,
+            });
+          }}
+        >
+          <div className={styles.commandPaletteBarTitle}>
+            <strong>Command Bar</strong>
+            <span>{viewLabel(activeView)}</span>
+          </div>
+          <div className={styles.commandPaletteBarActions}>
+            <button
+              className={styles.commandPaletteBarButton}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={openChatViewTab}
+              type="button"
+            >
+              Open page
+            </button>
+            <button
+              className={styles.commandPaletteBarButton}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => setIsCommandPaletteOpen(false)}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className={styles.commandPaletteContext}>
+          <span className={styles.commandContextChip}>{PathLabel(activeRepoPath || "No project")}</span>
+          <span className={styles.commandContextChip}>{viewLabel(activeView)}</span>
+          {focusedCanvasNodeId ? (
+            <span className={styles.commandContextChip}>
+              {findCanvasNodeTitle(canvasDocument, focusedCanvasNodeId)}
+            </span>
+          ) : null}
+          {pinnedCanvasNodes.map((node) => (
+            <button
+              className={styles.commandContextChipButton}
+              key={node.id}
+              onClick={() => unpinCanvasNode(node.id)}
+              type="button"
+            >
+              {node.title} ×
+            </button>
+          ))}
+        </div>
+
+        <div className={styles.commandPaletteInputWrap}>
+          <input
+            className={styles.commandPaletteInput}
+            onChange={(event) => setCommandInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setCommandSelectedIndex((current) =>
+                  commandResults.length === 0 ? 0 : Math.min(current + 1, commandResults.length - 1),
+                );
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setCommandSelectedIndex((current) => Math.max(current - 1, 0));
+                return;
+              }
+              if (event.key === "Enter") {
+                if (!selectedResult) {
+                  return;
+                }
+                event.preventDefault();
+                selectedResult.run();
+              }
+            }}
+            placeholder="Search notes, projects, chats...  ? ask  ! action"
+            ref={commandInputRef}
+            value={commandInput}
+          />
+        </div>
+
+        <div className={styles.commandPaletteBody}>
+          <div className={styles.commandResults}>
+            {commandResults.length === 0 ? (
+              <p className={styles.helperText}>
+                {commandMode === "ask"
+                  ? "Type a question after ? to ask about the current context."
+                  : commandMode === "action"
+                    ? "Type an action after ! or use !build / !plan with a prompt."
+                    : "Search notes, projects, chats, or views."}
+              </p>
+            ) : (
+              commandResults.map((item, index) => (
+                <button
+                  className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
+                  key={item.id}
+                  onClick={item.run}
+                  type="button"
+                >
+                  <span className={styles.commandResultTitle}>{item.title}</span>
+                  {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className={styles.commandConversationPreview}>
+            {consoleMessages.length === 0 ? (
+              <p className={styles.helperText}>Conversation updates will appear here while you explore the project.</p>
+            ) : (
+              consoleMessages.slice(-4).map((message) => (
+                <article
+                  className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
+                  key={message.id}
+                >
+                  <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
+                  {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                  <div className={styles.consoleMessageBody}>
+                    {renderConsoleMessageContent(
+                      message.content,
+                      message.role === "assistant" ? canvasDocument : null,
+                      openCanvasNode,
+                    )}
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -2068,6 +2859,8 @@ export default function Home() {
         return renderInspectView();
       case "project":
         return renderProjectView();
+      case "chat":
+        return renderChatView();
       default:
         return null;
     }
@@ -2095,7 +2888,7 @@ export default function Home() {
       <div className={isRailExpanded ? styles.shellExpanded : styles.shell}>
         <aside className={isRailExpanded ? styles.leftRailExpanded : styles.leftRail} style={{ width: currentRailWidth }}>
           <nav className={styles.railNav}>
-            {VIEW_ITEMS.map((item) => (
+            {RAIL_VIEW_ITEMS.map((item) => (
               <button
                 className={activeView === item.id ? styles.railButtonActive : styles.railButton}
                 key={item.id}
@@ -2153,7 +2946,7 @@ export default function Home() {
                   type="button"
                 >
                   {tab.type === "view"
-                    ? VIEW_ITEMS.find((item) => item.id === tab.view)?.label ?? tab.view
+                    ? viewLabel(tab.view)
                     : canvasDocument?.nodes.find((node) => node.id === tab.nodeId)?.title ?? "Note"}
                 </button>
                 {tab.id !== "view:notes" ? (
@@ -2170,6 +2963,22 @@ export default function Home() {
           <section className={activeView === "notes" ? styles.workspaceStageFlush : styles.workspaceStage}>
             {renderActiveView()}
           </section>
+
+          <button
+            className={styles.commandLauncher}
+            onClick={() => {
+              setIsCommandPaletteOpen(true);
+              window.setTimeout(() => {
+                commandInputRef.current?.focus();
+              }, 0);
+            }}
+            type="button"
+          >
+            Command
+            <span>Ctrl+K</span>
+          </button>
+
+          {renderCommandPalette()}
         </main>
       </div>
     </div>
@@ -2208,6 +3017,21 @@ function EmptyState({ message }: { message: string }) {
   return <p className={styles.helperText}>{message}</p>;
 }
 
+function viewLabel(view: WorkspaceView) {
+  switch (view) {
+    case "notes":
+      return "Notes";
+    case "inspect":
+      return "Inspect";
+    case "project":
+      return "Project";
+    case "chat":
+      return "Chat";
+    default:
+      return view;
+  }
+}
+
 function ViewIcon({ view }: { view: WorkspaceView }) {
   switch (view) {
     case "notes":
@@ -2230,6 +3054,12 @@ function ViewIcon({ view }: { view: WorkspaceView }) {
         <svg aria-hidden="true" viewBox="0 0 16 16">
           <path d="M3 13.2h10M4 11V4.6a1.6 1.6 0 0 1 1.6-1.6h4.8L12 4.6V11" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
           <path d="M10.4 3v2h2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+        </svg>
+      );
+    case "chat":
+      return (
+        <svg aria-hidden="true" viewBox="0 0 16 16">
+          <path d="M3.4 4.1h9.2a1.3 1.3 0 0 1 1.3 1.3v4.7a1.3 1.3 0 0 1-1.3 1.3H8.1l-2.6 2.2v-2.2H3.4a1.3 1.3 0 0 1-1.3-1.3V5.4a1.3 1.3 0 0 1 1.3-1.3Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
         </svg>
       );
     default:
@@ -2396,15 +3226,13 @@ function findCanvasNodeTitle(document: CanvasDocument | null, nodeId: string) {
   return document?.nodes.find((item) => item.id === nodeId)?.title ?? nodeId;
 }
 
-function buildSelectedNoteContext(document: CanvasDocument | null, selectedNodeId: string | null) {
+function buildSelectedNoteContext(document: CanvasDocument | null, focusNodeIds: string[]) {
   if (!document || document.nodes.length === 0) {
     return undefined;
   }
 
-  const nodes = rankRelevantNotes(document, selectedNodeId).slice(0, 12);
-  const selectedRelationLines = selectedNodeId
-    ? describeRelevantEdges(document, selectedNodeId)
-    : [];
+  const nodes = rankRelevantNotes(document, focusNodeIds).slice(0, 12);
+  const selectedRelationLines = focusNodeIds.flatMap((nodeId) => describeRelevantEdges(document, nodeId));
 
   const noteBlocks = nodes
     .slice(0, 12)
@@ -2454,10 +3282,10 @@ function buildCanvasSetupPrompt(repoPath: string, visibleFileCount: number) {
   ].join(" ");
 }
 
-function rankRelevantNotes(document: CanvasDocument, selectedNodeId: string | null) {
+function rankRelevantNotes(document: CanvasDocument, focusNodeIds: string[]) {
   return [...document.nodes].sort((left, right) => {
-    const leftScore = scoreNote(document, left, selectedNodeId);
-    const rightScore = scoreNote(document, right, selectedNodeId);
+    const leftScore = scoreNote(document, left, focusNodeIds);
+    const rightScore = scoreNote(document, right, focusNodeIds);
     if (leftScore !== rightScore) {
       return rightScore - leftScore;
     }
@@ -2465,21 +3293,23 @@ function rankRelevantNotes(document: CanvasDocument, selectedNodeId: string | nu
   });
 }
 
-function scoreNote(document: CanvasDocument, node: CanvasNode, selectedNodeId: string | null) {
+function scoreNote(document: CanvasDocument, node: CanvasNode, focusNodeIds: string[]) {
   let score =
     node.linked_files.length * 5 +
     node.linked_symbols.length * 6 +
     node.tags.length * 2 +
     Math.min(node.description.trim().length, 220) / 55;
 
-  if (selectedNodeId && node.id === selectedNodeId) {
-    score += 100;
+  for (const focusedNodeId of focusNodeIds) {
+    if (node.id === focusedNodeId) {
+      score += 100;
+    }
   }
 
-  if (selectedNodeId) {
+  for (const focusedNodeId of focusNodeIds) {
     for (const edge of document.edges) {
       const touchesSelected =
-        edge.source_node_id === selectedNodeId || edge.target_node_id === selectedNodeId;
+        edge.source_node_id === focusedNodeId || edge.target_node_id === focusedNodeId;
       const touchesCurrent = edge.source_node_id === node.id || edge.target_node_id === node.id;
       if (!touchesSelected || !touchesCurrent) {
         continue;

@@ -257,6 +257,13 @@ export interface ProjectPlanResponse {
   plan_text: string;
 }
 
+export interface ProjectAskResponse {
+  repo_path: string;
+  prompt: string;
+  summary: string;
+  answer_text: string;
+}
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -444,6 +451,23 @@ export function planProjectFromPrompt(
   conversationContext?: string,
 ) {
   return apiRequest<ProjectPlanResponse>("/project/plan", {
+    method: "POST",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      prompt,
+      semantic_context: semanticContext,
+      conversation_context: conversationContext,
+    }),
+  });
+}
+
+export function askProjectQuestion(
+  repoPath: string,
+  prompt: string,
+  semanticContext?: string,
+  conversationContext?: string,
+) {
+  return apiRequest<ProjectAskResponse>("/project/ask", {
     method: "POST",
     body: JSON.stringify({
       repo_path: repoPath,

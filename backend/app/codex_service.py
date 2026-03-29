@@ -203,6 +203,40 @@ class CodexService:
         summary = self._summarize_plan(plan_text)
         return summary, plan_text
 
+    def ask_project(
+        self,
+        repo_path: str,
+        prompt: str,
+        semantic_context: str | None,
+        conversation_context: str | None = None,
+    ) -> tuple[str, str]:
+        if not self.is_available():
+            raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
+
+        repo_dir = Path(repo_path)
+        context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
+        question_prompt = (
+            "You are answering a user's question about the current project and visible workspace context.\n"
+            "Inspect the repository as needed and respond with a concise, grounded answer.\n"
+            "Do not modify files.\n"
+            "Prefer practical explanations tied to the current codebase.\n\n"
+            f"User question:\n{prompt.strip()}"
+        )
+        final_prompt = (
+            f"{context_prefix}\n\nTask:\n{question_prompt}" if context_prefix else question_prompt
+        )
+        command = self._build_command(repo_dir, final_prompt, True, True)
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        events = self._parse_jsonl_output(result.stdout)
+        answer_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        answer_text = answer_text.strip()
+        if result.returncode != 0 or not answer_text:
+            error_tail = _clean_log_output(result.stderr or result.stdout).strip()
+            raise RuntimeError(error_tail or "Could not answer the project question.")
+
+        summary = self._summarize_plan(answer_text)
+        return summary, answer_text
+
     def generate_architecture_notes(
         self,
         repo_path: str,

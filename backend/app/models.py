@@ -321,6 +321,20 @@ class ProjectPlanResponse(BaseModel):
     plan_text: str
 
 
+class ProjectAskRequest(BaseModel):
+    repo_path: str
+    prompt: str = Field(min_length=2)
+    semantic_context: str | None = None
+    conversation_context: str | None = None
+
+
+class ProjectAskResponse(BaseModel):
+    repo_path: str
+    prompt: str
+    summary: str
+    answer_text: str
+
+
 class CanvasNode(BaseModel):
     id: str
     title: str
