@@ -7,9 +7,6 @@ import { CanvasBoard } from "@/components/canvas-board";
 import { StructureTree } from "@/components/structure-tree";
 import {
   API_BASE_URL,
-  askProjectQuestion,
-  buildProjectFromPrompt,
-  planProjectFromPrompt,
   createCanvasNode,
   createProjectCommit,
   deleteCanvasNode,
@@ -27,6 +24,7 @@ import {
   generateCanvasFromPrompt,
   runImpactAnalysis,
   runQuery,
+  streamProjectRun,
   resetCanvas,
   updateProject,
   updateProjectConversation,
@@ -48,6 +46,7 @@ import {
   type StatusResponse,
   type StructureNode,
   type SymbolRecord,
+  type ProjectRunStreamEvent,
 } from "@/lib/api";
 
 type WorkspaceView = "notes" | "inspect" | "project" | "chat";
@@ -133,6 +132,7 @@ export default function Home() {
   const [canvasDraftSymbols, setCanvasDraftSymbols] = useState("");
   const [pinnedCanvasNodeIds, setPinnedCanvasNodeIds] = useState<string[]>([]);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [commandPaletteMode, setCommandPaletteMode] = useState<"search" | "chat">("search");
   const [commandInput, setCommandInput] = useState("");
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
   const [commandPalettePosition, setCommandPalettePosition] = useState<CommandPalettePosition>({
@@ -374,6 +374,7 @@ export default function Home() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setIsCommandPaletteOpen(true);
+        setCommandPaletteMode("search");
         window.setTimeout(() => {
           commandInputRef.current?.focus();
           commandInputRef.current?.select();
@@ -738,29 +739,79 @@ export default function Home() {
         return;
       }
       await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
-      const response = await buildProjectFromPrompt(
+      let assistantContent = "";
+      const assistantId = `assistant-${Date.now()}`;
+      setConsoleMessages([
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant",
+          title: "Building...",
+          content: "",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
+      let finalSummary = "Build complete.";
+      await streamProjectRun(
         activeRepoPath,
+        "build",
         prompt,
         buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
-        [],
         buildConversationContext(pendingMessages),
+        (event) => {
+          handleProjectRunEvent(event, {
+            assistantId,
+            onChunk: (text) => {
+              assistantContent += text;
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, content: assistantContent } : message,
+                ),
+              );
+            },
+            onCompleted: (completedEvent) => {
+              finalSummary = completedEvent.summary ?? finalSummary;
+              if (completedEvent.document) {
+                setCanvasDocument(completedEvent.document);
+              }
+              setComposerStatus(finalSummary);
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        title: completedEvent.summary ?? "Build complete.",
+                        content:
+                          assistantContent ||
+                          [
+                            completedEvent.code_summary,
+                            completedEvent.note_summary,
+                            completedEvent.note_changes_summary
+                              ? `Notes changes summary:\n${completedEvent.note_changes_summary}`
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join("\n\n"),
+                      }
+                    : message,
+                ),
+              );
+            },
+          });
+        },
       );
-      setCanvasDocument(response.document);
-      setComposerStatus(response.summary);
-      const assistantMessage: ConversationMessage = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        title: response.summary,
-        content: [
-          response.code_summary,
-          response.note_summary,
-          `Notes changes summary:\n${response.note_changes_summary}`,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-        created_at: new Date().toISOString(),
-      };
-      const nextMessages = [...pendingMessages, assistantMessage];
+
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          title: finalSummary,
+          content: assistantContent,
+          created_at: new Date().toISOString(),
+        },
+      ];
       setConsoleMessages(nextMessages);
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
       await refreshCommitStatus(activeRepoPath);
@@ -810,7 +861,9 @@ export default function Home() {
       setCodexPrompt("");
     }
     setIsPlanning(true);
-    setIsConsoleExpanded(true);
+    if (promptValue === codexPrompt.trim()) {
+      setIsConsoleExpanded(true);
+    }
     let ensuredConversationId: string | null = null;
 
     try {
@@ -826,28 +879,67 @@ export default function Home() {
       }
       await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
 
-      const response = await planProjectFromPrompt(
+      let assistantContent = "";
+      const assistantId = `assistant-plan-${Date.now()}`;
+      setConsoleMessages([
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant",
+          title: "Planning...",
+          content: "",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      let finalSummary = "Plan ready.";
+      await streamProjectRun(
         activeRepoPath,
+        "plan",
         prompt,
         buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
+        (event) => {
+          handleProjectRunEvent(event, {
+            assistantId,
+            onChunk: (text) => {
+              assistantContent += text;
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, content: assistantContent } : message,
+                ),
+              );
+            },
+            onCompleted: (completedEvent) => {
+              finalSummary = completedEvent.summary ?? finalSummary;
+              setPendingPlan({
+                messageId: assistantId,
+                prompt,
+                planText: completedEvent.plan_text ?? assistantContent,
+                summary: finalSummary,
+              });
+              setComposerStatus("Plan ready.");
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? { ...message, title: finalSummary, content: completedEvent.plan_text ?? assistantContent }
+                    : message,
+                ),
+              );
+            },
+          });
+        },
       );
-      const assistantMessage: ConversationMessage = {
-        id: `assistant-plan-${Date.now()}`,
-        role: "assistant",
-        title: response.summary,
-        content: response.plan_text,
-        created_at: new Date().toISOString(),
-      };
-      const nextMessages = [...pendingMessages, assistantMessage];
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          title: finalSummary,
+          content: assistantContent,
+          created_at: new Date().toISOString(),
+        },
+      ];
       setConsoleMessages(nextMessages);
-      setPendingPlan({
-        messageId: assistantMessage.id,
-        prompt,
-        planText: response.plan_text,
-        summary: response.summary,
-      });
-      setComposerStatus("Plan ready.");
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
     } catch (error) {
       setComposerStatus("Plan failed.");
@@ -886,7 +978,6 @@ export default function Home() {
     const pendingMessages = [...consoleMessages, userMessage];
     setConsoleMessages(pendingMessages);
     setComposerStatus("Answering your question...");
-    setIsConsoleExpanded(true);
     let ensuredConversationId: string | null = null;
 
     try {
@@ -899,21 +990,60 @@ export default function Home() {
         return;
       }
       await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
-      const response = await askProjectQuestion(
+      let assistantContent = "";
+      const assistantId = `assistant-ask-${Date.now()}`;
+      setConsoleMessages([
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant",
+          title: "Answering...",
+          content: "",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      let finalSummary = "Answer ready.";
+      await streamProjectRun(
         activeRepoPath,
+        "ask",
         prompt,
         buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
+        (event) => {
+          handleProjectRunEvent(event, {
+            assistantId,
+            onChunk: (text) => {
+              assistantContent += text;
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, content: assistantContent } : message,
+                ),
+              );
+            },
+            onCompleted: (completedEvent) => {
+              finalSummary = completedEvent.summary ?? finalSummary;
+              setComposerStatus(finalSummary);
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? { ...message, title: finalSummary, content: completedEvent.answer_text ?? assistantContent }
+                    : message,
+                ),
+              );
+            },
+          });
+        },
       );
-      setComposerStatus(response.summary);
-      const assistantMessage: ConversationMessage = {
-        id: `assistant-ask-${Date.now()}`,
-        role: "assistant",
-        title: response.summary,
-        content: response.answer_text,
-        created_at: new Date().toISOString(),
-      };
-      const nextMessages = [...pendingMessages, assistantMessage];
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          title: finalSummary,
+          content: assistantContent,
+          created_at: new Date().toISOString(),
+        },
+      ];
       setConsoleMessages(nextMessages);
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
     } catch (error) {
@@ -975,33 +1105,81 @@ export default function Home() {
         return;
       }
       await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
-      const response = await buildProjectFromPrompt(
+      let assistantContent = "";
+      const assistantId = `assistant-${Date.now()}`;
+      setConsoleMessages([
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant",
+          title: "Building...",
+          content: "",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      let finalSummary = "Build complete.";
+      await streamProjectRun(
         activeRepoPath,
+        "build",
         [
           "Implement this approved plan.",
           `Original request:\n${plan.prompt}`,
           `Approved plan:\n${plan.planText}`,
         ].join("\n\n"),
         buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
-        [],
         buildConversationContext(pendingMessages),
+        (event) => {
+          handleProjectRunEvent(event, {
+            assistantId,
+            onChunk: (text) => {
+              assistantContent += text;
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, content: assistantContent } : message,
+                ),
+              );
+            },
+            onCompleted: (completedEvent) => {
+              finalSummary = completedEvent.summary ?? finalSummary;
+              if (completedEvent.document) {
+                setCanvasDocument(completedEvent.document);
+              }
+              setComposerStatus(finalSummary);
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        title: finalSummary,
+                        content:
+                          assistantContent ||
+                          [
+                            completedEvent.code_summary,
+                            completedEvent.note_summary,
+                            completedEvent.note_changes_summary
+                              ? `Notes changes summary:\n${completedEvent.note_changes_summary}`
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join("\n\n"),
+                      }
+                    : message,
+                ),
+              );
+            },
+          });
+        },
       );
-      setCanvasDocument(response.document);
-      setComposerStatus(response.summary);
-      const assistantMessage: ConversationMessage = {
-        id: `assistant-${Date.now()}`,
-        role: "assistant",
-        title: response.summary,
-        content: [
-          response.code_summary,
-          response.note_summary,
-          `Notes changes summary:\n${response.note_changes_summary}`,
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
-        created_at: new Date().toISOString(),
-      };
-      const nextMessages = [...pendingMessages, assistantMessage];
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          title: finalSummary,
+          content: assistantContent,
+          created_at: new Date().toISOString(),
+        },
+      ];
       setConsoleMessages(nextMessages);
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
       await refreshCommitStatus(activeRepoPath);
@@ -1250,6 +1428,38 @@ export default function Home() {
     });
   }
 
+  function handleProjectRunEvent(
+    event: ProjectRunStreamEvent,
+    handlers: {
+      assistantId: string;
+      onChunk: (text: string) => void;
+      onCompleted: (event: ProjectRunStreamEvent) => void;
+    },
+  ) {
+    if (event.type === "phase") {
+      if (event.label) {
+        setComposerStatus(event.label);
+      }
+      return;
+    }
+
+    if (event.type === "assistant.chunk") {
+      if (event.text) {
+        handlers.onChunk(event.text);
+      }
+      return;
+    }
+
+    if (event.type === "completed") {
+      handlers.onCompleted(event);
+      return;
+    }
+
+    if (event.type === "error") {
+      throw new Error(event.message || "Run failed.");
+    }
+  }
+
   function pinCanvasNode(nodeId: string) {
     setPinnedCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
     const title = canvasDocument?.nodes.find((node) => node.id === nodeId)?.title ?? "note";
@@ -1353,6 +1563,7 @@ export default function Home() {
             startCodexTransition(() => {
               void submitAskPrompt(question);
             });
+            setCommandPaletteMode("chat");
           },
         },
       ];
@@ -1374,6 +1585,7 @@ export default function Home() {
             run: () => {
               setCommandInput("");
               setIsCommandPaletteOpen(true);
+              setCommandPaletteMode("chat");
               startCodexTransition(() => {
                 void submitBuildPrompt(buildPrompt);
               });
@@ -1392,6 +1604,7 @@ export default function Home() {
             run: () => {
               setCommandInput("");
               setIsCommandPaletteOpen(true);
+              setCommandPaletteMode("chat");
               startCodexTransition(() => {
                 void submitPlanPrompt(planPrompt);
               });
@@ -1480,9 +1693,9 @@ export default function Home() {
           enabled: true,
           run: () => {
             setCommandInput("");
-            openChatViewTab();
-          },
+          openChatViewTab();
         },
+      },
         {
           id: "action-open-notes",
           title: "Open Notes",
@@ -2567,10 +2780,18 @@ export default function Home() {
           }}
         >
           <div className={styles.commandPaletteBarTitle}>
-            <strong>Command Bar</strong>
+            <strong>{commandPaletteMode === "chat" ? "Chat" : "Command Bar"}</strong>
             <span>{viewLabel(activeView)}</span>
           </div>
           <div className={styles.commandPaletteBarActions}>
+            <button
+              className={styles.commandPaletteBarButton}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => setCommandPaletteMode((current) => (current === "chat" ? "search" : "chat"))}
+              type="button"
+            >
+              {commandPaletteMode === "chat" ? "Search" : "Chat"}
+            </button>
             <button
               className={styles.commandPaletteBarButton}
               onMouseDown={(event) => event.stopPropagation()}
@@ -2610,85 +2831,138 @@ export default function Home() {
           ))}
         </div>
 
-        <div className={styles.commandPaletteInputWrap}>
-          <input
-            className={styles.commandPaletteInput}
-            onChange={(event) => setCommandInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setCommandSelectedIndex((current) =>
-                  commandResults.length === 0 ? 0 : Math.min(current + 1, commandResults.length - 1),
-                );
-                return;
-              }
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setCommandSelectedIndex((current) => Math.max(current - 1, 0));
-                return;
-              }
-              if (event.key === "Enter") {
-                if (!selectedResult) {
-                  return;
-                }
-                event.preventDefault();
-                selectedResult.run();
-              }
-            }}
-            placeholder="Search notes, projects, chats...  ? ask  ! action"
-            ref={commandInputRef}
-            value={commandInput}
-          />
-        </div>
+        {commandPaletteMode === "search" ? (
+          <>
+            <div className={styles.commandPaletteInputWrap}>
+              <input
+                className={styles.commandPaletteInput}
+                onChange={(event) => setCommandInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setCommandSelectedIndex((current) =>
+                      commandResults.length === 0 ? 0 : Math.min(current + 1, commandResults.length - 1),
+                    );
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setCommandSelectedIndex((current) => Math.max(current - 1, 0));
+                    return;
+                  }
+                  if (event.key === "Enter") {
+                    if (!selectedResult) {
+                      return;
+                    }
+                    event.preventDefault();
+                    selectedResult.run();
+                  }
+                }}
+                placeholder="Search notes, projects, chats...  ? ask  ! action"
+                ref={commandInputRef}
+                value={commandInput}
+              />
+            </div>
 
-        <div className={styles.commandPaletteBody}>
-          <div className={styles.commandResults}>
-            {commandResults.length === 0 ? (
-              <p className={styles.helperText}>
-                {commandMode === "ask"
-                  ? "Type a question after ? to ask about the current context."
-                  : commandMode === "action"
-                    ? "Type an action after ! or use !build / !plan with a prompt."
-                    : "Search notes, projects, chats, or views."}
-              </p>
-            ) : (
-              commandResults.map((item, index) => (
-                <button
-                  className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
-                  key={item.id}
-                  onClick={item.run}
-                  type="button"
-                >
-                  <span className={styles.commandResultTitle}>{item.title}</span>
-                  {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
-                </button>
-              ))
-            )}
-          </div>
+            <div className={styles.commandPaletteBodySingle}>
+              <div className={styles.commandResults}>
+                {commandResults.length === 0 ? (
+                  <p className={styles.helperText}>
+                    {commandMode === "ask"
+                      ? "Type a question after ? to ask about the current context."
+                      : commandMode === "action"
+                        ? "Type an action after ! or use !build / !plan with a prompt."
+                        : "Search notes, projects, chats, or views."}
+                  </p>
+                ) : (
+                  commandResults.map((item, index) => (
+                    <button
+                      className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
+                      key={item.id}
+                      onClick={item.run}
+                      type="button"
+                    >
+                      <span className={styles.commandResultTitle}>{item.title}</span>
+                      {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className={styles.commandChatBody}>
+            <div className={styles.commandChatMessages}>
+              {consoleMessages.length === 0 ? (
+                <p className={styles.helperText}>Ask about the current project, notes, or visible context.</p>
+              ) : (
+                consoleMessages.map((message) => (
+                  <article
+                    className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
+                    key={message.id}
+                  >
+                    <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
+                    {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                    <div className={styles.consoleMessageBody}>
+                      {renderConsoleMessageContent(
+                        message.content,
+                        message.role === "assistant" ? canvasDocument : null,
+                        openCanvasNode,
+                      )}
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
 
-          <div className={styles.commandConversationPreview}>
-            {consoleMessages.length === 0 ? (
-              <p className={styles.helperText}>Conversation updates will appear here while you explore the project.</p>
-            ) : (
-              consoleMessages.slice(-4).map((message) => (
-                <article
-                  className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
-                  key={message.id}
-                >
-                  <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
-                  {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                  <div className={styles.consoleMessageBody}>
-                    {renderConsoleMessageContent(
-                      message.content,
-                      message.role === "assistant" ? canvasDocument : null,
-                      openCanvasNode,
-                    )}
-                  </div>
-                </article>
-              ))
-            )}
+            <label className={styles.commandChatComposer}>
+              <textarea
+                className={styles.consoleComposerInput}
+                disabled={isBuilding || isPlanning}
+                onChange={(event) => setCodexPrompt(event.target.value)}
+                placeholder={isPlanMode ? "Describe what to plan in this project." : "Describe what to build or ask in this project."}
+                rows={4}
+                value={codexPrompt}
+              />
+              <div className={styles.consoleComposerActions}>
+                <div className={styles.consoleComposerLeft}>
+                  <button
+                    className={styles.commitButton}
+                    disabled={isCommitting || !commitStatus?.has_changes}
+                    onClick={handleCommitClick}
+                    type="button"
+                  >
+                    Commit
+                  </button>
+                  <span className={styles.buildComposerMeta}>
+                    {visibleContextNodeIds.length
+                      ? `Using ${visibleContextNodeIds.length} focused/pinned notes`
+                      : "Using project context"}
+                  </span>
+                </div>
+                <div className={styles.consoleComposerRight}>
+                  <label className={styles.planModeToggle}>
+                    <input
+                      checked={isPlanMode}
+                      disabled={isBuilding || isPlanning}
+                      onChange={(event) => setIsPlanMode(event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Plan mode</span>
+                  </label>
+                  <button
+                    className={styles.primaryButton}
+                    disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
+                    onClick={handleSubmitArchitecturePrompt}
+                    type="button"
+                  >
+                    {isPlanning ? "Planning..." : isBuilding ? "Building..." : isPlanMode ? "Plan" : "Build"}
+                  </button>
+                </div>
+              </div>
+            </label>
           </div>
-        </div>
+        )}
       </div>
     );
   }

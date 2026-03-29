@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .config import settings
 from .canvas_service import CanvasService, CanvasStore
@@ -35,6 +37,7 @@ from .models import (
     ProjectBuildResponse,
     ProjectAskRequest,
     ProjectAskResponse,
+    ProjectRunStreamRequest,
     ProjectPlanRequest,
     ProjectPlanResponse,
     ProjectProfileResponse,
@@ -441,6 +444,133 @@ def ask_project(request: ProjectAskRequest) -> ProjectAskResponse:
         summary=summary,
         answer_text=answer_text,
     )
+
+
+@app.post("/project/run-stream")
+def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    canvas_service.set_repo_path(resolved_repo_path)
+
+    def emit(event: dict[str, object]) -> bytes:
+        return (json.dumps(event) + "\n").encode("utf-8")
+
+    def stream_text_chunks(text: str) -> list[bytes]:
+        chunk_size = 120
+        chunks: list[bytes] = []
+        for start in range(0, len(text), chunk_size):
+            chunks.append(
+                emit(
+                    {
+                        "type": "assistant.chunk",
+                        "text": text[start : start + chunk_size],
+                    }
+                )
+            )
+        return chunks
+
+    def generate():
+        yield emit({"type": "phase", "phase": "starting", "label": "Preparing request..."})
+        try:
+            if request.mode == "ask":
+                yield emit({"type": "phase", "phase": "answering", "label": "Answering question..."})
+                summary, answer_text = codex_service.ask_project(
+                    resolved_repo_path,
+                    request.prompt,
+                    request.semantic_context,
+                    conversation_context=request.conversation_context,
+                )
+                for chunk in stream_text_chunks(answer_text):
+                    yield chunk
+                yield emit(
+                    {
+                        "type": "completed",
+                        "mode": "ask",
+                        "summary": summary,
+                        "answer_text": answer_text,
+                    }
+                )
+                return
+
+            if request.mode == "plan":
+                yield emit({"type": "phase", "phase": "planning", "label": "Preparing implementation plan..."})
+                summary, plan_text = codex_service.plan_project(
+                    repo_path=resolved_repo_path,
+                    prompt=request.prompt,
+                    semantic_context=request.semantic_context,
+                    conversation_context=request.conversation_context,
+                )
+                for chunk in stream_text_chunks(plan_text):
+                    yield chunk
+                yield emit(
+                    {
+                        "type": "completed",
+                        "mode": "plan",
+                        "summary": summary,
+                        "plan_text": plan_text,
+                    }
+                )
+                return
+
+            yield emit({"type": "phase", "phase": "building", "label": "Editing code..."})
+            change_response = codex_service.build_project(
+                repo_path=resolved_repo_path,
+                prompt=request.prompt,
+                semantic_context=request.semantic_context,
+                conversation_context=request.conversation_context,
+            )
+            yield emit({"type": "phase", "phase": "updating_notes", "label": "Updating notes..."})
+            generated_nodes, generated_edges, note_summary = codex_service.generate_architecture_notes(
+                repo_path=resolved_repo_path,
+                prompt=request.prompt,
+            )
+            document, notes_created, note_changes = canvas_service.append_generated_map(generated_nodes, generated_edges)
+
+            modified_files = [item.path for item in change_response.changed_files]
+            file_count = len(modified_files)
+            summary_parts = (
+                [f"Updated {file_count} file{'s' if file_count != 1 else ''} in {resolved_repo_path}."]
+                if file_count > 0
+                else [f"No project files were modified in {resolved_repo_path}."]
+            )
+            if notes_created > 0:
+                summary_parts.append(f"Added {notes_created} architecture note{'s' if notes_created != 1 else ''}.")
+            else:
+                summary_parts.append("Architecture notes refreshed with no new nodes added.")
+            summary = " ".join(summary_parts)
+            assistant_text = "\n\n".join(
+                item
+                for item in [
+                    change_response.summary,
+                    note_summary,
+                    f"Notes changes summary:\n{note_changes.summary}",
+                ]
+                if item
+            )
+            for chunk in stream_text_chunks(assistant_text):
+                yield chunk
+            yield emit(
+                {
+                    "type": "completed",
+                    "mode": "build",
+                    "summary": summary,
+                    "code_summary": change_response.summary,
+                    "note_summary": note_summary,
+                    "note_changes_summary": note_changes.summary,
+                    "modified_files": modified_files,
+                    "notes_created": notes_created,
+                    "document": document.model_dump(mode="json"),
+                }
+            )
+        except RuntimeError as error:
+            yield emit({"type": "error", "message": str(error)})
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 @app.get("/canvas", response_model=CanvasResponse)

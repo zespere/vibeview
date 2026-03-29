@@ -264,6 +264,24 @@ export interface ProjectAskResponse {
   answer_text: string;
 }
 
+export interface ProjectRunStreamEvent {
+  type: "phase" | "assistant.chunk" | "completed" | "error";
+  phase?: string;
+  label?: string;
+  text?: string;
+  mode?: "ask" | "plan" | "build";
+  summary?: string;
+  answer_text?: string;
+  plan_text?: string;
+  code_summary?: string;
+  note_summary?: string;
+  note_changes_summary?: string;
+  modified_files?: string[];
+  notes_created?: number;
+  document?: CanvasDocument;
+  message?: string;
+}
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -476,6 +494,58 @@ export function askProjectQuestion(
       conversation_context: conversationContext,
     }),
   });
+}
+
+export async function streamProjectRun(
+  repoPath: string,
+  mode: "ask" | "plan" | "build",
+  prompt: string,
+  semanticContext: string | undefined,
+  conversationContext: string | undefined,
+  onEvent: (event: ProjectRunStreamEvent) => void,
+) {
+  const response = await fetch(`${API_BASE_URL}/project/run-stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      repo_path: repoPath,
+      mode,
+      prompt,
+      semantic_context: semanticContext,
+      conversation_context: conversationContext,
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const detail = await response.text();
+    throw new Error(detail || `Request failed with ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      onEvent(JSON.parse(trimmed) as ProjectRunStreamEvent);
+    }
+  }
+
+  const trailing = buffer.trim();
+  if (trailing) {
+    onEvent(JSON.parse(trailing) as ProjectRunStreamEvent);
+  }
 }
 
 export function fetchCanvas(repoPath?: string) {

@@ -335,6 +335,14 @@ class ProjectAskResponse(BaseModel):
     answer_text: str
 
 
+class ProjectRunStreamRequest(BaseModel):
+    repo_path: str
+    prompt: str = Field(min_length=2)
+    mode: Literal["ask", "plan", "build"]
+    semantic_context: str | None = None
+    conversation_context: str | None = None
+
+
 class CanvasNode(BaseModel):
     id: str
     title: str

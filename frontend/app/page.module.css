@@ -967,8 +967,8 @@
 .commandPalette {
   position: fixed;
   z-index: 20;
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   width: 520px;
   height: 620px;
   border: 1px solid #d8cebf;
@@ -1072,29 +1072,40 @@
   border-color: #b8936d;
 }
 
-.commandPaletteBody {
-  display: grid;
-  grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  min-height: 0;
-  border-top: 1px solid #eee4d6;
-}
-
+.commandPaletteBodySingle,
 .commandResults,
-.commandConversationPreview {
+.commandChatMessages {
   min-height: 0;
   overflow: auto;
   padding: 12px;
 }
 
-.commandResults {
-  border-bottom: 1px solid #eee4d6;
+.commandPaletteBodySingle {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.commandConversationPreview {
+.commandChatBody {
   display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid #eee4d6;
+}
+
+.commandChatMessages {
+  display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
   background: rgba(255, 249, 241, 0.76);
+}
+
+.commandChatComposer {
+  display: block;
+  padding: 10px 12px 12px;
+  border-top: 1px solid #e7ddcf;
 }
 
 .commandResult,
