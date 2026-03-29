@@ -6,6 +6,7 @@ import "@xyflow/react/dist/style.css";
 import {
   applyNodeChanges,
   Background,
+  BackgroundVariant,
   Handle,
   type Edge,
   type Node,
@@ -300,7 +301,7 @@ export function CanvasBoard({
         proOptions={{ hideAttribution: true }}
         selectionOnDrag={false}
       >
-        <Background color="#e6ddd2" gap={24} />
+        <Background color="#e6ddd2" gap={24} variant={BackgroundVariant.Lines} />
       </ReactFlow>
       {contextMenu ? (
         <div

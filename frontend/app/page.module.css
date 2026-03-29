@@ -937,33 +937,6 @@
   border-top: 1px solid #e7ddcf;
 }
 
-.commandLauncher {
-  position: fixed;
-  right: 24px;
-  bottom: 24px;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  height: 40px;
-  border: 1px solid #d6cbbb;
-  border-radius: 10px;
-  background: rgba(255, 252, 246, 0.96);
-  color: #2b231b;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow: 0 8px 24px rgba(37, 28, 19, 0.08);
-  cursor: pointer;
-  z-index: 12;
-}
-
-.commandLauncher span {
-  color: #7b6d5c;
-  font-size: 12px;
-  font-weight: 500;
-}
-
 .commandPalette {
   position: fixed;
   z-index: 20;
@@ -1735,10 +1708,6 @@
   min-width: 100%;
   min-height: 100%;
   background-color: #fffdf9;
-  background-image:
-    linear-gradient(to right, #efe7dd 1px, transparent 1px),
-    linear-gradient(to bottom, #efe7dd 1px, transparent 1px);
-  background-size: 24px 24px;
 }
 
 .canvasBoard :global(.react-flow) {
@@ -2036,8 +2005,4 @@
     height: min(76vh, 620px);
   }
 
-  .commandLauncher {
-    right: 14px;
-    bottom: 14px;
-  }
 }

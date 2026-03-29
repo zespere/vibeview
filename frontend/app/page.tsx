@@ -1503,6 +1503,12 @@ export default function Home() {
     setIsCommandPaletteOpen(false);
   }
 
+  function returnChatToFloatingContainer() {
+    setIsCommandPaletteOpen(true);
+    setCommandPaletteMode("chat");
+    closeTab("view:chat");
+  }
+
   function handleCloseCanvasTab(nodeId: string) {
     setOpenCanvasNodeIds((current) => {
       const next = current.filter((item) => item !== nodeId);
@@ -2657,8 +2663,8 @@ export default function Home() {
                 {latestConsoleSummary}
               </p>
             </div>
-            <button className={styles.secondaryButton} onClick={() => setIsCommandPaletteOpen(true)} type="button">
-              Open command bar
+            <button className={styles.secondaryButton} onClick={returnChatToFloatingContainer} type="button">
+              Floating container
             </button>
           </div>
 
@@ -3249,20 +3255,6 @@ export default function Home() {
           <section className={activeView === "notes" ? styles.workspaceStageFlush : styles.workspaceStage}>
             {renderActiveView()}
           </section>
-
-          <button
-            className={styles.commandLauncher}
-            onClick={() => {
-              setIsCommandPaletteOpen(true);
-              window.setTimeout(() => {
-                commandInputRef.current?.focus();
-              }, 0);
-            }}
-            type="button"
-          >
-            Command
-            <span>Ctrl+K</span>
-          </button>
 
           {renderCommandPalette()}
         </main>
