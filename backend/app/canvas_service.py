@@ -43,6 +43,15 @@ class CanvasStore:
     def _project_canvas_path(self, repo_path: str) -> Path:
         return Path(repo_path) / ".konceptura" / "canvas.json"
 
+    def _ensure_konceptura_gitignore(self, repo_path: str) -> None:
+        konceptura_dir = Path(repo_path) / ".konceptura"
+        konceptura_dir.mkdir(parents=True, exist_ok=True)
+        gitignore_path = konceptura_dir / ".gitignore"
+        desired = "*\n!.gitignore\n!canvas.json\n"
+        current = gitignore_path.read_text() if gitignore_path.exists() else None
+        if current != desired:
+            gitignore_path.write_text(desired)
+
     def _read_document(self, path: Path) -> CanvasDocument:
         if not path.exists():
             return CanvasDocument()
@@ -67,6 +76,7 @@ class CanvasStore:
         payload = json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True)
         self.path.write_text(payload)
         if document.repo_path:
+            self._ensure_konceptura_gitignore(document.repo_path)
             project_path = self._project_canvas_path(document.repo_path)
             if document.nodes or document.edges or project_path.exists():
                 project_path.parent.mkdir(parents=True, exist_ok=True)

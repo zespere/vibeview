@@ -1766,6 +1766,10 @@
   width: 240px;
 }
 
+.canvasBoard :global(.react-flow__edge) {
+  pointer-events: none;
+}
+
 .canvasBoard :global(.react-flow__edge-path) {
   stroke: #b6a391;
   stroke-width: 2;
@@ -1807,6 +1811,19 @@
 
 .canvasContextItemDanger {
   color: #8b2e1a;
+}
+
+.canvasNodeShell {
+  position: relative;
+}
+
+.canvasNodeHandle {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .canvasEdges,

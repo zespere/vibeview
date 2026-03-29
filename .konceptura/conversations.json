@@ -1,6 +1,28 @@
 {
   "conversations": [
     {
+      "created_at": "2026-03-29T19:42:32.062334Z",
+      "id": "conv_fa89b4a760",
+      "messages": [
+        {
+          "content": "explain currently opened note, how does it work with the command bar?",
+          "created_at": "2026-03-29T19:42:32.010000Z",
+          "id": "user-1774813352010",
+          "role": "user",
+          "title": null
+        },
+        {
+          "content": "The \u201ccurrently opened note\u201d is the note Konceptura treats as the current canvas focus. In code, that is `focusedCanvasNodeId`, which is resolved as:\n\n- the note tab you currently have open, if the active tab is a note\n- otherwise the node currently selected on the canvas\n\nThat logic is in [frontend/app/page.tsx](/home/wniak/konceptura/frontend/app/page.tsx#L187). Opening a note through the canvas or the command bar runs `openCanvasNode`, which selects the node, adds a note tab if needed, and makes that tab active at [frontend/app/page.tsx](/home/wniak/konceptura/frontend/app/page.tsx#L1478).\n\nWith the command bar, that focused note is used in three ways:\n\n- It is shown as a context chip in the bar header, alongside repo and view, at [frontend/app/page.tsx](/home/wniak/konceptura/frontend/app/page.tsx#L2817).\n- It becomes part of `visibleContextNodeIds`, which includes the focused note plus any pinned notes, at [frontend/app/page.tsx](/home/wniak/konceptura/frontend/app/page.tsx#L193).\n- That note context is passed into `ask`, `plan`, and `build` runs via `buildSelectedNoteContext(...)`, which ranks the focused/pinned notes highest and includes their relationships in the prompt sent to the backend at [frontend/app/page.tsx](/home/wniak/konceptura/frontend/app/page.tsx#L760) and [frontend/app/page.tsx](/home/wniak/konceptura/frontend/app/page.tsx#L3503).\n\nSo practically: if you open a note, then use `Ctrl+K`, the command bar treats that note as the active architectural context. `?question` asks about that context, `!build ...` / `!plan ...` execute against that context, and `!pin`/`!unpin` actions let you keep notes in scope even after switching elsewhere. The command bar itself opens with `Ctrl+K` from the global key handler at [frontend/app/page.tsx](/home/wniak/konceptura/frontend/app/page.tsx#L366).",
+          "created_at": "2026-03-29T19:43:27.101000Z",
+          "id": "assistant-ask-1774813352612",
+          "role": "assistant",
+          "title": "The \u201ccurrently opened note\u201d is the note Konceptura treats as the current canvas focus. In code, that is `focusedCanvasNodeId`, which is reso"
+        }
+      ],
+      "title": "explain currently opened note, how does it...",
+      "updated_at": "2026-03-29T19:43:27.101000Z"
+    },
+    {
       "created_at": "2026-03-29T19:34:50.700374Z",
       "id": "conv_f283087c16",
       "messages": [

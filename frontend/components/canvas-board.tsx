@@ -6,6 +6,7 @@ import "@xyflow/react/dist/style.css";
 import {
   applyNodeChanges,
   Background,
+  Handle,
   type Edge,
   type Node,
   type NodeChange,
@@ -14,6 +15,7 @@ import {
   type ReactFlowInstance,
   ReactFlow,
   type ReactFlowProps,
+  Position,
   type Viewport,
 } from "@xyflow/react";
 
@@ -340,39 +342,43 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
   const isCompact = detailLevel === "compact";
 
   return (
-    <button
-      className={
-        selected
-          ? `${styles.canvasNodeActive} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
-          : `${styles.canvasNode} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
-      }
-      onClick={() => onSelectNode(node.id)}
-      onDoubleClick={() => onOpenNode(node.id)}
-      type="button"
-    >
-      {!isMinimal ? (
-        <div className={styles.canvasNodeHeader}>
-          <div className={styles.canvasTagList}>
-            {node.tags.length === 0 ? <span className={styles.canvasTag}>untagged</span> : null}
-            {node.tags.slice(0, isCompact ? 2 : 3).map((tag) => (
-              <span className={styles.canvasTag} key={tag}>
-                {tag}
-              </span>
-            ))}
+    <div className={styles.canvasNodeShell}>
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-target`} position={Position.Top} type="target" />
+      <Handle className={styles.canvasNodeHandle} id={`${node.id}-source`} position={Position.Bottom} type="source" />
+      <button
+        className={
+          selected
+            ? `${styles.canvasNodeActive} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
+            : `${styles.canvasNode} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
+        }
+        onClick={() => onSelectNode(node.id)}
+        onDoubleClick={() => onOpenNode(node.id)}
+        type="button"
+      >
+        {!isMinimal ? (
+          <div className={styles.canvasNodeHeader}>
+            <div className={styles.canvasTagList}>
+              {node.tags.length === 0 ? <span className={styles.canvasTag}>untagged</span> : null}
+              {node.tags.slice(0, isCompact ? 2 : 3).map((tag) => (
+                <span className={styles.canvasTag} key={tag}>
+                  {tag}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-      ) : null}
-      <strong className={styles.canvasNodeTitle}>{node.title}</strong>
-      {detailLevel === "full" ? (
-        <>
-          <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
-          <div className={styles.canvasNodeMeta}>
-            <span>{node.linked_files.length} files</span>
-            <span>{node.linked_symbols.length} symbols</span>
-          </div>
-        </>
-      ) : null}
-    </button>
+        ) : null}
+        <strong className={styles.canvasNodeTitle}>{node.title}</strong>
+        {detailLevel === "full" ? (
+          <>
+            <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
+            <div className={styles.canvasNodeMeta}>
+              <span>{node.linked_files.length} files</span>
+              <span>{node.linked_symbols.length} symbols</span>
+            </div>
+          </>
+        ) : null}
+      </button>
+    </div>
   );
 }
 

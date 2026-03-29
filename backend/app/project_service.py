@@ -61,6 +61,8 @@ class ProjectService:
             repo_path=repo_path,
             recent_projects=recent_projects[:8],
         )
+        if repo_path:
+            self._ensure_konceptura_gitignore(repo_path)
         return self.store.save(project)
 
     def list_project_items(self) -> tuple[str | None, list[ProjectTreeItem]]:
@@ -150,6 +152,7 @@ class ProjectService:
 
         repo_root = Path(resolved_repo_path)
         repo_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_konceptura_gitignore(str(repo_root))
         agents_path = repo_root / "AGENTS.md"
         normalized = content.rstrip() + ("\n" if content.strip() else "")
         agents_path.write_text(normalized)
@@ -233,6 +236,7 @@ class ProjectService:
     def _save_conversation_document(self, repo_path: str, document: ConversationDocument) -> ConversationDocument:
         path = self._conversation_path(repo_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_konceptura_gitignore(repo_path)
         path.write_text(json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True))
         return document
 
@@ -312,3 +316,12 @@ class ProjectService:
                 continue
             count += 1
         return count
+
+    def _ensure_konceptura_gitignore(self, repo_path: str) -> None:
+        konceptura_dir = self._konceptura_dir(self._normalize_repo_path(repo_path))
+        konceptura_dir.mkdir(parents=True, exist_ok=True)
+        gitignore_path = konceptura_dir / ".gitignore"
+        desired = "*\n!.gitignore\n!canvas.json\n"
+        current = gitignore_path.read_text() if gitignore_path.exists() else None
+        if current != desired:
+            gitignore_path.write_text(desired)
