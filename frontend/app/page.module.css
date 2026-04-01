@@ -426,6 +426,7 @@
   height: 100vh;
   background: #f7f4ee;
   overflow: hidden;
+  position: relative;
 }
 
 .shell .workspace {
@@ -463,9 +464,21 @@
 
 .tabStrip {
   flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 12;
   overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid #ddd5ca;
   padding: 12px 28px 0;
+  background: #f7f4ee;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.tabStrip::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .tab,
@@ -637,7 +650,8 @@
   border-radius: 0;
   background: transparent;
   padding-bottom: 0;
-  overflow: auto;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .canvasSetupCard {
