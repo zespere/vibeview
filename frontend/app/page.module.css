@@ -574,11 +574,11 @@
 }
 
 .workspaceStageWithDockCollapsed {
-  padding-bottom: 178px;
+  padding-bottom: 0;
 }
 
 .workspaceStageWithDockExpanded {
-  padding-bottom: 420px;
+  padding-bottom: 0;
 }
 
 .workspaceSingle {
@@ -599,15 +599,15 @@
 
 .notesConsoleShell {
   position: absolute;
-  bottom: 0;
+  bottom: 16px;
   right: 0;
   left: 0;
   z-index: 8;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 0 18px 14px;
+  gap: 0;
+  padding: 0 18px;
   pointer-events: none;
 }
 
@@ -616,10 +616,10 @@
   width: min(980px, 100%);
   flex-direction: column;
   gap: 0;
-  border: 1px solid #d4c8ba;
-  border-radius: 14px;
-  background: rgba(250, 244, 235, 0.95);
-  box-shadow: 0 18px 42px rgba(47, 33, 20, 0.12);
+  border: 1px solid rgba(212, 200, 186, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 253, 249, 0.92);
+  box-shadow: none;
   overflow: hidden;
   pointer-events: auto;
 }
@@ -854,17 +854,17 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  border: 0;
-  border-radius: 0;
-  background: rgba(248, 242, 232, 0.82);
+  background: transparent;
   color: #241d17;
   cursor: pointer;
-  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 14px 10px;
   pointer-events: auto;
 }
 
 .notesConsoleBarExpanded {
-  border-top: 1px solid #e3d7c8;
+  border-bottom: 1px solid #e2d8cb;
 }
 
 .notesConsoleBarLabel {
@@ -894,7 +894,7 @@
   width: 100%;
   height: 260px;
   border: 0;
-  background: rgba(255, 251, 245, 0.72);
+  background: transparent;
   overflow: hidden;
   pointer-events: auto;
 }
@@ -976,21 +976,30 @@
 .consoleComposer {
   display: block;
   border: 0;
+  border-top: 1px solid #e2d8cb;
+  border-radius: 0;
   background: transparent;
-  padding: 8px 10px 10px;
+  box-shadow: none;
+  padding: 0;
+  overflow: hidden;
   pointer-events: auto;
 }
 
 .consoleComposerInput {
+  appearance: none;
+  -webkit-appearance: none;
   width: 100%;
   border: 0;
   background: transparent;
+  box-shadow: none;
   color: #241d17;
   font: inherit;
-  line-height: 1.5;
-  min-height: 24px;
-  max-height: 72px;
-  padding: 4px 6px 2px;
+  line-height: 1.35;
+  min-height: 28px;
+  max-height: 128px;
+  padding: 14px 18px 10px;
+  border-radius: 0;
+  overflow-y: auto;
   resize: none;
 }
 
@@ -1007,9 +1016,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 6px;
+  margin-top: 0;
   border-top: 1px solid #e2d8cb;
-  padding: 6px 2px 0;
+  padding: 10px 18px 12px;
 }
 
 .consoleComposerLeft {
@@ -2275,11 +2284,11 @@
   }
 
   .workspaceStageWithDockCollapsed {
-    padding-bottom: 196px;
+    padding-bottom: 0;
   }
 
   .workspaceStageWithDockExpanded {
-    padding-bottom: 500px;
+    padding-bottom: 0;
   }
 
 }

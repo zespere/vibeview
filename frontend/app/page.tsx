@@ -720,6 +720,10 @@ export default function Home() {
   }, [consoleMessages, isConsoleExpanded]);
 
   useEffect(() => {
+    resizeComposerInput(composerInputRef.current);
+  }, [codexPrompt]);
+
+  useEffect(() => {
     explorationSuggestionStatesRef.current = explorationSuggestionStates;
   }, [explorationSuggestionStates]);
 
@@ -2570,6 +2574,13 @@ export default function Home() {
     }
   }
 
+  function handleComposerChange(value: string) {
+    setCodexPrompt(value);
+    window.requestAnimationFrame(() => {
+      resizeComposerInput(composerInputRef.current);
+    });
+  }
+
   function pinPreviewTab(tabId: OpenTab["id"]) {
     setOpenTabs((current) =>
       current.map((tab) => {
@@ -3174,11 +3185,11 @@ export default function Home() {
             <textarea
               className={styles.consoleComposerInput}
               disabled={isComposerBusy}
-              onChange={(event) => setCodexPrompt(event.target.value)}
+              onChange={(event) => handleComposerChange(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               placeholder="Ask about the project, describe a change, or type / for commands."
               ref={composerInputRef}
-              rows={3}
+              rows={1}
               value={codexPrompt}
             />
             <div className={styles.consoleComposerActions}>
@@ -4568,6 +4579,16 @@ function getErrorMessage(error: unknown) {
     return error.message;
   }
   return "Request failed";
+}
+
+function resizeComposerInput(element: HTMLTextAreaElement | null) {
+  if (!element) {
+    return;
+  }
+
+  element.style.height = "0px";
+  const nextHeight = Math.min(Math.max(element.scrollHeight, 28), 128);
+  element.style.height = `${nextHeight}px`;
 }
 
 function statusTone(status: StatusResponse["index_job"]["status"] | undefined): "ok" | "error" | "muted" {
