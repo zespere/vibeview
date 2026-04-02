@@ -449,7 +449,7 @@ export function fetchExplorationSuggestions(
 
 export async function streamProjectRun(
   repoPath: string,
-  mode: "ask" | "plan" | "build",
+  mode: "ask" | "plan" | "build" | "auto",
   prompt: string,
   semanticContext: string | undefined,
   conversationContext: string | undefined,

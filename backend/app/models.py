@@ -367,7 +367,7 @@ class ExplorationSuggestionResponse(BaseModel):
 class ProjectRunStreamRequest(BaseModel):
     repo_path: str
     prompt: str = Field(min_length=2)
-    mode: Literal["ask", "plan", "build"]
+    mode: Literal["ask", "plan", "build", "auto"]
     semantic_context: str | None = None
     conversation_context: str | None = None
 

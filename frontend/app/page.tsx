@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
@@ -42,21 +42,16 @@ import {
   type ProjectRunStreamEvent,
 } from "@/lib/api";
 
-type WorkspaceView = "notes" | "project" | "chat";
+type WorkspaceView = "notes" | "project";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `note:${string}`; type: "note"; nodeId: string }
   | { id: `explore:${string}`; type: "exploration"; explorationId: string };
 
-const RAIL_VIEW_ITEMS: Array<{ id: Exclude<WorkspaceView, "chat">; label: string }> = [
+const RAIL_VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
   { id: "notes", label: "Notes" },
   { id: "project", label: "Project" },
 ];
-
-interface CommandPalettePosition {
-  x: number;
-  y: number;
-}
 
 interface CommandResultItem {
   id: string;
@@ -126,10 +121,10 @@ export default function Home() {
   const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [codexPrompt, setCodexPrompt] = useState("");
-  const [isPlanMode, setIsPlanMode] = useState(false);
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isPlanning, setIsPlanning] = useState(false);
+  const [isAnswering, setIsAnswering] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
@@ -156,19 +151,10 @@ export default function Home() {
   const [canvasDraftFiles, setCanvasDraftFiles] = useState("");
   const [canvasDraftSymbols, setCanvasDraftSymbols] = useState("");
   const [pinnedCanvasNodeIds, setPinnedCanvasNodeIds] = useState<string[]>([]);
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [commandPaletteMode, setCommandPaletteMode] = useState<"search" | "chat">("search");
-  const [commandInput, setCommandInput] = useState("");
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
-  const [commandPalettePosition, setCommandPalettePosition] = useState<CommandPalettePosition>({
-    x: 360,
-    y: 92,
-  });
-  const [isCommandDragging, setIsCommandDragging] = useState(false);
-  const [commandDragOffset, setCommandDragOffset] = useState<{ x: number; y: number } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
-  const commandInputRef = useRef<HTMLInputElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const expectedRepoPathRef = useRef("");
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
 
@@ -235,25 +221,15 @@ export default function Home() {
     }
     return [...ids];
   }, [currentExplorationSession?.pathNodeIds, focusedCanvasNodeId, pinnedCanvasNodeIds, selectedCanvasNodeIds]);
-  const pinnedCanvasNodes = useMemo(() => {
-    if (!canvasDocument) {
-      return [];
-    }
-    return pinnedCanvasNodeIds
-      .map((nodeId) => canvasDocument.nodes.find((item) => item.id === nodeId) ?? null)
-      .filter((item): item is CanvasNode => item !== null);
-  }, [canvasDocument, pinnedCanvasNodeIds]);
   const shouldShowCanvasSetup =
     !!canvasDocument &&
     canvasDocument.nodes.length === 0 &&
     !!activeRepoPath &&
     workspaceStatus?.repo_path === activeRepoPath &&
     workspaceStatus.has_project_files;
-  const commandMode = commandInput.startsWith("?")
-    ? "ask"
-    : commandInput.startsWith("!")
-      ? "action"
-      : "navigate";
+  const isSlashCommandMode = codexPrompt.trim().startsWith("/");
+  const commandQuery = isSlashCommandMode ? codexPrompt.trim().slice(1).trim() : "";
+  const isComposerBusy = isBuilding || isPlanning || isAnswering || codexPending;
   const activeConversationSummary = useMemo(
     () =>
       activeProjectTreeItem?.conversations.find(
@@ -268,6 +244,9 @@ export default function Home() {
     if (isBuilding) {
       return "Building the project and refreshing notes...";
     }
+    if (isAnswering) {
+      return "Working through the request...";
+    }
     if (composerStatus) {
       return composerStatus;
     }
@@ -275,7 +254,7 @@ export default function Home() {
       return activeConversationSummary.title;
     }
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
-  }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding, isPlanning]);
+  }, [activeConversationSummary, composerStatus, consoleMessages, isAnswering, isBuilding, isPlanning]);
   const notesExplorationPresentation = useMemo(
     () =>
       buildExplorationPresentation(
@@ -747,11 +726,16 @@ export default function Home() {
     function handleKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setIsCommandPaletteOpen(true);
-        setCommandPaletteMode("search");
+        setIsConsoleExpanded(true);
+        if (!codexPrompt.trim()) {
+          setCodexPrompt("/");
+        }
         window.setTimeout(() => {
-          commandInputRef.current?.focus();
-          commandInputRef.current?.select();
+          composerInputRef.current?.focus();
+          composerInputRef.current?.setSelectionRange(
+            composerInputRef.current.value.length,
+            composerInputRef.current.value.length,
+          );
         }, 0);
         return;
       }
@@ -797,44 +781,21 @@ export default function Home() {
         return;
       }
 
-      if (event.key === "Escape" && isCommandPaletteOpen) {
-        setIsCommandPaletteOpen(false);
-      }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTab, canvasDocument, isCommandPaletteOpen, notesExploration]);
-
-  useEffect(() => {
-    if (!isCommandDragging || !commandDragOffset) {
-      return;
-    }
-
-    const dragOffset = commandDragOffset;
-
-    function handleMouseMove(event: MouseEvent) {
-      const nextX = Math.max(20, Math.min(window.innerWidth - 560, event.clientX - dragOffset.x));
-      const nextY = Math.max(20, Math.min(window.innerHeight - 280, event.clientY - dragOffset.y));
-      setCommandPalettePosition({ x: nextX, y: nextY });
-    }
-
-    function handleMouseUp() {
-      setIsCommandDragging(false);
-      setCommandDragOffset(null);
-    }
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [commandDragOffset, isCommandDragging]);
+  }, [activeTab, canvasDocument, codexPrompt, notesExploration]);
 
   useEffect(() => {
     setCommandSelectedIndex(0);
-  }, [commandInput, isCommandPaletteOpen]);
+  }, [codexPrompt]);
+
+  useEffect(() => {
+    if (isSlashCommandMode) {
+      setIsConsoleExpanded(true);
+    }
+  }, [isSlashCommandMode]);
 
   useEffect(() => {
     if (!canvasDocument) {
@@ -1212,10 +1173,156 @@ export default function Home() {
     }
   }
 
-  async function handleSubmitArchitecturePrompt() {
-    startCodexTransition(() => {
-      void (isPlanMode ? submitPlanPrompt() : submitBuildPrompt());
-    });
+  async function submitAutoPrompt(
+    promptValue = codexPrompt.trim(),
+    options?: { preserveActiveView?: boolean },
+  ) {
+    const prompt = promptValue.trim();
+    if (!prompt || !activeRepoPath) {
+      return;
+    }
+
+    const userMessage: ConversationMessage = {
+      id: `user-${Date.now()}`,
+      role: "user",
+      content: prompt,
+      created_at: new Date().toISOString(),
+    };
+    const pendingMessages = [...consoleMessages, userMessage];
+    setConsoleMessages(pendingMessages);
+    setIsAnswering(true);
+    if (promptValue === codexPrompt.trim()) {
+      setCodexPrompt("");
+    }
+    setPendingPlan(null);
+    let ensuredConversationId: string | null = null;
+
+    try {
+      setErrorMessage(null);
+      setComposerStatus("Understanding request...");
+      ensuredConversationId =
+        activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
+          ? activeConversationId
+          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
+      if (!ensuredConversationId) {
+        setIsAnswering(false);
+        return;
+      }
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
+      let assistantContent = "";
+      const assistantId = `assistant-auto-${Date.now()}`;
+      setConsoleMessages([
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant",
+          title: "Working...",
+          content: "",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
+      let finalSummary = "Done.";
+      let resolvedMode: ProjectRunStreamEvent["mode"] | null = null;
+      await streamProjectRun(
+        activeRepoPath,
+        "auto",
+        prompt,
+        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
+        buildConversationContext(pendingMessages),
+        (event) => {
+          handleProjectRunEvent(event, {
+            assistantId,
+            onChunk: (text) => {
+              assistantContent += text;
+              setConsoleMessages((current) =>
+                current.map((message) =>
+                  message.id === assistantId ? { ...message, content: assistantContent } : message,
+                ),
+              );
+            },
+            onCompleted: (completedEvent) => {
+              resolvedMode = completedEvent.mode ?? resolvedMode;
+              finalSummary = completedEvent.summary ?? finalSummary;
+              if (completedEvent.mode === "build") {
+                if (completedEvent.document) {
+                  setCanvasDocument(completedEvent.document);
+                }
+                setConsoleMessages((current) =>
+                  current.map((message) =>
+                    message.id === assistantId
+                      ? {
+                          ...message,
+                          title: finalSummary,
+                          content:
+                            assistantContent ||
+                            [
+                              completedEvent.code_summary,
+                              completedEvent.note_summary,
+                              completedEvent.note_changes_summary
+                                ? `Notes changes summary:\n${completedEvent.note_changes_summary}`
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join("\n\n"),
+                        }
+                      : message,
+                  ),
+                );
+              } else {
+                setConsoleMessages((current) =>
+                  current.map((message) =>
+                    message.id === assistantId
+                      ? {
+                          ...message,
+                          title: finalSummary,
+                          content: completedEvent.answer_text ?? assistantContent,
+                        }
+                      : message,
+                  ),
+                );
+              }
+              setComposerStatus(finalSummary);
+            },
+          });
+        },
+      );
+
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          title: finalSummary,
+          content: assistantContent,
+          created_at: new Date().toISOString(),
+        },
+      ];
+      setConsoleMessages(nextMessages);
+      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      if (resolvedMode === "build") {
+        await refreshCommitStatus(activeRepoPath);
+      }
+    } catch (error) {
+      setComposerStatus("Request failed.");
+      setErrorMessage(getErrorMessage(error));
+      const nextMessages = [
+        ...pendingMessages,
+        {
+          id: `assistant-auto-error-${Date.now()}`,
+          role: "assistant" as const,
+          title: "Request failed.",
+          content: getErrorMessage(error),
+          created_at: new Date().toISOString(),
+        },
+      ];
+      setConsoleMessages(nextMessages);
+      if (ensuredConversationId) {
+        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      }
+    } finally {
+      setIsAnswering(false);
+    }
   }
 
   async function submitPlanPrompt(
@@ -1341,114 +1448,10 @@ export default function Home() {
     }
   }
 
-  async function submitAskPrompt(promptValue: string, options?: { preserveActiveView?: boolean }) {
-    const prompt = promptValue.trim();
-    if (!prompt || !activeRepoPath) {
-      return;
-    }
-
-    const userMessage: ConversationMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: prompt,
-      created_at: new Date().toISOString(),
-    };
-    const pendingMessages = [...consoleMessages, userMessage];
-    setConsoleMessages(pendingMessages);
-    setComposerStatus("Answering your question...");
-    let ensuredConversationId: string | null = null;
-
-    try {
-      setErrorMessage(null);
-      ensuredConversationId =
-        activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
-          ? activeConversationId
-          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
-      if (!ensuredConversationId) {
-        return;
-      }
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
-      let assistantContent = "";
-      const assistantId = `assistant-ask-${Date.now()}`;
-      setConsoleMessages([
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant",
-          title: "Answering...",
-          content: "",
-          created_at: new Date().toISOString(),
-        },
-      ]);
-      let finalSummary = "Answer ready.";
-      await streamProjectRun(
-        activeRepoPath,
-        "ask",
-        prompt,
-        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
-        buildConversationContext(pendingMessages),
-        (event) => {
-          handleProjectRunEvent(event, {
-            assistantId,
-            onChunk: (text) => {
-              assistantContent += text;
-              setConsoleMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? { ...message, content: assistantContent } : message,
-                ),
-              );
-            },
-            onCompleted: (completedEvent) => {
-              finalSummary = completedEvent.summary ?? finalSummary;
-              setComposerStatus(finalSummary);
-              setConsoleMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? { ...message, title: finalSummary, content: completedEvent.answer_text ?? assistantContent }
-                    : message,
-                ),
-              );
-            },
-          });
-        },
-      );
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant" as const,
-          title: finalSummary,
-          content: assistantContent,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-    } catch (error) {
-      setComposerStatus("Question failed.");
-      setErrorMessage(getErrorMessage(error));
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: `assistant-ask-error-${Date.now()}`,
-          role: "assistant" as const,
-          title: "Question failed.",
-          content: getErrorMessage(error),
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      if (ensuredConversationId) {
-        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      }
-    }
-  }
-
   function handleApprovePlan() {
     if (!pendingPlan || isBuilding || !activeRepoPath) {
       return;
     }
-    setIsPlanMode(false);
     setCodexPrompt("");
     startCodexTransition(() => {
       void submitApprovedPlan(pendingPlan);
@@ -2084,17 +2087,6 @@ export default function Home() {
     openCanvasNode(nodeId);
   }
 
-  function openChatViewTab() {
-    openViewTab("chat");
-    setIsCommandPaletteOpen(false);
-  }
-
-  function returnChatToFloatingContainer() {
-    setIsCommandPaletteOpen(true);
-    setCommandPaletteMode("chat");
-    closeTab("view:chat");
-  }
-
   function handleCloseCanvasTab(nodeId: string) {
     setOpenCanvasNodeIds((current) => {
       const next = current.filter((item) => item !== nodeId);
@@ -2194,244 +2186,202 @@ export default function Home() {
   }
 
   const commandResults: CommandResultItem[] = (() => {
-    const trimmed = commandInput.trim();
+    if (!isSlashCommandMode) {
+      return [];
+    }
 
-    if (commandMode === "ask") {
-      const question = trimmed.slice(1).trim();
-      if (!question) {
-        return [];
-      }
+    const loweredCommand = commandQuery.toLowerCase();
+    const buildPrompt = loweredCommand.startsWith("build ") ? commandQuery.slice(6).trim() : "";
+    const planPrompt = loweredCommand.startsWith("plan ") ? commandQuery.slice(5).trim() : "";
+
+    if (buildPrompt) {
       return [
         {
-          id: "ask-current-context",
-          title: `Ask AI: ${question}`,
-          subtitle: visibleContextNodeIds.length
-            ? `Uses ${visibleContextNodeIds.length} visible/pinned note context item${visibleContextNodeIds.length === 1 ? "" : "s"}`
-            : "Uses the current project and visible screen context",
-          group: "ask",
+          id: "execute-build",
+          title: `Build: ${buildPrompt}`,
+          subtitle: "Implement changes and refresh the canvas afterward",
+          group: "execute",
           run: () => {
-            setCommandInput("");
+            setCodexPrompt("");
+            setIsConsoleExpanded(true);
             startCodexTransition(() => {
-              void submitAskPrompt(question, { preserveActiveView: true });
+              void submitBuildPrompt(buildPrompt, { preserveActiveView: true });
             });
-            setCommandPaletteMode("chat");
           },
         },
       ];
     }
 
-    if (commandMode === "action") {
-      const rawAction = trimmed.slice(1).trim();
-      const loweredAction = rawAction.toLowerCase();
-      const buildPrompt = loweredAction.startsWith("build ") ? rawAction.slice(6).trim() : "";
-      const planPrompt = loweredAction.startsWith("plan ") ? rawAction.slice(5).trim() : "";
+    if (planPrompt) {
+      return [
+        {
+          id: "execute-plan",
+          title: `Plan: ${planPrompt}`,
+          subtitle: "Draft an implementation plan in the current conversation",
+          group: "execute",
+          run: () => {
+            setCodexPrompt("");
+            setIsConsoleExpanded(true);
+            startCodexTransition(() => {
+              void submitPlanPrompt(planPrompt, { preserveActiveView: true });
+            });
+          },
+        },
+      ];
+    }
 
-      if (buildPrompt) {
-        return [
-          {
-            id: "execute-build",
-            title: `Build: ${buildPrompt}`,
-            subtitle: "Runs a real build/edit pass and refreshes notes afterward",
-            group: "execute",
-            run: () => {
-              setCommandInput("");
-              setIsCommandPaletteOpen(true);
-              setCommandPaletteMode("chat");
-              startCodexTransition(() => {
-                void submitBuildPrompt(buildPrompt, { preserveActiveView: true });
-              });
-            },
-          },
-        ];
-      }
-
-      if (planPrompt) {
-        return [
-          {
-            id: "execute-plan",
-            title: `Plan: ${planPrompt}`,
-            subtitle: "Creates an implementation plan in the current conversation",
-            group: "execute",
-            run: () => {
-              setCommandInput("");
-              setIsCommandPaletteOpen(true);
-              setCommandPaletteMode("chat");
-              startCodexTransition(() => {
-                void submitPlanPrompt(planPrompt, { preserveActiveView: true });
-              });
-            },
-          },
-        ];
-      }
-
-      const currentNode = canvasDocument?.nodes.find((node) => node.id === focusedCanvasNodeId) ?? null;
-      const actionItems: Array<CommandResultItem & { keywords: string[]; enabled?: boolean }> = [
-        {
-          id: "action-create-note",
-          title: "Create note",
-          subtitle: "Adds a new note to the current canvas",
-          group: "action",
-          keywords: ["create", "note", "new"],
-          enabled: !!activeRepoPath,
-          run: () => {
-            setCommandInput("");
-            setIsCommandPaletteOpen(false);
-            startCanvasTransition(() => {
-              void handleCreateCanvasNodeAt();
-            });
-          },
-        },
-        {
-          id: "action-setup-canvas",
-          title: canvasDocument?.nodes.length ? "Regenerate canvas" : "Set up canvas",
-          subtitle: "Maps the current project into notes on the canvas",
-          group: "action",
-          keywords: ["canvas", "map", "generate", "setup", "regenerate"],
-          enabled: !!activeRepoPath,
-          run: () => {
-            setCommandInput("");
-            startCanvasTransition(() => {
-              void handleGenerateCanvas();
-            });
-          },
-        },
-        {
-          id: "action-reset-canvas",
-          title: "Reset canvas",
-          subtitle: "Clears all notes for the current project",
-          group: "action",
-          keywords: ["canvas", "reset", "clear"],
-          enabled: !!activeRepoPath,
-          run: () => {
-            setCommandInput("");
-            startCanvasTransition(() => {
-              void handleResetCanvas();
-            });
-          },
-        },
-        {
-          id: "action-commit",
-          title: "Commit changes",
-          subtitle: commitStatus?.suggested_message ?? "Create a git commit for the current repo",
-          group: "action",
-          keywords: ["commit", "git", "save"],
-          enabled: !!activeRepoPath && !!commitStatus?.has_changes,
-          run: () => {
-            setCommandInput("");
-            handleCommitClick();
-          },
-        },
-        {
-          id: "action-new-conversation",
-          title: "New conversation",
-          subtitle: "Starts a new project conversation",
-          group: "action",
-          keywords: ["conversation", "chat", "new"],
-          enabled: !!activeRepoPath,
-          run: () => {
-            setCommandInput("");
-            startProjectTransition(() => {
-              void createConversationForProject(activeRepoPath);
-            });
-          },
-        },
-        {
-          id: "action-open-chat-page",
-          title: "Open chat page",
-          subtitle: "Turns the current conversation into a regular workspace tab",
-          group: "action",
-          keywords: ["chat", "page", "open", "conversation", "tab"],
-          enabled: true,
-          run: () => {
-            setCommandInput("");
-          openChatViewTab();
+    const currentNode = canvasDocument?.nodes.find((node) => node.id === focusedCanvasNodeId) ?? null;
+    const actionItems: Array<CommandResultItem & { keywords: string[]; enabled?: boolean }> = [
+      {
+        id: "action-create-note",
+        title: "Create note",
+        subtitle: "Add a new note to the current canvas",
+        group: "action",
+        keywords: ["create", "note", "new"],
+        enabled: !!activeRepoPath,
+        run: () => {
+          setCodexPrompt("");
+          startCanvasTransition(() => {
+            void handleCreateCanvasNodeAt();
+          });
         },
       },
-        {
-          id: "action-open-notes",
-          title: "Open Notes",
-          subtitle: "Switches to the Notes workspace",
-          group: "action",
-          keywords: ["open", "notes", "view"],
-          enabled: true,
-          run: () => {
-            setCommandInput("");
-            setIsCommandPaletteOpen(false);
-            openViewTab("notes");
-          },
+      {
+        id: "action-setup-canvas",
+        title: canvasDocument?.nodes.length ? "Regenerate canvas" : "Set up canvas",
+        subtitle: "Map the current project into canvas notes",
+        group: "action",
+        keywords: ["canvas", "map", "generate", "setup", "regenerate"],
+        enabled: !!activeRepoPath,
+        run: () => {
+          setCodexPrompt("");
+          startCanvasTransition(() => {
+            void handleGenerateCanvas();
+          });
         },
-        {
-          id: "action-open-project",
-          title: "Open Project",
-          subtitle: "Switches to the Project workspace",
-          group: "action",
-          keywords: ["open", "project", "view", "settings"],
-          enabled: true,
-          run: () => {
-            setCommandInput("");
-            setIsCommandPaletteOpen(false);
-            openViewTab("project");
-          },
+      },
+      {
+        id: "action-reset-canvas",
+        title: "Reset canvas",
+        subtitle: "Clear all notes for the current project",
+        group: "action",
+        keywords: ["canvas", "reset", "clear"],
+        enabled: !!activeRepoPath,
+        run: () => {
+          setCodexPrompt("");
+          startCanvasTransition(() => {
+            void handleResetCanvas();
+          });
         },
-      ];
+      },
+      {
+        id: "action-commit",
+        title: "Commit changes",
+        subtitle: commitStatus?.suggested_message ?? "Create a git commit for the current repo",
+        group: "action",
+        keywords: ["commit", "git", "save"],
+        enabled: !!activeRepoPath && !!commitStatus?.has_changes,
+        run: () => {
+          setCodexPrompt("");
+          handleCommitClick();
+        },
+      },
+      {
+        id: "action-new-conversation",
+        title: "New conversation",
+        subtitle: "Start a new project conversation",
+        group: "action",
+        keywords: ["conversation", "chat", "new"],
+        enabled: !!activeRepoPath,
+        run: () => {
+          setCodexPrompt("");
+          startProjectTransition(() => {
+            void createConversationForProject(activeRepoPath, "New conversation", { preserveActiveView: true });
+          });
+        },
+      },
+      {
+        id: "action-open-notes",
+        title: "Open Notes",
+        subtitle: "Switch to the Notes workspace",
+        group: "action",
+        keywords: ["open", "notes", "view"],
+        enabled: true,
+        run: () => {
+          setCodexPrompt("");
+          openViewTab("notes");
+        },
+      },
+      {
+        id: "action-open-project",
+        title: "Open Project",
+        subtitle: "Switch to the Project workspace",
+        group: "action",
+        keywords: ["open", "project", "view", "settings"],
+        enabled: true,
+        run: () => {
+          setCodexPrompt("");
+          openViewTab("project");
+        },
+      },
+    ];
 
-      if (currentNode && !pinnedCanvasNodeIds.includes(currentNode.id)) {
-        actionItems.push({
-          id: "action-pin-current-note",
-          title: `Pin ${currentNode.title}`,
-          subtitle: "Keeps this note in context while you move around the project",
-          group: "action",
-          keywords: ["pin", "current", "note", currentNode.title.toLowerCase()],
-          enabled: true,
-          run: () => {
-            setCommandInput("");
-            pinCanvasNode(currentNode.id);
-          },
-        });
-      }
-
-      if (currentNode && pinnedCanvasNodeIds.includes(currentNode.id)) {
-        actionItems.push({
-          id: "action-unpin-current-note",
-          title: `Unpin ${currentNode.title}`,
-          subtitle: "Removes this note from persistent context",
-          group: "action",
-          keywords: ["unpin", "current", "note", currentNode.title.toLowerCase()],
-          enabled: true,
-          run: () => {
-            setCommandInput("");
-            unpinCanvasNode(currentNode.id);
-          },
-        });
-      }
-
-      if (pinnedCanvasNodeIds.length > 0) {
-        actionItems.push({
-          id: "action-clear-pinned",
-          title: "Clear pinned context",
-          subtitle: `Removes ${pinnedCanvasNodeIds.length} pinned note${pinnedCanvasNodeIds.length === 1 ? "" : "s"}`,
-          group: "action",
-          keywords: ["clear", "pinned", "context", "unpin"],
-          enabled: true,
-          run: () => {
-            setCommandInput("");
-            clearPinnedCanvasNodes();
-          },
-        });
-      }
-
-      return actionItems
-        .filter((item) => item.enabled !== false)
-        .filter((item) => {
-          if (!rawAction) {
-            return true;
-          }
-          const haystack = [item.title, item.subtitle ?? "", ...item.keywords].join(" ").toLowerCase();
-          return haystack.includes(loweredAction);
-        });
+    if (currentNode && !pinnedCanvasNodeIds.includes(currentNode.id)) {
+      actionItems.push({
+        id: "action-pin-current-note",
+        title: `Pin ${currentNode.title}`,
+        subtitle: "Keep this note in working context while you explore",
+        group: "action",
+        keywords: ["pin", "current", "note", currentNode.title.toLowerCase()],
+        enabled: true,
+        run: () => {
+          setCodexPrompt("");
+          pinCanvasNode(currentNode.id);
+        },
+      });
     }
 
-    const query = trimmed.toLowerCase();
+    if (currentNode && pinnedCanvasNodeIds.includes(currentNode.id)) {
+      actionItems.push({
+        id: "action-unpin-current-note",
+        title: `Unpin ${currentNode.title}`,
+        subtitle: "Remove this note from persistent context",
+        group: "action",
+        keywords: ["unpin", "current", "note", currentNode.title.toLowerCase()],
+        enabled: true,
+        run: () => {
+          setCodexPrompt("");
+          unpinCanvasNode(currentNode.id);
+        },
+      });
+    }
+
+    if (pinnedCanvasNodeIds.length > 0) {
+      actionItems.push({
+        id: "action-clear-pinned",
+        title: "Clear pinned notes",
+        subtitle: `Remove ${pinnedCanvasNodeIds.length} pinned note${pinnedCanvasNodeIds.length === 1 ? "" : "s"}`,
+        group: "action",
+        keywords: ["clear", "pinned", "context", "unpin"],
+        enabled: true,
+        run: () => {
+          setCodexPrompt("");
+          clearPinnedCanvasNodes();
+        },
+      });
+    }
+
+    const actionMatches = actionItems
+      .filter((item) => item.enabled !== false)
+      .filter((item) => {
+        if (!commandQuery) {
+          return true;
+        }
+        const haystack = [item.title, item.subtitle ?? "", ...item.keywords].join(" ").toLowerCase();
+        return haystack.includes(loweredCommand);
+      });
+
+    const query = loweredCommand;
     const noteItems = (canvasDocument?.nodes ?? [])
       .filter((node) => {
         if (!query) {
@@ -2447,8 +2397,7 @@ export default function Home() {
         subtitle: node.tags.join(", ") || "note",
         group: "navigate",
         run: () => {
-          setCommandInput("");
-          setIsCommandPaletteOpen(false);
+          setCodexPrompt("");
           openCanvasNode(node.id);
         },
       }));
@@ -2467,8 +2416,7 @@ export default function Home() {
         subtitle: item.repo_path,
         group: "navigate",
         run: () => {
-          setCommandInput("");
-          setIsCommandPaletteOpen(false);
+          setCodexPrompt("");
           startProjectTransition(() => {
             void openProjectConversation(item.repo_path);
           });
@@ -2496,15 +2444,14 @@ export default function Home() {
         subtitle: `${item.projectName} · ${item.conversation.message_count} msg${item.conversation.message_count === 1 ? "" : "s"}`,
         group: "navigate",
         run: () => {
-          setCommandInput("");
-          setIsCommandPaletteOpen(false);
+          setCodexPrompt("");
           startProjectTransition(() => {
             void openProjectConversation(item.repoPath, item.conversation);
           });
         },
       }));
 
-    const viewItems = (["notes", "project", "chat"] as WorkspaceView[])
+    const viewItems = (["notes", "project"] as WorkspaceView[])
       .filter((view) => !query || viewLabel(view).toLowerCase().includes(query))
       .map<CommandResultItem>((view) => ({
         id: `view:${view}`,
@@ -2512,14 +2459,62 @@ export default function Home() {
         subtitle: "workspace view",
         group: "navigate",
         run: () => {
-          setCommandInput("");
-          setIsCommandPaletteOpen(false);
+          setCodexPrompt("");
           openViewTab(view);
         },
       }));
 
-    return [...noteItems, ...projectItems, ...conversationItems, ...viewItems].slice(0, 14);
+    return [...actionMatches, ...noteItems, ...projectItems, ...conversationItems, ...viewItems].slice(0, 14);
   })();
+
+  function handleSubmitOmnibox() {
+    const value = codexPrompt.trim();
+    if (!value) {
+      return;
+    }
+
+    setIsConsoleExpanded(true);
+
+    if (isSlashCommandMode) {
+      const selectedResult =
+        commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? commandResults[0];
+      if (selectedResult) {
+        selectedResult.run();
+      }
+      return;
+    }
+
+    startCodexTransition(() => {
+      void submitAutoPrompt(value, { preserveActiveView: true });
+    });
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (isSlashCommandMode) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setCommandSelectedIndex((current) =>
+          commandResults.length === 0 ? 0 : Math.min(current + 1, commandResults.length - 1),
+        );
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setCommandSelectedIndex((current) => Math.max(current - 1, 0));
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        handleSubmitOmnibox();
+      }
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleSubmitOmnibox();
+    }
+  }
 
   function pinPreviewTab(tabId: OpenTab["id"]) {
     setOpenTabs((current) =>
@@ -2690,130 +2685,7 @@ export default function Home() {
   function renderNotesView() {
     return (
       <div className={styles.notesWorkspace}>
-        <div className={styles.notesConsoleShell}>
-          <div className={styles.notesConsoleDock}>
-            {isConsoleExpanded ? (
-              <div className={styles.notesConsolePanel}>
-                <div className={styles.notesConsoleMessages} ref={consoleMessagesRef}>
-                  {consoleMessages.length === 0 ? (
-                    <p className={styles.helperText}>Describe what to build. The console will show your prompt and the latest architectural summary from the run.</p>
-                  ) : (
-                    consoleMessages.map((message) => (
-                      <article
-                        className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
-                        key={message.id}
-                      >
-                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
-                        {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                        <div className={styles.consoleMessageBody}>
-                          {renderConsoleMessageContent(
-                            message.content,
-                            message.role === "assistant" ? activeContextDocument : null,
-                            handleOpenContextNode,
-                          )}
-                        </div>
-                        {pendingPlan?.messageId === message.id ? (
-                          <div className={styles.consoleMessageActions}>
-                            <button
-                              className={styles.secondaryButton}
-                              disabled={isBuilding}
-                              onClick={handleApprovePlan}
-                              type="button"
-                            >
-                              Approve
-                            </button>
-                          </div>
-                        ) : null}
-                      </article>
-                    ))
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            <button
-              className={isConsoleExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
-              onClick={() => setIsConsoleExpanded((current) => !current)}
-              type="button"
-            >
-              <span className={styles.notesConsoleBarLabel}>Console</span>
-              <span className={styles.notesConsoleBarSummary}>{latestConsoleSummary}</span>
-              <span className={styles.notesConsoleBarAction}>{isConsoleExpanded ? "Hide" : "Show"}</span>
-            </button>
-
-            <label className={styles.consoleComposer}>
-              <textarea
-                className={styles.consoleComposerInput}
-                disabled={isBuilding || isPlanning}
-                onChange={(event) => setCodexPrompt(event.target.value)}
-                placeholder={isPlanMode ? "Describe what to plan in this project." : "Describe what to build in this project."}
-                rows={3}
-                value={codexPrompt}
-              />
-              <div className={styles.consoleComposerActions}>
-                <div className={styles.consoleComposerLeft}>
-                  <button
-                    className={styles.commitButton}
-                    disabled={isCommitting || !commitStatus?.has_changes}
-                    onClick={handleCommitClick}
-                    title={
-                      !commitStatus?.is_git_repo
-                        ? "Repository is not a git repository"
-                        : !commitStatus?.has_changes
-                          ? "Nothing to commit"
-                          : commitStatus.suggested_message ?? "Create commit"
-                    }
-                    type="button"
-                  >
-                    Commit
-                  </button>
-                  <span className={styles.buildComposerMeta}>
-                    {canvasDocument?.nodes.length
-                      ? `Using top ${Math.min(canvasDocument.nodes.length, 12)} notes automatically`
-                      : "No notes available"}
-                  </span>
-                </div>
-                <div className={styles.consoleComposerRight}>
-                  <label className={styles.planModeToggle}>
-                    <input
-                      checked={isPlanMode}
-                      disabled={isBuilding || isPlanning}
-                      onChange={(event) => setIsPlanMode(event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>Plan mode</span>
-                  </label>
-                  <button
-                    className={styles.primaryButton}
-                    disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
-                    onClick={handleSubmitArchitecturePrompt}
-                    type="button"
-                  >
-                    {isPlanning ? (
-                      <>
-                        <span aria-hidden="true" className={styles.buttonSpinner} />
-                        <span>Planning...</span>
-                      </>
-                    ) : isBuilding ? (
-                      <>
-                        <span aria-hidden="true" className={styles.buttonSpinner} />
-                        <span>Building...</span>
-                      </>
-                    ) : (
-                      isPlanMode ? "Plan" : "Build"
-                    )}
-                  </button>
-                </div>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <div
-          className={`${styles.canvasFrame} ${
-            isConsoleExpanded ? styles.canvasFrameWithConsoleExpanded : styles.canvasFrameWithConsoleCollapsed
-          }`}
-        >
+        <div className={styles.canvasFrame}>
           {!canvasDocument ? (
             <EmptyState message="Load or create a canvas for this repo. Double-click empty space to add a node." />
           ) : shouldShowCanvasSetup ? (
@@ -2917,130 +2789,7 @@ export default function Home() {
 
     return (
       <div className={styles.notesWorkspace}>
-        <div className={styles.notesConsoleShell}>
-          <div className={styles.notesConsoleDock}>
-            {isConsoleExpanded ? (
-              <div className={styles.notesConsolePanel}>
-                <div className={styles.notesConsoleMessages} ref={consoleMessagesRef}>
-                  {consoleMessages.length === 0 ? (
-                    <p className={styles.helperText}>Ask about the current exploration, its path, or the surrounding architecture.</p>
-                  ) : (
-                    consoleMessages.map((message) => (
-                      <article
-                        className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
-                        key={message.id}
-                      >
-                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
-                        {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                        <div className={styles.consoleMessageBody}>
-                          {renderConsoleMessageContent(
-                            message.content,
-                            message.role === "assistant" ? activeContextDocument : null,
-                            handleOpenContextNode,
-                          )}
-                        </div>
-                        {pendingPlan?.messageId === message.id ? (
-                          <div className={styles.consoleMessageActions}>
-                            <button
-                              className={styles.secondaryButton}
-                              disabled={isBuilding}
-                              onClick={handleApprovePlan}
-                              type="button"
-                            >
-                              Approve
-                            </button>
-                          </div>
-                        ) : null}
-                      </article>
-                    ))
-                  )}
-                </div>
-              </div>
-            ) : null}
-
-            <button
-              className={isConsoleExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
-              onClick={() => setIsConsoleExpanded((current) => !current)}
-              type="button"
-            >
-              <span className={styles.notesConsoleBarLabel}>Console</span>
-              <span className={styles.notesConsoleBarSummary}>{latestConsoleSummary}</span>
-              <span className={styles.notesConsoleBarAction}>{isConsoleExpanded ? "Hide" : "Show"}</span>
-            </button>
-
-            <label className={styles.consoleComposer}>
-              <textarea
-                className={styles.consoleComposerInput}
-                disabled={isBuilding || isPlanning}
-                onChange={(event) => setCodexPrompt(event.target.value)}
-                placeholder={isPlanMode ? "Describe what to plan in this project." : "Ask or build from this exploration."}
-                rows={3}
-                value={codexPrompt}
-              />
-              <div className={styles.consoleComposerActions}>
-                <div className={styles.consoleComposerLeft}>
-                  <button
-                    className={styles.commitButton}
-                    disabled={isCommitting || !commitStatus?.has_changes}
-                    onClick={handleCommitClick}
-                    title={
-                      !commitStatus?.is_git_repo
-                        ? "Repository is not a git repository"
-                        : !commitStatus?.has_changes
-                          ? "Nothing to commit"
-                          : commitStatus.suggested_message ?? "Create commit"
-                    }
-                    type="button"
-                  >
-                    Commit
-                  </button>
-                  <span className={styles.buildComposerMeta}>
-                    {visibleContextNodeIds.length
-                      ? `Using ${visibleContextNodeIds.length} focused/pinned notes`
-                      : "Using project context"}
-                  </span>
-                </div>
-                <div className={styles.consoleComposerRight}>
-                  <label className={styles.planModeToggle}>
-                    <input
-                      checked={isPlanMode}
-                      disabled={isBuilding || isPlanning}
-                      onChange={(event) => setIsPlanMode(event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>Plan mode</span>
-                  </label>
-                  <button
-                    className={styles.primaryButton}
-                    disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
-                    onClick={handleSubmitArchitecturePrompt}
-                    type="button"
-                  >
-                    {isPlanning ? (
-                      <>
-                        <span aria-hidden="true" className={styles.buttonSpinner} />
-                        <span>Planning...</span>
-                      </>
-                    ) : isBuilding ? (
-                      <>
-                        <span aria-hidden="true" className={styles.buttonSpinner} />
-                        <span>Building...</span>
-                      </>
-                    ) : (
-                      isPlanMode ? "Plan" : "Build"
-                    )}
-                  </button>
-                </div>
-              </div>
-            </label>
-          </div>
-        </div>
-
-        <div
-          className={`${styles.canvasFrame} ${
-            isConsoleExpanded ? styles.canvasFrameWithConsoleExpanded : styles.canvasFrameWithConsoleCollapsed
-          }`}
-        >
+        <div className={styles.canvasFrame}>
           <CanvasBoard
             document={explorationCanvasDocument}
             edgeNodeIds={activeExplorationPresentation.visibleNodeIds}
@@ -3286,66 +3035,93 @@ export default function Home() {
     );
   }
 
-  function renderChatView() {
-    return (
-      <div className={styles.chatWorkspace}>
-        <div className={styles.chatPageSurface}>
-          <div className={styles.chatPageHeader}>
-            <div>
-              <strong className={styles.resultTitle}>
-                {activeConversationSummary?.title ?? "Conversation"}
-              </strong>
-              <p className={styles.resultMeta}>
-                {latestConsoleSummary}
-              </p>
-            </div>
-            <button className={styles.secondaryButton} onClick={returnChatToFloatingContainer} type="button">
-              Floating container
-            </button>
-          </div>
+  function renderUnifiedDock() {
+    const selectedCommandResult =
+      commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? null;
 
-          <div className={styles.chatPageMessages}>
-            {consoleMessages.length === 0 ? (
-              <p className={styles.helperText}>Ask about the current project, notes, or visible context.</p>
-            ) : (
-              consoleMessages.map((message) => (
-                <article
-                  className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
-                  key={message.id}
-                >
-                  <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
-                  {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                  <div className={styles.consoleMessageBody}>
-                    {renderConsoleMessageContent(
-                      message.content,
-                      message.role === "assistant" ? activeContextDocument : null,
-                      handleOpenContextNode,
-                    )}
-                  </div>
-                  {pendingPlan?.messageId === message.id ? (
-                    <div className={styles.consoleMessageActions}>
+    return (
+      <div className={styles.notesConsoleShell}>
+        <div className={styles.notesConsoleDock}>
+          {isConsoleExpanded ? (
+            <div className={styles.notesConsolePanel}>
+              {isSlashCommandMode ? (
+                <div className={styles.commandResults}>
+                  {commandResults.length === 0 ? (
+                    <p className={styles.helperText}>Type a slash command, or search notes, projects, conversations, and views with `/`.</p>
+                  ) : (
+                    commandResults.map((item, index) => (
                       <button
-                        className={styles.secondaryButton}
-                        disabled={isBuilding}
-                        onClick={handleApprovePlan}
+                        className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
+                        key={item.id}
+                        onClick={item.run}
                         type="button"
                       >
-                        Approve
+                        <span className={styles.commandResultTitle}>{item.title}</span>
+                        {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
                       </button>
-                    </div>
-                  ) : null}
-                </article>
-              ))
-            )}
-          </div>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <div className={styles.notesConsoleMessages} ref={consoleMessagesRef}>
+                  {consoleMessages.length === 0 ? (
+                    <p className={styles.helperText}>Ask about the project, describe a change, or type `/` for commands.</p>
+                  ) : (
+                    consoleMessages.map((message) => (
+                      <article
+                        className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
+                        key={message.id}
+                      >
+                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
+                        {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                        <div className={styles.consoleMessageBody}>
+                          {renderConsoleMessageContent(
+                            message.content,
+                            message.role === "assistant" ? activeContextDocument : null,
+                            handleOpenContextNode,
+                          )}
+                        </div>
+                        {pendingPlan?.messageId === message.id ? (
+                          <div className={styles.consoleMessageActions}>
+                            <button
+                              className={styles.secondaryButton}
+                              disabled={isBuilding}
+                              onClick={handleApprovePlan}
+                              type="button"
+                            >
+                              Approve
+                            </button>
+                          </div>
+                        ) : null}
+                      </article>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          ) : null}
 
-          <label className={styles.chatComposer}>
+          <button
+            className={isConsoleExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
+            onClick={() => setIsConsoleExpanded((current) => !current)}
+            type="button"
+          >
+            <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
+            <span className={styles.notesConsoleBarSummary}>
+              {isSlashCommandMode && selectedCommandResult ? selectedCommandResult.title : latestConsoleSummary}
+            </span>
+            <span className={styles.notesConsoleBarAction}>{isConsoleExpanded ? "Hide" : "Show"}</span>
+          </button>
+
+          <label className={styles.consoleComposer}>
             <textarea
               className={styles.consoleComposerInput}
-              disabled={isBuilding || isPlanning}
+              disabled={isComposerBusy}
               onChange={(event) => setCodexPrompt(event.target.value)}
-              placeholder={isPlanMode ? "Describe what to plan in this project." : "Describe what to build in this project."}
-              rows={4}
+              onKeyDown={handleComposerKeyDown}
+              placeholder="Ask about the project, describe a change, or type / for commands."
+              ref={composerInputRef}
+              rows={3}
               value={codexPrompt}
             />
             <div className={styles.consoleComposerActions}>
@@ -3354,248 +3130,53 @@ export default function Home() {
                   className={styles.commitButton}
                   disabled={isCommitting || !commitStatus?.has_changes}
                   onClick={handleCommitClick}
+                  title={
+                    !commitStatus?.is_git_repo
+                      ? "Repository is not a git repository"
+                      : !commitStatus?.has_changes
+                        ? "Nothing to commit"
+                        : commitStatus.suggested_message ?? "Create commit"
+                  }
                   type="button"
                 >
                   Commit
                 </button>
-                <span className={styles.buildComposerMeta}>
-                  {visibleContextNodeIds.length
-                    ? `Using ${visibleContextNodeIds.length} focused/pinned notes`
-                    : "Using project context"}
-                </span>
+                <span className={styles.consoleComposerHint}>Type / for commands</span>
               </div>
               <div className={styles.consoleComposerRight}>
-                <label className={styles.planModeToggle}>
-                  <input
-                    checked={isPlanMode}
-                    disabled={isBuilding || isPlanning}
-                    onChange={(event) => setIsPlanMode(event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>Plan mode</span>
-                </label>
                 <button
                   className={styles.primaryButton}
-                  disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
-                  onClick={handleSubmitArchitecturePrompt}
+                  disabled={
+                    isComposerBusy ||
+                    !codexPrompt.trim() ||
+                    (!isSlashCommandMode && !activeRepoPath)
+                  }
+                  onClick={handleSubmitOmnibox}
                   type="button"
                 >
-                  {isPlanning ? "Planning..." : isBuilding ? "Building..." : isPlanMode ? "Plan" : "Build"}
+                  {isPlanning ? (
+                    <>
+                      <span aria-hidden="true" className={styles.buttonSpinner} />
+                      <span>Planning...</span>
+                    </>
+                  ) : isBuilding ? (
+                    <>
+                      <span aria-hidden="true" className={styles.buttonSpinner} />
+                      <span>Building...</span>
+                    </>
+                  ) : isAnswering ? (
+                    <>
+                      <span aria-hidden="true" className={styles.buttonSpinner} />
+                      <span>Working...</span>
+                    </>
+                  ) : (
+                    <span>{isSlashCommandMode ? "Run" : "Send"}</span>
+                  )}
                 </button>
               </div>
             </div>
           </label>
         </div>
-      </div>
-    );
-  }
-
-  function renderCommandPalette() {
-    if (!isCommandPaletteOpen) {
-      return null;
-    }
-
-    const selectedResult = commandResults[commandSelectedIndex] ?? null;
-
-    return (
-      <div
-        className={styles.commandPalette}
-        style={{ left: commandPalettePosition.x, top: commandPalettePosition.y }}
-      >
-        <div
-          className={styles.commandPaletteBar}
-          onMouseDown={(event) => {
-            setIsCommandDragging(true);
-            setCommandDragOffset({
-              x: event.clientX - commandPalettePosition.x,
-              y: event.clientY - commandPalettePosition.y,
-            });
-          }}
-        >
-          <div className={styles.commandPaletteBarTitle}>
-            <strong>{commandPaletteMode === "chat" ? "Chat" : "Command Bar"}</strong>
-            <span>{viewLabel(activeView)}</span>
-          </div>
-          <div className={styles.commandPaletteBarActions}>
-            <button
-              className={styles.commandPaletteBarButton}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => setCommandPaletteMode((current) => (current === "chat" ? "search" : "chat"))}
-              type="button"
-            >
-              {commandPaletteMode === "chat" ? "Search" : "Chat"}
-            </button>
-            <button
-              className={styles.commandPaletteBarButton}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={openChatViewTab}
-              type="button"
-            >
-              Open page
-            </button>
-            <button
-              className={styles.commandPaletteBarButton}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => setIsCommandPaletteOpen(false)}
-              type="button"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-
-        <div className={styles.commandPaletteContext}>
-          <span className={styles.commandContextChip}>{PathLabel(activeRepoPath || "No project")}</span>
-          <span className={styles.commandContextChip}>{viewLabel(activeView)}</span>
-          {focusedCanvasNodeId ? (
-            <span className={styles.commandContextChip}>
-              {findCanvasNodeTitle(canvasDocument, focusedCanvasNodeId)}
-            </span>
-          ) : null}
-          {pinnedCanvasNodes.map((node) => (
-            <button
-              className={styles.commandContextChipButton}
-              key={node.id}
-              onClick={() => unpinCanvasNode(node.id)}
-              type="button"
-            >
-              {node.title} ×
-            </button>
-          ))}
-        </div>
-
-        {commandPaletteMode === "search" ? (
-          <>
-            <div className={styles.commandPaletteInputWrap}>
-              <input
-                className={styles.commandPaletteInput}
-                onChange={(event) => setCommandInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    setCommandSelectedIndex((current) =>
-                      commandResults.length === 0 ? 0 : Math.min(current + 1, commandResults.length - 1),
-                    );
-                    return;
-                  }
-                  if (event.key === "ArrowUp") {
-                    event.preventDefault();
-                    setCommandSelectedIndex((current) => Math.max(current - 1, 0));
-                    return;
-                  }
-                  if (event.key === "Enter") {
-                    if (!selectedResult) {
-                      return;
-                    }
-                    event.preventDefault();
-                    selectedResult.run();
-                  }
-                }}
-                placeholder="Search notes, projects, chats...  ? ask  ! action"
-                ref={commandInputRef}
-                value={commandInput}
-              />
-            </div>
-
-            <div className={styles.commandPaletteBodySingle}>
-              <div className={styles.commandResults}>
-                {commandResults.length === 0 ? (
-                  <p className={styles.helperText}>
-                    {commandMode === "ask"
-                      ? "Type a question after ? to ask about the current context."
-                      : commandMode === "action"
-                        ? "Type an action after ! or use !build / !plan with a prompt."
-                        : "Search notes, projects, chats, or views."}
-                  </p>
-                ) : (
-                  commandResults.map((item, index) => (
-                    <button
-                      className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
-                      key={item.id}
-                      onClick={item.run}
-                      type="button"
-                    >
-                      <span className={styles.commandResultTitle}>{item.title}</span>
-                      {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className={styles.commandChatBody}>
-            <div className={styles.commandChatMessages}>
-              {consoleMessages.length === 0 ? (
-                <p className={styles.helperText}>Ask about the current project, notes, or visible context.</p>
-              ) : (
-                consoleMessages.map((message) => (
-                  <article
-                    className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
-                    key={message.id}
-                  >
-                    <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
-                    {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                    <div className={styles.consoleMessageBody}>
-                      {renderConsoleMessageContent(
-                        message.content,
-                        message.role === "assistant" ? activeContextDocument : null,
-                        handleOpenContextNode,
-                      )}
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
-
-            <label className={styles.commandChatComposer}>
-              <textarea
-                className={styles.consoleComposerInput}
-                disabled={isBuilding || isPlanning}
-                onChange={(event) => setCodexPrompt(event.target.value)}
-                placeholder={isPlanMode ? "Describe what to plan in this project." : "Describe what to build or ask in this project."}
-                rows={4}
-                value={codexPrompt}
-              />
-              <div className={styles.consoleComposerActions}>
-                <div className={styles.consoleComposerLeft}>
-                  <button
-                    className={styles.commitButton}
-                    disabled={isCommitting || !commitStatus?.has_changes}
-                    onClick={handleCommitClick}
-                    type="button"
-                  >
-                    Commit
-                  </button>
-                  <span className={styles.buildComposerMeta}>
-                    {visibleContextNodeIds.length
-                      ? `Using ${visibleContextNodeIds.length} focused/pinned notes`
-                      : "Using project context"}
-                  </span>
-                </div>
-                <div className={styles.consoleComposerRight}>
-                  <label className={styles.planModeToggle}>
-                    <input
-                      checked={isPlanMode}
-                      disabled={isBuilding || isPlanning}
-                      onChange={(event) => setIsPlanMode(event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>Plan mode</span>
-                  </label>
-                  <button
-                    className={styles.primaryButton}
-                    disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
-                    onClick={handleSubmitArchitecturePrompt}
-                    type="button"
-                  >
-                    {isPlanning ? "Planning..." : isBuilding ? "Building..." : isPlanMode ? "Plan" : "Build"}
-                  </button>
-                </div>
-              </div>
-            </label>
-          </div>
-        )}
       </div>
     );
   }
@@ -3767,8 +3348,6 @@ export default function Home() {
         return renderNotesView();
       case "project":
         return renderProjectView();
-      case "chat":
-        return renderChatView();
       default:
         return null;
     }
@@ -3870,11 +3449,18 @@ export default function Home() {
 
           {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
 
-          <section className={activeView === "notes" ? styles.workspaceStageFlush : styles.workspaceStage}>
+          <section
+            className={[
+              activeTab?.type === "exploration" || (activeTab?.type === "view" && activeView === "notes")
+                ? styles.workspaceStageFlush
+                : styles.workspaceStage,
+              isConsoleExpanded ? styles.workspaceStageWithDockExpanded : styles.workspaceStageWithDockCollapsed,
+            ].join(" ")}
+          >
             {renderActiveView()}
           </section>
 
-          {renderCommandPalette()}
+          {renderUnifiedDock()}
         </main>
       </div>
     </div>
@@ -3910,8 +3496,6 @@ function viewLabel(view: WorkspaceView) {
       return "Notes";
     case "project":
       return "Project";
-    case "chat":
-      return "Chat";
     default:
       return view;
   }
@@ -3930,12 +3514,6 @@ function ViewIcon({ view }: { view: WorkspaceView }) {
         <svg aria-hidden="true" viewBox="0 0 16 16">
           <path d="M3 13.2h10M4 11V4.6a1.6 1.6 0 0 1 1.6-1.6h4.8L12 4.6V11" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
           <path d="M10.4 3v2h2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-        </svg>
-      );
-    case "chat":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path d="M3.4 4.1h9.2a1.3 1.3 0 0 1 1.3 1.3v4.7a1.3 1.3 0 0 1-1.3 1.3H8.1l-2.6 2.2v-2.2H3.4a1.3 1.3 0 0 1-1.3-1.3V5.4a1.3 1.3 0 0 1 1.3-1.3Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
         </svg>
       );
     default:

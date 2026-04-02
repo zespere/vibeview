@@ -568,6 +568,19 @@
   padding: 0;
 }
 
+.workspaceStageWithDockCollapsed,
+.workspaceStageWithDockExpanded {
+  box-sizing: border-box;
+}
+
+.workspaceStageWithDockCollapsed {
+  padding-bottom: 178px;
+}
+
+.workspaceStageWithDockExpanded {
+  padding-bottom: 420px;
+}
+
 .workspaceSingle {
   display: flex;
   flex: 1 1 auto;
@@ -669,14 +682,6 @@
   gap: 12px;
   padding: 32px;
   text-align: center;
-}
-
-.canvasFrameWithConsoleCollapsed {
-  padding-bottom: 156px;
-}
-
-.canvasFrameWithConsoleExpanded {
-  padding-bottom: 438px;
 }
 
 .explorationWorkspace {
@@ -1021,23 +1026,7 @@
   flex: 0 0 auto;
 }
 
-.planModeToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: #5f5347;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.planModeToggle input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: #8b5c32;
-}
-
-.buildComposerMeta {
+.consoleComposerHint {
   font-size: 12px;
   color: #6c6257;
 }
@@ -1067,185 +1056,10 @@
   cursor: default;
 }
 
-.chatWorkspace {
-  height: 100%;
-}
-
-.chatPageSurface {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: 100%;
-  border: 1px solid #ddd5ca;
-  border-radius: 10px;
-  background: #fffdf9;
-}
-
-.chatPageHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 18px;
-  border-bottom: 1px solid #e7ddcf;
-}
-
-.chatPageMessages {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  overflow: auto;
-  padding: 18px;
-}
-
-.chatComposer {
-  display: block;
-  padding: 10px 14px 14px;
-  border-top: 1px solid #e7ddcf;
-}
-
-.commandPalette {
-  position: fixed;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  width: 520px;
-  height: 620px;
-  border: 1px solid #d8cebf;
-  border-radius: 12px;
-  background: rgba(255, 251, 245, 0.98);
-  box-shadow: 0 22px 54px rgba(31, 24, 17, 0.16);
-  overflow: hidden;
-}
-
-.commandPaletteBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #e7ddcf;
-  background: #f7f0e6;
-  cursor: move;
-  user-select: none;
-}
-
-.commandPaletteBarTitle {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  color: #3a3027;
-}
-
-.commandPaletteBarTitle strong {
-  font-size: 13px;
-}
-
-.commandPaletteBarTitle span {
-  color: #7f7262;
-  font-size: 12px;
-}
-
-.commandPaletteBarActions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.commandPaletteBarButton {
-  height: 28px;
-  border: 1px solid #d4c8ba;
-  border-radius: 8px;
-  background: #fffaf2;
-  color: #4b3e31;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 0 10px;
-  cursor: pointer;
-}
-
-.commandPaletteContext {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 10px 12px 0;
-}
-
-.commandContextChip,
-.commandContextChipButton {
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  border: 1px solid #ddd2c4;
-  border-radius: 8px;
-  background: #fff9f1;
-  color: #5a4d40;
-  font-size: 12px;
-  white-space: nowrap;
-  padding: 0 9px;
-}
-
-.commandContextChipButton {
-  font: inherit;
-  cursor: pointer;
-}
-
-.commandPaletteInputWrap {
-  padding: 10px 12px 12px;
-}
-
-.commandPaletteInput {
-  width: 100%;
-  height: 40px;
-  border: 1px solid #d6cbbe;
-  border-radius: 10px;
-  background: #fffdf9;
-  color: #241d17;
-  font: inherit;
-  padding: 0 12px;
-}
-
-.commandPaletteInput:focus {
-  outline: none;
-  border-color: #b8936d;
-}
-
-.commandPaletteBodySingle,
-.commandResults,
-.commandChatMessages {
+.commandResults {
   min-height: 0;
   overflow: auto;
   padding: 12px;
-}
-
-.commandPaletteBodySingle {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.commandChatBody {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  min-height: 0;
-  border-top: 1px solid #eee4d6;
-}
-
-.commandChatMessages {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-  background: rgba(255, 249, 241, 0.76);
-}
-
-.commandChatComposer {
-  display: block;
-  padding: 10px 12px 12px;
-  border-top: 1px solid #e7ddcf;
 }
 
 .commandResult,
@@ -2460,19 +2274,12 @@
     height: 320px;
   }
 
-  .canvasFrameWithConsoleCollapsed {
-    padding-bottom: 178px;
+  .workspaceStageWithDockCollapsed {
+    padding-bottom: 196px;
   }
 
-  .canvasFrameWithConsoleExpanded {
-    padding-bottom: 518px;
-  }
-
-  .commandPalette {
-    left: 12px !important;
-    right: 12px;
-    width: auto;
-    height: min(76vh, 620px);
+  .workspaceStageWithDockExpanded {
+    padding-bottom: 500px;
   }
 
 }

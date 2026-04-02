@@ -6,7 +6,7 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from .config import settings
 from .models import (
@@ -204,8 +204,7 @@ class CodexService:
                 timeout=EXPLORATION_SUGGESTION_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            logger.warning("Timed out generating exploration suggestions for %s", repo_path)
-            return fallback
+            raise RuntimeError("Could not generate an implementation plan in time.")
         events = self._parse_jsonl_output(result.stdout)
         plan_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
         plan_text = plan_text.strip()
@@ -215,6 +214,54 @@ class CodexService:
 
         summary = self._summarize_plan(plan_text)
         return summary, plan_text
+
+    def infer_project_run_mode(
+        self,
+        repo_path: str,
+        prompt: str,
+        semantic_context: str | None,
+        conversation_context: str | None = None,
+    ) -> Literal["ask", "build"]:
+        fallback = self._fallback_prompt_mode(prompt)
+        if not self.is_available():
+            return fallback
+
+        repo_dir = Path(repo_path)
+        context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
+        classifier_prompt = (
+            "Classify the user's request for a codebase workspace.\n"
+            "Return JSON only in this exact shape:\n"
+            '{\n  "mode": "ask"\n}\n'
+            "Allowed modes: ask, build.\n\n"
+            "Use ask when the user primarily wants explanation, understanding, comparison, diagnosis, or discussion without changing code.\n"
+            "Use build when the user wants files changed, code written, code edited, features implemented, bugs fixed, or behavior changed.\n"
+            "If the request is ambiguous, prefer ask only when it clearly reads like a question; otherwise prefer build.\n\n"
+            f"User request:\n{prompt.strip()}"
+        )
+        final_prompt = (
+            f"{context_prefix}\n\nTask:\n{classifier_prompt}" if context_prefix else classifier_prompt
+        )
+        command = self._build_command(repo_dir, final_prompt, True, True)
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=8,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("Timed out classifying project request intent for %s", repo_path)
+            return fallback
+
+        events = self._parse_jsonl_output(result.stdout)
+        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        payload = self._extract_json_object(raw_text)
+        if isinstance(payload, dict):
+            mode = str(payload.get("mode", "")).strip().lower()
+            if mode in {"ask", "build"}:
+                return mode
+        return fallback
 
     def ask_project(
         self,
@@ -677,3 +724,31 @@ class CodexService:
             ),
         ]
         return seeds[:suggestion_count]
+
+    def _fallback_prompt_mode(self, prompt: str) -> Literal["ask", "build"]:
+        normalized = prompt.strip().lower()
+        if not normalized:
+            return "ask"
+
+        question_starters = (
+            "what",
+            "why",
+            "how",
+            "where",
+            "when",
+            "which",
+            "who",
+            "is",
+            "are",
+            "does",
+            "do",
+            "can",
+            "could",
+            "would",
+            "should",
+            "explain",
+            "tell me",
+        )
+        if normalized.endswith("?") or normalized.startswith(question_starters):
+            return "ask"
+        return "build"

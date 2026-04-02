@@ -507,7 +507,17 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
     def generate():
         yield emit({"type": "phase", "phase": "starting", "label": "Preparing request..."})
         try:
-            if request.mode == "ask":
+            resolved_mode = request.mode
+            if request.mode == "auto":
+                yield emit({"type": "phase", "phase": "understanding", "label": "Understanding request..."})
+                resolved_mode = codex_service.infer_project_run_mode(
+                    resolved_repo_path,
+                    request.prompt,
+                    request.semantic_context,
+                    conversation_context=request.conversation_context,
+                )
+
+            if resolved_mode == "ask":
                 yield emit({"type": "phase", "phase": "answering", "label": "Answering question..."})
                 summary, answer_text = codex_service.ask_project(
                     resolved_repo_path,
@@ -527,7 +537,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                 )
                 return
 
-            if request.mode == "plan":
+            if resolved_mode == "plan":
                 yield emit({"type": "phase", "phase": "planning", "label": "Preparing implementation plan..."})
                 summary, plan_text = codex_service.plan_project(
                     repo_path=resolved_repo_path,
