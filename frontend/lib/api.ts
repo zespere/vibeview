@@ -1,5 +1,3 @@
-export type QueryMode = "search" | "cypher";
-
 export type IndexJobStatus = "idle" | "running" | "completed" | "failed";
 
 export interface IndexJobState {
@@ -110,72 +108,6 @@ export interface CommitCreateResponse {
   summary: string;
 }
 
-export interface SymbolRecord {
-  labels: string[];
-  properties: Record<string, unknown>;
-}
-
-export interface RelationshipRecord {
-  relationship: string;
-  direction: "incoming" | "outgoing";
-  other_node: SymbolRecord;
-}
-
-export interface RelationshipsResponse {
-  qualified_name: string;
-  total: number;
-  items: RelationshipRecord[];
-}
-
-export interface StructureNode {
-  id: string;
-  name: string;
-  kind: string;
-  path: string | null;
-  qualified_name: string | null;
-  children: StructureNode[];
-}
-
-export interface StructureResponse {
-  project_name: string;
-  root: StructureNode;
-}
-
-export interface QueryResponse {
-  mode: QueryMode;
-  results: Array<Record<string, unknown> | SymbolRecord>;
-}
-
-export interface ImpactSeed {
-  score: number;
-  reason: string;
-  file_path: string | null;
-  symbol: SymbolRecord;
-}
-
-export interface ImpactRelationshipRecord {
-  source_qualified_name: string;
-  relationship: string;
-  direction: "incoming" | "outgoing";
-  reason: string;
-  file_path: string | null;
-  other_node: SymbolRecord;
-}
-
-export interface ImpactFileRecord {
-  path: string;
-  reasons: string[];
-}
-
-export interface AssistImpactResponse {
-  mode: "heuristic";
-  prompt: string;
-  summary: string;
-  seeds: ImpactSeed[];
-  related_symbols: ImpactRelationshipRecord[];
-  affected_files: ImpactFileRecord[];
-}
-
 export interface CodexCommandRecord {
   command: string;
   status: string;
@@ -262,6 +194,25 @@ export interface ProjectAskResponse {
   prompt: string;
   summary: string;
   answer_text: string;
+}
+
+export interface ExplorationContextNode {
+  title: string;
+  description: string;
+  tags: string[];
+  linked_files: string[];
+  linked_symbols: string[];
+}
+
+export interface ExplorationSuggestionRecord {
+  title: string;
+  summary: string;
+  edge_label: string;
+}
+
+export interface ExplorationSuggestionResponse {
+  repo_path: string;
+  suggestions: ExplorationSuggestionRecord[];
 }
 
 export interface ProjectRunStreamEvent {
@@ -396,32 +347,6 @@ export function runIndex(repoPath: string, clean: boolean, dryRun: boolean) {
   });
 }
 
-export function runQuery(input: string, mode: QueryMode) {
-  return apiRequest<QueryResponse>("/query", {
-    method: "POST",
-    body: JSON.stringify(mode === "search" ? { text: input, limit: 20 } : { cypher: input, limit: 20 }),
-  });
-}
-
-export function fetchRelationships(qualifiedName: string) {
-  return apiRequest<RelationshipsResponse>(
-    `/relationships?qualified_name=${encodeURIComponent(qualifiedName)}&relationship=CALLS&direction=outgoing`,
-    { cache: "no-store" },
-  );
-}
-
-export function fetchStructure(projectName?: string) {
-  const suffix = projectName ? `?project_name=${encodeURIComponent(projectName)}` : "";
-  return apiRequest<StructureResponse>(`/structure${suffix}`, { cache: "no-store" });
-}
-
-export function runImpactAnalysis(prompt: string, limit = 6) {
-  return apiRequest<AssistImpactResponse>("/assist/impact", {
-    method: "POST",
-    body: JSON.stringify({ prompt, limit }),
-  });
-}
-
 export function runCodexChange(
   repoPath: string,
   prompt: string,
@@ -494,6 +419,32 @@ export function askProjectQuestion(
       conversation_context: conversationContext,
     }),
   });
+}
+
+export function fetchExplorationSuggestions(
+  repoPath: string,
+  activeNode: ExplorationContextNode,
+  pathTitles: string[],
+  semanticContext?: string,
+  conversationContext?: string,
+  relationQuery?: string,
+  suggestionCount = 3,
+) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12000);
+  return apiRequest<ExplorationSuggestionResponse>("/project/exploration-suggestions", {
+    method: "POST",
+    signal: controller.signal,
+    body: JSON.stringify({
+      repo_path: repoPath,
+      active_node: activeNode,
+      path_titles: pathTitles,
+      relation_query: relationQuery,
+      semantic_context: semanticContext,
+      conversation_context: conversationContext,
+      suggestion_count: suggestionCount,
+    }),
+  }).finally(() => window.clearTimeout(timeout));
 }
 
 export async function streamProjectRun(

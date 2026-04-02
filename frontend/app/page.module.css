@@ -687,6 +687,17 @@
   min-height: 0;
 }
 
+.explorationOverlay {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  bottom: 18px;
+  z-index: 6;
+  width: 320px;
+  max-width: calc(100% - 36px);
+  pointer-events: none;
+}
+
 .explorationPanel {
   display: flex;
   flex-direction: column;
@@ -696,6 +707,7 @@
   background: rgba(255, 251, 245, 0.92);
   padding: 18px;
   overflow: auto;
+  pointer-events: auto;
 }
 
 .explorationPanelHeader {
@@ -799,6 +811,19 @@
   color: #6b5f52;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.explorationSuggestionRelation {
+  color: #8b5c32;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.explorationRelationActions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .helperTextLoading {
@@ -2123,6 +2148,11 @@
 
   .explorationWorkspace {
     grid-template-columns: 1fr;
+  }
+
+  .explorationOverlay {
+    right: 18px;
+    width: auto;
   }
 
   .explorationPanel {

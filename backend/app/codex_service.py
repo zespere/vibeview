@@ -13,6 +13,8 @@ from .models import (
     ChangedFileRecord,
     CodexChangeResponse,
     CodexCommandRecord,
+    ExplorationContextNode,
+    ExplorationSuggestionRecord,
     GeneratedCanvasEdge,
     GeneratedCanvasNode,
 )
@@ -31,6 +33,7 @@ IGNORED_DIR_NAMES = {
     "node_modules",
 }
 MAX_SNAPSHOT_BYTES = 250_000
+EXPLORATION_SUGGESTION_TIMEOUT_SECONDS = 12
 
 
 @dataclass
@@ -192,7 +195,17 @@ class CodexService:
             f"{context_prefix}\n\nTask:\n{planning_prompt}" if context_prefix else planning_prompt
         )
         command = self._build_command(repo_dir, final_prompt, True, True)
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=EXPLORATION_SUGGESTION_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("Timed out generating exploration suggestions for %s", repo_path)
+            return fallback
         events = self._parse_jsonl_output(result.stdout)
         plan_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
         plan_text = plan_text.strip()
@@ -236,6 +249,80 @@ class CodexService:
 
         summary = self._summarize_plan(answer_text)
         return summary, answer_text
+
+    def generate_exploration_suggestions(
+        self,
+        repo_path: str,
+        active_node: ExplorationContextNode,
+        path_titles: list[str],
+        suggestion_count: int = 3,
+        relation_query: str | None = None,
+        semantic_context: str | None = None,
+        conversation_context: str | None = None,
+    ) -> list[ExplorationSuggestionRecord]:
+        fallback = self._fallback_exploration_suggestions(active_node.title, relation_query, suggestion_count)
+        if not self.is_available():
+            return fallback
+
+        repo_dir = Path(repo_path)
+        context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
+        relation_clause = (
+            f'The user explicitly wants this relationship angle explored: "{relation_query.strip()}".\n'
+            if relation_query and relation_query.strip()
+            else ""
+        )
+        prompt = (
+            "You are generating exploration suggestions for a visual codebase explorer.\n"
+            "Inspect the repository as needed, but return exploration concepts, not persisted architecture notes.\n"
+            "These suggestions are temporary next-step concepts that help the user explore one selected concept.\n"
+            "Do not copy existing canvas note titles mechanically. Generate fresh conceptual follow-ups.\n"
+            "Keep them grounded in the codebase and the active concept.\n"
+            "Return JSON only in this exact shape:\n"
+            '{\n'
+            '  "suggestions": [\n'
+            '    {\n'
+            '      "title": "string",\n'
+            '      "summary": "one concise sentence about what this exploration concept would reveal",\n'
+            '      "edge_label": "supports"\n'
+            '    }\n'
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            f"- Return exactly {suggestion_count} suggestions.\n"
+            "- Suggestions must be exploration concepts, not existing saved notes.\n"
+            "- Titles should be short and specific.\n"
+            "- Summaries should explain what the user would learn by opening that concept.\n"
+            "- edge_label should be a short relation phrase like drives, depends on, shapes, constrains, exposes, persists through.\n"
+            "- Avoid duplicating the active concept title.\n\n"
+            f"Active concept title: {active_node.title}\n"
+            f"Active concept description: {active_node.description or '(none)'}\n"
+            f"Active concept tags: {', '.join(active_node.tags) or '(none)'}\n"
+            f"Active concept linked files: {', '.join(active_node.linked_files) or '(none)'}\n"
+            f"Active concept linked symbols: {', '.join(active_node.linked_symbols) or '(none)'}\n"
+            f"Exploration path so far: {', '.join(path_titles) or active_node.title}\n"
+            f"{relation_clause}"
+        )
+        final_prompt = f"{context_prefix}\n\nTask:\n{prompt}" if context_prefix else prompt
+        command = self._build_command(repo_dir, final_prompt, True, True)
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        events = self._parse_jsonl_output(result.stdout)
+        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        payload = self._extract_json_object(raw_text)
+        if result.returncode != 0 or payload is None:
+            return fallback
+
+        try:
+            suggestions = [
+                ExplorationSuggestionRecord.model_validate(item)
+                for item in payload.get("suggestions", [])
+            ]
+        except Exception:
+            return fallback
+
+        if not suggestions:
+            return fallback
+
+        return suggestions[:suggestion_count]
 
     def generate_architecture_notes(
         self,
@@ -554,3 +641,39 @@ class CodexService:
         if any(token in lowered for token in ["test", "spec"]):
             return "test: update project coverage"
         return "feat: update project workspace"
+
+    def _fallback_exploration_suggestions(
+        self,
+        active_title: str,
+        relation_query: str | None,
+        suggestion_count: int,
+    ) -> list[ExplorationSuggestionRecord]:
+        base = active_title.strip() or "Current concept"
+        if relation_query and relation_query.strip():
+            query = relation_query.strip()
+            return [
+                ExplorationSuggestionRecord(
+                    title=f"{base} {query.title()}",
+                    summary=f"Explore the {query} angle around {base.lower()} and what it changes in practice.",
+                    edge_label=query.lower(),
+                )
+            ]
+
+        seeds = [
+            ExplorationSuggestionRecord(
+                title=f"{base} Decision Points",
+                summary=f"Explore the decisions and branching logic that shape how {base.lower()} behaves.",
+                edge_label="shapes",
+            ),
+            ExplorationSuggestionRecord(
+                title=f"{base} Runtime Inputs",
+                summary=f"Explore what inputs, triggers, or upstream state feed into {base.lower()}.",
+                edge_label="depends on",
+            ),
+            ExplorationSuggestionRecord(
+                title=f"{base} Downstream Effects",
+                summary=f"Explore what {base.lower()} changes, updates, or exposes to the rest of the system.",
+                edge_label="drives",
+            ),
+        ]
+        return seeds[:suggestion_count]

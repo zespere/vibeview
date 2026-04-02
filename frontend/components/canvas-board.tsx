@@ -77,6 +77,7 @@ export function CanvasBoard({
   const repoPath = document?.repo_path ?? "";
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [localNodes, setLocalNodes] = useState<Array<Node<NoteNodeData>>>([]);
+  const [pendingSelectionIds, setPendingSelectionIds] = useState<string[] | null>(null);
   const [zoom, setZoom] = useState(1);
   const [cursorPosition, setCursorPosition] = useState<{ x: number; y: number } | null>(null);
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
@@ -140,8 +141,21 @@ export function CanvasBoard({
     if (isDraggingRef.current) {
       return;
     }
-    setLocalNodes(derivedNodes);
+    setLocalNodes((current) => {
+      if (areFlowNodesEquivalent(current, derivedNodes)) {
+        return current;
+      }
+      return derivedNodes;
+    });
   }, [derivedNodes]);
+
+  useEffect(() => {
+    if (!pendingSelectionIds) {
+      return;
+    }
+    onSelectNodes(pendingSelectionIds);
+    setPendingSelectionIds(null);
+  }, [onSelectNodes, pendingSelectionIds]);
 
   const edges: Edge[] = useMemo(
     () => {
@@ -197,26 +211,23 @@ export function CanvasBoard({
   };
 
   const handleNodesChange = (changes: NodeChange<Node<NoteNodeData>>[]) => {
-    setLocalNodes((current) => {
-      const nextNodes = applyNodeChanges(changes, current);
+    const nextNodes = applyNodeChanges(changes, localNodes);
+    setLocalNodes(nextNodes);
 
-      if (changes.some((change) => change.type === "select")) {
-        const nextNodeIds = nextNodes
-          .filter((node) => !!node.selected)
-          .map((node) => node.id)
-          .sort();
-        const currentNodeIds = [...selectedNodeIds].sort();
+    if (changes.some((change) => change.type === "select")) {
+      const nextNodeIds = nextNodes
+        .filter((node) => !!node.selected)
+        .map((node) => node.id)
+        .sort();
+      const currentNodeIds = [...selectedNodeIds].sort();
 
-        if (
-          nextNodeIds.length !== currentNodeIds.length ||
-          nextNodeIds.some((nodeId, index) => nodeId !== currentNodeIds[index])
-        ) {
-          onSelectNodes(nextNodeIds);
-        }
+      if (
+        nextNodeIds.length !== currentNodeIds.length ||
+        nextNodeIds.some((nodeId, index) => nodeId !== currentNodeIds[index])
+      ) {
+        setPendingSelectionIds(nextNodeIds);
       }
-
-      return nextNodes;
-    });
+    }
   };
 
   const handleNodeClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
@@ -472,6 +483,26 @@ function compactDescription(value: string) {
     return "No description yet.";
   }
   return value.length > 180 ? `${value.slice(0, 177)}...` : value;
+}
+
+function areFlowNodesEquivalent(left: Array<Node<NoteNodeData>>, right: Array<Node<NoteNodeData>>) {
+  return (
+    left.length === right.length &&
+    left.every((node, index) => {
+      const other = right[index];
+      return (
+        node.id === other.id &&
+        node.type === other.type &&
+        node.position.x === other.position.x &&
+        node.position.y === other.position.y &&
+        node.selected === other.selected &&
+        node.data.node.id === other.data.node.id &&
+        node.data.node.title === other.data.node.title &&
+        node.data.node.description === other.data.node.description &&
+        node.data.detailLevel === other.data.detailLevel
+      );
+    })
+  );
 }
 
 function resolveHandleSide(from: CanvasNode, to: CanvasNode) {

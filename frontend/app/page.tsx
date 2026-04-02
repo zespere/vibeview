@@ -4,12 +4,12 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
-import { StructureTree } from "@/components/structure-tree";
 import {
   API_BASE_URL,
   createCanvasNode,
   createProjectCommit,
   deleteCanvasNode,
+  fetchExplorationSuggestions,
   fetchCanvas,
   fetchCommitStatus,
   fetchProjectConversation,
@@ -17,13 +17,9 @@ import {
   fetchProject,
   fetchProjectWorkspaceStatus,
   fetchProjectAgents,
-  fetchRelationships,
   fetchStatus,
-  fetchStructure,
   createProjectConversation,
   generateCanvasFromPrompt,
-  runImpactAnalysis,
-  runQuery,
   streamProjectRun,
   resetCanvas,
   updateProject,
@@ -31,25 +27,22 @@ import {
   updateProjectAgents,
   updateCanvasNode,
   type AgentsDocumentResponse,
-  type AssistImpactResponse,
   type CanvasDocument,
+  type CanvasEdge,
   type CanvasNode,
   type CommitStatusResponse,
   type ConversationMessage,
   type ConversationSummary,
+  type ExplorationContextNode,
+  type ExplorationSuggestionRecord,
   type ProjectProfile,
   type ProjectTreeItem,
   type ProjectWorkspaceStatusResponse,
-  type QueryMode,
-  type QueryResponse,
-  type RelationshipRecord,
   type StatusResponse,
-  type StructureNode,
-  type SymbolRecord,
   type ProjectRunStreamEvent,
 } from "@/lib/api";
 
-type WorkspaceView = "notes" | "inspect" | "project" | "chat";
+type WorkspaceView = "notes" | "project" | "chat";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `note:${string}`; type: "note"; nodeId: string }
@@ -57,7 +50,6 @@ type OpenTab =
 
 const RAIL_VIEW_ITEMS: Array<{ id: Exclude<WorkspaceView, "chat">; label: string }> = [
   { id: "notes", label: "Notes" },
-  { id: "inspect", label: "Inspect" },
   { id: "project", label: "Project" },
 ];
 
@@ -74,20 +66,38 @@ interface CommandResultItem {
   run: () => void;
 }
 
-interface ExplorationSession {
+interface ExplorationSuggestion {
+  id: string;
+  displayNodeId: string;
+  title: string;
+  summary: string;
+  edgeLabel: string;
+}
+
+interface ExplorationSuggestionState {
+  key: string;
+  loading: boolean;
+  error: string | null;
+  suggestions: ExplorationSuggestion[];
+}
+
+interface ExplorationBranch {
   id: string;
   rootNodeId: string;
-  activeNodeId: string;
+  activeNodeId: string | null;
   pathNodeIds: string[];
+  revealedNodeIds: string[];
+  transientNodes: CanvasNode[];
+  transientEdges: CanvasEdge[];
   relationQuery: string;
+  summaryPosition: { x: number; y: number };
 }
 
 interface ExplorationPresentation {
   activeNode: CanvasNode | null;
-  customMatches: CanvasNode[];
   displayDocument: CanvasDocument | null;
   pathNodes: CanvasNode[];
-  suggestedNodes: CanvasNode[];
+  suggestedNodes: ExplorationSuggestion[];
   visibleNodeIds: string[];
 }
 
@@ -112,18 +122,6 @@ export default function Home() {
   const [agentsDocument, setAgentsDocument] = useState<AgentsDocumentResponse | null>(null);
   const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
-  const [inspectView, setInspectView] = useState<"structure" | "search" | "impact">("structure");
-  const [queryMode, setQueryMode] = useState<QueryMode>("search");
-  const [queryInput, setQueryInput] = useState("create user");
-  const [queryResults, setQueryResults] = useState<QueryResponse["results"]>([]);
-  const [selectedSymbol, setSelectedSymbol] = useState<SymbolRecord | null>(null);
-  const [relationships, setRelationships] = useState<RelationshipRecord[]>([]);
-  const [structure, setStructure] = useState<StructureNode | null>(null);
-  const [selectedTreeNode, setSelectedTreeNode] = useState<StructureNode | null>(null);
-  const [expandedTreeNodeIds, setExpandedTreeNodeIds] = useState<Set<string>>(new Set());
-  const [structureRelationships, setStructureRelationships] = useState<RelationshipRecord[]>([]);
-  const [impactPrompt, setImpactPrompt] = useState("create user");
-  const [impactResult, setImpactResult] = useState<AssistImpactResponse | null>(null);
   const [codexPrompt, setCodexPrompt] = useState("");
   const [isPlanMode, setIsPlanMode] = useState(false);
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
@@ -143,8 +141,10 @@ export default function Home() {
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<string[]>([]);
-  const [notesExploration, setNotesExploration] = useState<ExplorationSession | null>(null);
-  const [explorationTabs, setExplorationTabs] = useState<Record<string, ExplorationSession>>({});
+  const [notesExploration, setNotesExploration] = useState<ExplorationBranch | null>(null);
+  const [explorationBranches, setExplorationBranches] = useState<Record<string, ExplorationBranch>>({});
+  const [explorationTabs, setExplorationTabs] = useState<Record<string, ExplorationBranch>>({});
+  const [explorationSuggestionStates, setExplorationSuggestionStates] = useState<Record<string, ExplorationSuggestionState>>({});
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
   const [canvasDraftTitle, setCanvasDraftTitle] = useState("");
   const [canvasDraftDescription, setCanvasDraftDescription] = useState("");
@@ -166,14 +166,11 @@ export default function Home() {
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const commandInputRef = useRef<HTMLInputElement | null>(null);
   const expectedRepoPathRef = useRef("");
+  const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
 
   const [statusPending, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
   const [agentsPending, startAgentsTransition] = useTransition();
-  const [queryPending, startQueryTransition] = useTransition();
-  const [relationshipsPending, startRelationshipsTransition] = useTransition();
-  const [, startStructureTransition] = useTransition();
-  const [impactPending, startImpactTransition] = useTransition();
   const [codexPending, startCodexTransition] = useTransition();
   const [, startCanvasTransition] = useTransition();
 
@@ -276,12 +273,30 @@ export default function Home() {
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
   }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding, isPlanning]);
   const notesExplorationPresentation = useMemo(
-    () => buildExplorationPresentation(canvasDocument, notesExploration),
-    [canvasDocument, notesExploration],
+    () =>
+      buildExplorationPresentation(
+        canvasDocument,
+        notesExploration,
+        notesExploration ? explorationSuggestionStates[notesExploration.id]?.suggestions ?? [] : [],
+      ),
+    [canvasDocument, explorationSuggestionStates, notesExploration],
   );
   const activeExplorationPresentation = useMemo(
-    () => buildExplorationPresentation(canvasDocument, activeExplorationSession),
-    [activeExplorationSession, canvasDocument],
+    () =>
+      buildExplorationPresentation(
+        canvasDocument,
+        activeExplorationSession,
+        activeExplorationSession ? explorationSuggestionStates[activeExplorationSession.id]?.suggestions ?? [] : [],
+      ),
+    [activeExplorationSession, canvasDocument, explorationSuggestionStates],
+  );
+  const overviewCanvasDocument = useMemo(
+    () => buildOverviewCanvasDocument(canvasDocument, explorationBranches),
+    [canvasDocument, explorationBranches],
+  );
+  const activeContextDocument = useMemo(
+    () => buildExplorationContextDocument(canvasDocument, currentExplorationSession),
+    [canvasDocument, currentExplorationSession],
   );
 
   useEffect(() => {
@@ -297,15 +312,6 @@ export default function Home() {
     });
     startProjectTransition(() => {
       void refreshProjectsTree();
-    });
-    startStructureTransition(() => {
-      void refreshStructure();
-    });
-    startQueryTransition(() => {
-      void submitQuery("create user", "search");
-    });
-    startImpactTransition(() => {
-      void submitImpact("create user");
     });
     startCanvasTransition(() => {
       void refreshCanvas();
@@ -356,6 +362,8 @@ export default function Home() {
       setPendingPlan(null);
       setCommitStatus(null);
       setWorkspaceStatus(null);
+      setExplorationBranches({});
+      setExplorationSuggestionStates({});
       return;
     }
     startAgentsTransition(() => {
@@ -370,6 +378,105 @@ export default function Home() {
     void refreshCommitStatus(project.repo_path);
     void refreshWorkspaceStatus(project.repo_path);
   }, [project?.repo_path]);
+
+  useEffect(() => {
+    setExplorationBranches(readStoredExplorationBranches(activeRepoPath));
+    setExplorationSuggestionStates({});
+  }, [activeRepoPath]);
+
+  useEffect(() => {
+    if (!activeRepoPath) {
+      return;
+    }
+    writeStoredExplorationBranches(activeRepoPath, explorationBranches);
+  }, [activeRepoPath, explorationBranches]);
+
+  useEffect(() => {
+    if (!activeRepoPath || !canvasDocument || !currentExplorationSession) {
+      return;
+    }
+
+    const branchDocument = buildExplorationContextDocument(canvasDocument, currentExplorationSession);
+    if (!branchDocument) {
+      return;
+    }
+    const activeNode = buildExplorationContextNode(branchDocument, currentExplorationSession);
+    if (!activeNode) {
+      return;
+    }
+
+    const requestKey = buildExplorationSuggestionKey(currentExplorationSession);
+    const existingState = explorationSuggestionStatesRef.current[currentExplorationSession.id];
+    if (
+      existingState?.key === requestKey &&
+      (existingState.loading || existingState.suggestions.length > 0 || existingState.error !== null)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    setExplorationSuggestionStates((current) => ({
+      ...current,
+      [currentExplorationSession.id]: {
+        key: requestKey,
+        loading: true,
+        error: null,
+        suggestions: current[currentExplorationSession.id]?.key === requestKey ? current[currentExplorationSession.id].suggestions : [],
+      },
+    }));
+
+    void fetchExplorationSuggestions(
+      activeRepoPath,
+      activeNode,
+      buildExplorationPathTitles(branchDocument, currentExplorationSession),
+      buildSelectedNoteContext(branchDocument, currentExplorationSession.pathNodeIds),
+      undefined,
+    )
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setExplorationSuggestionStates((current) => ({
+          ...current,
+          [currentExplorationSession.id]: {
+            key: requestKey,
+            loading: false,
+            error: null,
+            suggestions: response.suggestions.map((suggestion, index) =>
+              toExplorationSuggestion(currentExplorationSession.id, suggestion, index),
+            ),
+          },
+        }));
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        const fallbackSuggestions = buildFallbackExplorationSuggestions(activeNode.title).map((suggestion, index) =>
+          toExplorationSuggestion(currentExplorationSession.id, suggestion, index),
+        );
+        setExplorationSuggestionStates((current) => ({
+          ...current,
+          [currentExplorationSession.id]: {
+            key: requestKey,
+            loading: false,
+            error: null,
+            suggestions: fallbackSuggestions,
+          },
+        }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeRepoPath,
+    canvasDocument,
+    currentExplorationSession?.activeNodeId,
+    currentExplorationSession?.id,
+    currentExplorationSession?.pathNodeIds,
+    currentExplorationSession?.rootNodeId,
+  ]);
 
   useEffect(() => {
     if (!project?.repo_path) {
@@ -411,6 +518,10 @@ export default function Home() {
     }
     container.scrollTop = container.scrollHeight;
   }, [consoleMessages, isConsoleExpanded]);
+
+  useEffect(() => {
+    explorationSuggestionStatesRef.current = explorationSuggestionStates;
+  }, [explorationSuggestionStates]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -482,10 +593,21 @@ export default function Home() {
     }
 
     const validNodeIds = new Set(canvasDocument.nodes.map((node) => node.id));
-    setPinnedCanvasNodeIds((current) => current.filter((nodeId) => validNodeIds.has(nodeId)));
-    setOpenCanvasNodeIds((current) => current.filter((nodeId) => validNodeIds.has(nodeId)));
-    setOpenTabs((current) =>
-      current.filter((tab) => {
+    const explorationNodeIds = new Set<string>([
+      ...(notesExploration?.transientNodes.map((node) => node.id) ?? []),
+      ...Object.values(explorationTabs).flatMap((branch) => branch.transientNodes.map((node) => node.id)),
+      ...Object.values(explorationBranches).flatMap((branch) => branch.transientNodes.map((node) => node.id)),
+    ]);
+    setPinnedCanvasNodeIds((current) => {
+      const next = current.filter((nodeId) => validNodeIds.has(nodeId));
+      return current.length === next.length && current.every((nodeId, index) => nodeId === next[index]) ? current : next;
+    });
+    setOpenCanvasNodeIds((current) => {
+      const next = current.filter((nodeId) => validNodeIds.has(nodeId));
+      return current.length === next.length && current.every((nodeId, index) => nodeId === next[index]) ? current : next;
+    });
+    setOpenTabs((current) => {
+      const next = current.filter((tab) => {
         if (tab.type === "view") {
           return true;
         }
@@ -493,17 +615,29 @@ export default function Home() {
           return validNodeIds.has(tab.nodeId);
         }
         return true;
-      }),
-    );
-    setNotesExploration((current) => normalizeExplorationSession(current, validNodeIds));
+      });
+      return current.length === next.length && current.every((tab, index) => tab === next[index]) ? current : next;
+    });
+    setNotesExploration((current) => {
+      const next = normalizeExplorationBranch(current, validNodeIds);
+      return areExplorationBranchesEqual(current, next) ? current : next;
+    });
+    setExplorationBranches((current) => {
+      const nextEntries = Object.entries(current)
+        .map(([id, branch]) => [id, normalizeExplorationBranch(branch, validNodeIds)] as const)
+        .filter((entry): entry is readonly [string, ExplorationBranch] => Boolean(entry[1]));
+      const next = Object.fromEntries(nextEntries);
+      return areExplorationBranchMapsEqual(current, next) ? current : next;
+    });
     setExplorationTabs((current) => {
       const nextEntries = Object.entries(current)
-        .map(([id, session]) => [id, normalizeExplorationSession(session, validNodeIds)] as const)
-        .filter((entry): entry is readonly [string, ExplorationSession] => Boolean(entry[1]));
-      return Object.fromEntries(nextEntries);
+        .map(([id, branch]) => [id, normalizeExplorationBranch(branch, validNodeIds)] as const)
+        .filter((entry): entry is readonly [string, ExplorationBranch] => Boolean(entry[1]));
+      const next = Object.fromEntries(nextEntries);
+      return areExplorationBranchMapsEqual(current, next) ? current : next;
     });
 
-    if (selectedCanvasNodeId && !validNodeIds.has(selectedCanvasNodeId)) {
+    if (selectedCanvasNodeId && !validNodeIds.has(selectedCanvasNodeId) && !explorationNodeIds.has(selectedCanvasNodeId)) {
       const fallbackNodeId = canvasDocument.nodes[0]?.id ?? null;
       setSelectedCanvasNodeId(fallbackNodeId);
       setSelectedCanvasNodeIds(fallbackNodeId ? [fallbackNodeId] : []);
@@ -513,42 +647,7 @@ export default function Home() {
         );
       }
     }
-  }, [canvasDocument, selectedCanvasNodeId]);
-
-  useEffect(() => {
-    if (
-      !canvasDocument ||
-      activeTab?.type !== "view" ||
-      activeTab.view !== "notes"
-    ) {
-      return;
-    }
-
-    if (selectedCanvasNodeIds.length !== 1) {
-      setNotesExploration((current) => (current ? null : current));
-      return;
-    }
-
-    const nextNodeId = selectedCanvasNodeIds[0];
-    if (!canvasDocument.nodes.some((node) => node.id === nextNodeId)) {
-      return;
-    }
-
-    setNotesExploration((current) => {
-      if (!current) {
-        return createExplorationSession(nextNodeId);
-      }
-      return advanceExplorationSession(current, nextNodeId);
-    });
-  }, [activeTab, canvasDocument, selectedCanvasNodeIds]);
-
-  useEffect(() => {
-    if (status?.index_job.status === "completed") {
-      startStructureTransition(() => {
-        void refreshStructure();
-      });
-    }
-  }, [status?.index_job.status, startStructureTransition]);
+  }, [canvasDocument, explorationBranches, explorationTabs, notesExploration, selectedCanvasNodeId]);
 
   useEffect(() => {
     if (status?.index_job.status !== "running") {
@@ -761,56 +860,6 @@ export default function Home() {
     }
   }
 
-  async function refreshStructure() {
-    try {
-      setErrorMessage(null);
-      const response = await fetchStructure();
-      setStructure(response.root);
-      setSelectedTreeNode(response.root);
-      setExpandedTreeNodeIds(new Set([response.root.id]));
-      setStructureRelationships([]);
-    } catch (error) {
-      setStructure(null);
-      setSelectedTreeNode(null);
-      setStructureRelationships([]);
-      setErrorMessage(getErrorMessage(error));
-    }
-  }
-
-  async function submitQuery(input: string, mode: QueryMode) {
-    try {
-      setErrorMessage(null);
-      const response = await runQuery(input, mode);
-      setQueryResults(response.results);
-      setSelectedSymbol(null);
-      setRelationships([]);
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    }
-  }
-
-  async function handleSubmitQuery() {
-    startQueryTransition(() => {
-      void submitQuery(queryInput, queryMode);
-    });
-  }
-
-  async function submitImpact(prompt: string) {
-    try {
-      setErrorMessage(null);
-      const response = await runImpactAnalysis(prompt);
-      setImpactResult(response);
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    }
-  }
-
-  async function handleSubmitImpact() {
-    startImpactTransition(() => {
-      void submitImpact(impactPrompt);
-    });
-  }
-
   async function submitBuildPrompt(
     promptValue = codexPrompt.trim(),
     options?: { preserveActiveView?: boolean },
@@ -864,7 +913,7 @@ export default function Home() {
         activeRepoPath,
         "build",
         prompt,
-        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
+        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
         (event) => {
           handleProjectRunEvent(event, {
@@ -1006,7 +1055,7 @@ export default function Home() {
         activeRepoPath,
         "plan",
         prompt,
-        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
+        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
         (event) => {
           handleProjectRunEvent(event, {
@@ -1117,7 +1166,7 @@ export default function Home() {
         activeRepoPath,
         "ask",
         prompt,
-        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
+        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
         (event) => {
           handleProjectRunEvent(event, {
@@ -1236,7 +1285,7 @@ export default function Home() {
           `Original request:\n${plan.prompt}`,
           `Approved plan:\n${plan.planText}`,
         ].join("\n\n"),
-        buildSelectedNoteContext(canvasDocument, visibleContextNodeIds),
+        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
         (event) => {
           handleProjectRunEvent(event, {
@@ -1348,74 +1397,8 @@ export default function Home() {
     });
   }
 
-  async function inspectSymbol(symbol: SymbolRecord) {
-    const qualifiedName =
-      typeof symbol.properties.qualified_name === "string"
-        ? symbol.properties.qualified_name
-        : null;
-    if (!qualifiedName) {
-      setSelectedSymbol(symbol);
-      setRelationships([]);
-      return;
-    }
-
-    startRelationshipsTransition(() => {
-      void (async () => {
-        try {
-          setErrorMessage(null);
-          const response = await fetchRelationships(qualifiedName);
-          setSelectedSymbol(symbol);
-          setRelationships(response.items);
-        } catch (error) {
-          setErrorMessage(getErrorMessage(error));
-        }
-      })();
-    });
-  }
-
-  async function inspectTreeNode(node: StructureNode) {
-    setSelectedTreeNode(node);
-    const qualifiedName = node.qualified_name;
-    if (!qualifiedName) {
-      setStructureRelationships([]);
-      return;
-    }
-
-    startRelationshipsTransition(() => {
-      void (async () => {
-        try {
-          setErrorMessage(null);
-          const response = await fetchRelationships(qualifiedName);
-          setStructureRelationships(response.items);
-        } catch (error) {
-          setErrorMessage(getErrorMessage(error));
-        }
-      })();
-    });
-  }
-
-  function toggleTreeNode(nodeId: string) {
-    setExpandedTreeNodeIds((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-      return next;
-    });
-  }
-
   function applySampleRepo(nextPath: string) {
     setRepoPath(nextPath);
-    if (nextPath.includes("react-crud-app")) {
-      setQueryInput("create user");
-      setImpactPrompt("create user");
-      setCodexPrompt("");
-      return;
-    }
-    setQueryInput("user");
-    setImpactPrompt("user");
     setCodexPrompt("");
   }
 
@@ -1613,27 +1596,179 @@ export default function Home() {
       return;
     }
 
-    const promotedSession = {
+    const promotedBranch = {
       ...notesExploration,
       id: `saved-${Date.now()}`,
       pathNodeIds: [...notesExploration.pathNodeIds],
+      revealedNodeIds: [...notesExploration.revealedNodeIds],
+      transientNodes: [...notesExploration.transientNodes],
+      transientEdges: [...notesExploration.transientEdges],
     };
 
+    setExplorationBranches((current) => ({
+      ...current,
+      [promotedBranch.id]: promotedBranch,
+    }));
     setExplorationTabs((current) => ({
       ...current,
-      [promotedSession.id]: promotedSession,
+      [promotedBranch.id]: promotedBranch,
     }));
     setOpenTabs((current) =>
-      current.some((tab) => tab.id === `explore:${promotedSession.id}`)
+      current.some((tab) => tab.id === `explore:${promotedBranch.id}`)
         ? current
-        : [...current, { id: `explore:${promotedSession.id}`, type: "exploration", explorationId: promotedSession.id }],
+        : [...current, { id: `explore:${promotedBranch.id}`, type: "exploration", explorationId: promotedBranch.id }],
     );
-    setActiveTabId(`explore:${promotedSession.id}`);
-    setComposerStatus(`Opened an exploration tab for ${findCanvasNodeTitle(canvasDocument, promotedSession.rootNodeId)}.`);
+    setActiveTabId(`explore:${promotedBranch.id}`);
+    setComposerStatus(`Opened an exploration tab for ${findCanvasNodeTitle(canvasDocument, promotedBranch.rootNodeId)}.`);
+  }
+
+  function collapseNotesExploration() {
+    if (!notesExploration) {
+      setSelectedCanvasNodeId(null);
+      setSelectedCanvasNodeIds([]);
+      return;
+    }
+    setExplorationBranches((current) => ({
+      ...current,
+      [notesExploration.id]: notesExploration,
+    }));
+    setNotesExploration(null);
+    setSelectedCanvasNodeId(null);
+    setSelectedCanvasNodeIds([]);
+  }
+
+  function materializeExplorationSuggestion(
+    branch: ExplorationBranch,
+    suggestion: ExplorationSuggestion,
+    options?: { persistent?: boolean },
+  ) {
+    const nextBranch = addTransientExplorationNode(
+      canvasDocument,
+      branch,
+      branch.activeNodeId ?? branch.rootNodeId,
+      suggestion.title,
+      suggestion.summary,
+      suggestion.edgeLabel,
+    );
+
+    setSelectedCanvasNodeId(nextBranch.activeNodeId);
+    setSelectedCanvasNodeIds(nextBranch.activeNodeId ? [nextBranch.activeNodeId] : []);
+    if (options?.persistent) {
+      setExplorationTabs((current) => ({
+        ...current,
+        [branch.id]: nextBranch,
+      }));
+    } else {
+      setNotesExploration(nextBranch);
+    }
+  }
+
+  function findSuggestionForBranch(branch: ExplorationBranch, nodeId: string, options?: { persistent?: boolean }) {
+    const presentation =
+      options?.persistent
+        ? activeExplorationPresentation
+        : notesExplorationPresentation;
+    if (!presentation || branch.id !== (options?.persistent ? activeExplorationSession?.id : notesExploration?.id)) {
+      return null;
+    }
+    return presentation.suggestedNodes.find((suggestion) => suggestion.displayNodeId === nodeId) ?? null;
+  }
+
+  async function materializeRelationQuery(
+    branch: ExplorationBranch,
+    relationQuery: string,
+    options?: { persistent?: boolean },
+  ) {
+    const query = relationQuery.trim();
+    if (!query || !canvasDocument || !activeRepoPath) {
+      return;
+    }
+
+    const branchDocument = buildExplorationContextDocument(canvasDocument, branch);
+    if (!branchDocument) {
+      return;
+    }
+    const activeNode = buildExplorationContextNode(branchDocument, branch);
+    if (!activeNode) {
+      return;
+    }
+
+    setExplorationSuggestionStates((current) => ({
+      ...current,
+      [branch.id]: {
+        key: buildExplorationSuggestionKey(branch),
+        loading: true,
+        error: null,
+        suggestions: current[branch.id]?.suggestions ?? [],
+      },
+    }));
+
+    let generatedSuggestion: ExplorationSuggestion;
+    try {
+      const response = await fetchExplorationSuggestions(
+        activeRepoPath,
+        activeNode,
+        buildExplorationPathTitles(branchDocument, branch),
+        buildSelectedNoteContext(branchDocument, branch.pathNodeIds),
+        buildConversationContext(consoleMessages),
+        query,
+        1,
+      );
+      const firstSuggestion = response.suggestions[0];
+      if (!firstSuggestion) {
+        throw new Error("No exploration suggestion was returned.");
+      }
+      generatedSuggestion = toExplorationSuggestion(branch.id, firstSuggestion, 0);
+    } catch (error) {
+      const fallbackSuggestion = buildFallbackRelationSuggestion(activeNode.title, query);
+      generatedSuggestion = toExplorationSuggestion(branch.id, fallbackSuggestion, 0);
+      setExplorationSuggestionStates((current) => ({
+        ...current,
+        [branch.id]: {
+          key: buildExplorationSuggestionKey(branch),
+          loading: false,
+          error: null,
+          suggestions: current[branch.id]?.suggestions ?? [],
+        },
+      }));
+    }
+
+    let nextBranch = addTransientExplorationNode(
+      canvasDocument,
+      branch,
+      branch.activeNodeId ?? branch.rootNodeId,
+      generatedSuggestion.title,
+      generatedSuggestion.summary,
+      generatedSuggestion.edgeLabel,
+    );
+    nextBranch = {
+      ...nextBranch,
+      relationQuery: "",
+    };
+
+    setSelectedCanvasNodeId(nextBranch.activeNodeId);
+    setSelectedCanvasNodeIds(nextBranch.activeNodeId ? [nextBranch.activeNodeId] : []);
+    if (options?.persistent) {
+      setExplorationTabs((current) => ({
+        ...current,
+        [branch.id]: nextBranch,
+      }));
+    } else {
+      setNotesExploration(nextBranch);
+    }
+    setExplorationSuggestionStates((current) => ({
+      ...current,
+      [branch.id]: {
+        key: buildExplorationSuggestionKey(nextBranch),
+        loading: false,
+        error: null,
+        suggestions: [],
+      },
+    }));
   }
 
   function handleExplorationSelection(
-    session: ExplorationSession,
+    branch: ExplorationBranch,
     nodeIds: string[],
     options?: { persistent?: boolean },
   ) {
@@ -1641,9 +1776,7 @@ export default function Home() {
       if (options?.persistent) {
         return;
       }
-      setNotesExploration(null);
-      setSelectedCanvasNodeId(null);
-      setSelectedCanvasNodeIds([]);
+      collapseNotesExploration();
       return;
     }
 
@@ -1652,7 +1785,12 @@ export default function Home() {
     }
 
     const nextNodeId = nodeIds[0];
-    const nextSession = advanceExplorationSession(session, nextNodeId);
+    const suggestion = findSuggestionForBranch(branch, nextNodeId, options);
+    if (suggestion) {
+      materializeExplorationSuggestion(branch, suggestion, options);
+      return;
+    }
+    const nextBranch = advanceExplorationBranch(branch, nextNodeId);
     setSelectedCanvasNodeId((current) => (current === nextNodeId ? current : nextNodeId));
     setSelectedCanvasNodeIds((current) =>
       current.length === 1 && current[0] === nextNodeId ? current : [nextNodeId],
@@ -1661,10 +1799,10 @@ export default function Home() {
     if (options?.persistent) {
       setExplorationTabs((current) => ({
         ...current,
-        [session.id]: nextSession,
+        [branch.id]: nextBranch,
       }));
     } else {
-      setNotesExploration(nextSession);
+      setNotesExploration(nextBranch);
     }
   }
 
@@ -1675,13 +1813,13 @@ export default function Home() {
   ) {
     if (options?.persistent) {
       setExplorationTabs((current) => {
-        const session = current[sessionId];
-        if (!session) {
+        const branch = current[sessionId];
+        if (!branch) {
           return current;
         }
         return {
           ...current,
-          [sessionId]: { ...session, relationQuery: value },
+          [sessionId]: { ...branch, relationQuery: value },
         };
       });
       return;
@@ -1692,6 +1830,32 @@ export default function Home() {
 
   function clearExplorationRelationQuery(sessionId: string, options?: { persistent?: boolean }) {
     handleExplorationRelationQueryChange(sessionId, "", options);
+  }
+
+  function handleOpenContextNode(nodeId: string) {
+    const branchId = parseBranchSummaryNodeId(nodeId);
+    if (branchId) {
+      const branch = explorationBranches[branchId];
+      if (branch) {
+        setNotesExploration(branch);
+        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+      }
+      return;
+    }
+
+    if (isTransientExplorationNodeId(nodeId)) {
+      if (activeTab?.type === "exploration" && activeExplorationSession) {
+        handleExplorationSelection(activeExplorationSession, [nodeId], { persistent: true });
+        return;
+      }
+      if (notesExploration) {
+        handleExplorationSelection(notesExploration, [nodeId]);
+        return;
+      }
+    }
+
+    openCanvasNode(nodeId);
   }
 
   function openChatViewTab() {
@@ -1758,6 +1922,19 @@ export default function Home() {
   }
 
   function handleSelectCanvasNodes(nodeIds: string[]) {
+    if (activeTab?.type === "view" && activeTab.view === "notes" && !notesExploration && nodeIds.length === 1) {
+      const branchId = parseBranchSummaryNodeId(nodeIds[0]);
+      if (branchId) {
+        const branch = explorationBranches[branchId];
+        if (branch) {
+          setNotesExploration(branch);
+          setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+          setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+        }
+        return;
+      }
+    }
+
     const normalized = [...nodeIds].sort();
     setSelectedCanvasNodeIds((current) => {
       const currentNormalized = [...current].sort();
@@ -1773,6 +1950,19 @@ export default function Home() {
       const nextPrimary = nodeIds[0] ?? null;
       return current === nextPrimary ? current : nextPrimary;
     });
+
+    if (activeTab?.type === "view" && activeTab.view === "notes") {
+      if (nodeIds.length === 1 && canvasDocument?.nodes.some((node) => node.id === nodeIds[0])) {
+        setNotesExploration((current) => {
+          if (!current) {
+            return createExplorationBranch(nodeIds[0], canvasDocument);
+          }
+          return advanceExplorationBranch(current, nodeIds[0]);
+        });
+      } else if (nodeIds.length === 0) {
+        collapseNotesExploration();
+      }
+    }
   }
 
   const commandResults = useMemo<CommandResultItem[]>(() => {
@@ -1943,19 +2133,6 @@ export default function Home() {
           },
         },
         {
-          id: "action-open-inspect",
-          title: "Open Inspect",
-          subtitle: "Switches to the Inspect workspace",
-          group: "action",
-          keywords: ["open", "inspect", "view"],
-          enabled: true,
-          run: () => {
-            setCommandInput("");
-            setIsCommandPaletteOpen(false);
-            openViewTab("inspect");
-          },
-        },
-        {
           id: "action-open-project",
           title: "Open Project",
           subtitle: "Switches to the Project workspace",
@@ -2099,7 +2276,7 @@ export default function Home() {
         },
       }));
 
-    const viewItems = (["notes", "inspect", "project", "chat"] as WorkspaceView[])
+    const viewItems = (["notes", "project", "chat"] as WorkspaceView[])
       .filter((view) => !query || viewLabel(view).toLowerCase().includes(query))
       .map<CommandResultItem>((view) => ({
         id: `view:${view}`,
@@ -2200,13 +2377,13 @@ export default function Home() {
       void (async () => {
         try {
           const response = await createCanvasNode({
-            title: buildNewCanvasNodeTitle(selectedSymbol, selectedTreeNode),
-            description: buildNewCanvasNodeDescription(selectedSymbol, selectedTreeNode),
-            tags: buildNewCanvasNodeTags(selectedSymbol, selectedTreeNode),
+            title: "New note",
+            description: "Describe the feature, screen, workflow, or constraint this note represents.",
+            tags: ["feature"],
             x,
             y,
-            linked_files: buildLinkedFiles(selectedSymbol, selectedTreeNode),
-            linked_symbols: buildLinkedSymbols(selectedSymbol, selectedTreeNode),
+            linked_files: [],
+            linked_symbols: [],
           });
           setCanvasDocument(response.document);
           const createdNode = response.document.nodes.at(-1) ?? null;
@@ -2257,160 +2434,172 @@ export default function Home() {
     });
   }
 
-  function renderExplorationSurface(
-    session: ExplorationSession,
+  function renderExplorationPanel(
+    branch: ExplorationBranch,
     presentation: ExplorationPresentation,
     options?: { persistent?: boolean },
   ) {
     const isPersistent = options?.persistent ?? false;
     const activeNode = presentation.activeNode;
-    const relationQuery = session.relationQuery;
+    const relationQuery = branch.relationQuery;
+    const suggestionState = explorationSuggestionStates[branch.id] ?? null;
+
+    return (
+      <aside className={styles.explorationPanel}>
+        <div className={styles.explorationPanelHeader}>
+          <div>
+            <strong className={styles.resultTitle}>{activeNode?.title ?? "Explore concept"}</strong>
+            <p className={styles.resultMeta}>
+              {isPersistent
+                ? "Saved exploration tab"
+                : "Transient exploration from the overview canvas"}
+            </p>
+          </div>
+          <div className={styles.explorationHeaderActions}>
+            {!isPersistent ? (
+              <>
+                <button className={styles.secondaryButton} onClick={promoteNotesExplorationToTab} type="button">
+                  Open as tab
+                </button>
+                <button
+                  className={styles.secondaryButton}
+                  onClick={collapseNotesExploration}
+                  type="button"
+                >
+                  Back to overview
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div className={styles.explorationSection}>
+          <span className={styles.fieldLabel}>Path</span>
+          <div className={styles.explorationPath}>
+            {presentation.pathNodes.map((node) => (
+              <button
+                className={node.id === branch.activeNodeId ? styles.explorationPathChipActive : styles.explorationPathChip}
+                key={node.id}
+                onClick={() => handleExplorationSelection(branch, [node.id], { persistent: isPersistent })}
+                type="button"
+              >
+                {node.title}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {activeNode ? (
+          <div className={styles.explorationSection}>
+            <span className={styles.fieldLabel}>What this concept does</span>
+            <p className={styles.explorationDescription}>{activeNode.description || "No description yet."}</p>
+            <div className={styles.explorationMetaGrid}>
+              <div>
+                <span className={styles.fieldLabel}>Tags</span>
+                <div className={styles.tagRow}>
+                  {activeNode.tags.length === 0 ? <span className={styles.tagChip}>untagged</span> : null}
+                  {activeNode.tags.map((tag) => (
+                    <span className={styles.tagChip} key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <span className={styles.fieldLabel}>Grounded in</span>
+                <ul className={styles.explorationList}>
+                  {activeNode.linked_files.length === 0 ? (
+                    <li className={styles.helperText}>No linked files</li>
+                  ) : (
+                    activeNode.linked_files.slice(0, 6).map((file) => <li key={file}>{file}</li>)
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className={styles.explorationSection}>
+          <span className={styles.fieldLabel}>Suggested next concepts</span>
+          <div className={styles.explorationSuggestionList}>
+            {suggestionState?.loading ? (
+              <p className={styles.helperTextLoading}>Generating exploration suggestions...</p>
+            ) : suggestionState?.error ? (
+              <p className={styles.helperText}>Could not generate suggestions right now: {suggestionState.error}</p>
+            ) : presentation.suggestedNodes.length === 0 ? (
+              <p className={styles.helperText}>No strong next concepts from the current focus.</p>
+            ) : (
+              presentation.suggestedNodes.map((suggestion) => (
+                <button
+                  className={styles.explorationSuggestion}
+                  key={suggestion.id}
+                  onClick={() => materializeExplorationSuggestion(branch, suggestion, { persistent: isPersistent })}
+                  type="button"
+                >
+                  <strong>{suggestion.title}</strong>
+                  <span>{suggestion.summary}</span>
+                  <span className={styles.explorationSuggestionRelation}>{suggestion.edgeLabel}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className={styles.explorationSection}>
+          <div className={styles.explorationRelationHeader}>
+            <span className={styles.fieldLabel}>Custom relation</span>
+            {relationQuery ? (
+              <button
+                className={styles.inlineLink}
+                onClick={() => clearExplorationRelationQuery(branch.id, { persistent: isPersistent })}
+                type="button"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+          <input
+            className={styles.input}
+            onChange={(event) =>
+              handleExplorationRelationQueryChange(branch.id, event.target.value, { persistent: isPersistent })
+            }
+            placeholder="Show related state, workflow, persistence..."
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void materializeRelationQuery(branch, relationQuery, { persistent: isPersistent });
+              }
+            }}
+            value={relationQuery}
+          />
+          <div className={styles.explorationRelationActions}>
+            <button
+              className={styles.secondaryButton}
+              disabled={!relationQuery.trim()}
+              onClick={() => {
+                void materializeRelationQuery(branch, relationQuery, { persistent: isPersistent });
+              }}
+              type="button"
+            >
+              Add relation
+            </button>
+            <p className={styles.helperText}>Type an angle and create one connected concept from the current focus.</p>
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
+  function renderExplorationSurface(
+    branch: ExplorationBranch,
+    presentation: ExplorationPresentation,
+    options?: { persistent?: boolean },
+  ) {
+    const isPersistent = options?.persistent ?? false;
 
     return (
       <div className={styles.explorationWorkspace}>
-        <aside className={styles.explorationPanel}>
-          <div className={styles.explorationPanelHeader}>
-            <div>
-              <strong className={styles.resultTitle}>{activeNode?.title ?? "Explore concept"}</strong>
-              <p className={styles.resultMeta}>
-                {isPersistent
-                  ? "Saved exploration tab"
-                  : "Transient exploration from the overview canvas"}
-              </p>
-            </div>
-            <div className={styles.explorationHeaderActions}>
-              {!isPersistent ? (
-                <>
-                  <button className={styles.secondaryButton} onClick={promoteNotesExplorationToTab} type="button">
-                    Open as tab
-                  </button>
-                  <button
-                    className={styles.secondaryButton}
-                    onClick={() => {
-                      setNotesExploration(null);
-                      setSelectedCanvasNodeId(null);
-                      setSelectedCanvasNodeIds([]);
-                    }}
-                    type="button"
-                  >
-                    Back to overview
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </div>
-
-          <div className={styles.explorationSection}>
-            <span className={styles.fieldLabel}>Path</span>
-            <div className={styles.explorationPath}>
-              {presentation.pathNodes.map((node) => (
-                <button
-                  className={node.id === session.activeNodeId ? styles.explorationPathChipActive : styles.explorationPathChip}
-                  key={node.id}
-                  onClick={() => handleExplorationSelection(session, [node.id], { persistent: isPersistent })}
-                  type="button"
-                >
-                  {node.title}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {activeNode ? (
-            <div className={styles.explorationSection}>
-              <span className={styles.fieldLabel}>What this concept does</span>
-              <p className={styles.explorationDescription}>{activeNode.description || "No description yet."}</p>
-              <div className={styles.explorationMetaGrid}>
-                <div>
-                  <span className={styles.fieldLabel}>Tags</span>
-                  <div className={styles.tagRow}>
-                    {activeNode.tags.length === 0 ? <span className={styles.tagChip}>untagged</span> : null}
-                    {activeNode.tags.map((tag) => (
-                      <span className={styles.tagChip} key={tag}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <span className={styles.fieldLabel}>Grounded in</span>
-                  <ul className={styles.explorationList}>
-                    {activeNode.linked_files.length === 0 ? (
-                      <li className={styles.helperText}>No linked files</li>
-                    ) : (
-                      activeNode.linked_files.slice(0, 6).map((file) => <li key={file}>{file}</li>)
-                    )}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          <div className={styles.explorationSection}>
-            <span className={styles.fieldLabel}>Suggested next concepts</span>
-            <div className={styles.explorationSuggestionList}>
-              {presentation.suggestedNodes.length === 0 ? (
-                <p className={styles.helperText}>No strong next concepts from the current focus.</p>
-              ) : (
-                presentation.suggestedNodes.map((node) => (
-                  <button
-                    className={styles.explorationSuggestion}
-                    key={node.id}
-                    onClick={() => handleExplorationSelection(session, [node.id], { persistent: isPersistent })}
-                    type="button"
-                  >
-                    <strong>{node.title}</strong>
-                    <span>{summarizeNote(node.description)}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className={styles.explorationSection}>
-            <div className={styles.explorationRelationHeader}>
-              <span className={styles.fieldLabel}>Custom relation</span>
-              {relationQuery ? (
-                <button
-                  className={styles.inlineLink}
-                  onClick={() => clearExplorationRelationQuery(session.id, { persistent: isPersistent })}
-                  type="button"
-                >
-                  Clear
-                </button>
-              ) : null}
-            </div>
-            <input
-              className={styles.input}
-              onChange={(event) =>
-                handleExplorationRelationQueryChange(session.id, event.target.value, { persistent: isPersistent })
-              }
-              placeholder="Show related state, workflow, persistence..."
-              value={relationQuery}
-            />
-            {relationQuery ? (
-              <div className={styles.explorationSuggestionList}>
-                {presentation.customMatches.length === 0 ? (
-                  <p className={styles.helperText}>No nearby concepts matched that relation yet.</p>
-                ) : (
-                  presentation.customMatches.map((node) => (
-                    <button
-                      className={styles.explorationSuggestion}
-                      key={node.id}
-                      onClick={() => handleExplorationSelection(session, [node.id], { persistent: isPersistent })}
-                      type="button"
-                    >
-                      <strong>{node.title}</strong>
-                      <span>{summarizeNote(node.description)}</span>
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : (
-              <p className={styles.helperText}>Type a relation or angle to surface a different branch of the architecture.</p>
-            )}
-          </div>
-        </aside>
+        {renderExplorationPanel(branch, presentation, options)}
 
         <div className={styles.explorationCanvasStage}>
           <CanvasBoard
@@ -2427,19 +2616,26 @@ export default function Home() {
                 void handlePersistCanvasNodePosition(nodeId, x, y);
               });
             }}
-            onOpenNode={openCanvasNode}
+            onOpenNode={(nodeId) => {
+              const suggestion = findSuggestionForBranch(branch, nodeId, { persistent: isPersistent });
+              if (suggestion) {
+                materializeExplorationSuggestion(branch, suggestion, { persistent: isPersistent });
+                return;
+              }
+              if (isTransientExplorationNodeId(nodeId)) {
+                handleExplorationSelection(branch, [nodeId], { persistent: isPersistent });
+                return;
+              }
+              openCanvasNode(nodeId);
+            }}
             onPaneClick={
               isPersistent
                 ? undefined
-                : () => {
-                    setNotesExploration(null);
-                    setSelectedCanvasNodeId(null);
-                    setSelectedCanvasNodeIds([]);
-                  }
+                : collapseNotesExploration
             }
-            onSelectNode={(nodeId) => handleExplorationSelection(session, [nodeId], { persistent: isPersistent })}
-            onSelectNodes={(nodeIds) => handleExplorationSelection(session, nodeIds, { persistent: isPersistent })}
-            selectedNodeIds={session.activeNodeId ? [session.activeNodeId] : []}
+            onSelectNode={(nodeId) => handleExplorationSelection(branch, [nodeId], { persistent: isPersistent })}
+            onSelectNodes={(nodeIds) => handleExplorationSelection(branch, nodeIds, { persistent: isPersistent })}
+            selectedNodeIds={branch.activeNodeId ? [branch.activeNodeId] : []}
           />
         </div>
       </div>
@@ -2467,8 +2663,8 @@ export default function Home() {
                         <div className={styles.consoleMessageBody}>
                           {renderConsoleMessageContent(
                             message.content,
-                            message.role === "assistant" ? canvasDocument : null,
-                            openCanvasNode,
+                            message.role === "assistant" ? activeContextDocument : null,
+                            handleOpenContextNode,
                           )}
                         </div>
                         {pendingPlan?.messageId === message.id ? (
@@ -2593,39 +2789,82 @@ export default function Home() {
                 </button>
               </div>
             </div>
-          ) : notesExploration && notesExplorationPresentation.displayDocument ? (
-            renderExplorationSurface(notesExploration, notesExplorationPresentation)
           ) : (
-            <CanvasBoard
-              onDeleteNode={handleDeleteCanvasNode}
-              document={canvasDocument}
-              edgeNodeIds={selectedCanvasNodeIds}
-              onCreateNodeAt={(x, y) => {
-                startCanvasTransition(() => {
-                  void handleCreateCanvasNodeAt(x, y);
-                });
-              }}
-              onMoveNodeEnd={(nodeId, x, y) => {
-                startCanvasTransition(() => {
-                  void handlePersistCanvasNodePosition(nodeId, x, y);
-                });
-              }}
-              onOpenNode={openCanvasNode}
-              onPaneClick={() => {
-                setNotesExploration(null);
-              }}
-              onSelectNode={(nodeId) => handleSelectCanvasNodes([nodeId])}
-              onSelectNodes={handleSelectCanvasNodes}
-              selectedNodeIds={selectedCanvasNodeIds}
-            />
+            <>
+              <CanvasBoard
+                onDeleteNode={handleDeleteCanvasNode}
+                document={notesExplorationPresentation.displayDocument ?? overviewCanvasDocument}
+                edgeNodeIds={notesExploration ? notesExplorationPresentation.visibleNodeIds : selectedCanvasNodeIds}
+                onCreateNodeAt={(x, y) => {
+                  startCanvasTransition(() => {
+                    void handleCreateCanvasNodeAt(x, y);
+                  });
+                }}
+                onMoveNodeEnd={(nodeId, x, y) => {
+                  const branchId = parseBranchSummaryNodeId(nodeId);
+                  if (branchId && !notesExploration) {
+                    setExplorationBranches((current) => {
+                      const branch = current[branchId];
+                      if (!branch) {
+                        return current;
+                      }
+                      return {
+                        ...current,
+                        [branchId]: {
+                          ...branch,
+                          summaryPosition: { x, y },
+                        },
+                      };
+                    });
+                    return;
+                  }
+                  startCanvasTransition(() => {
+                    void handlePersistCanvasNodePosition(nodeId, x, y);
+                  });
+                }}
+                onOpenNode={(nodeId) => {
+                  const branchId = parseBranchSummaryNodeId(nodeId);
+                  if (branchId && !notesExploration) {
+                    const branch = explorationBranches[branchId];
+                    if (branch) {
+                      setNotesExploration(branch);
+                      setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+                      setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+                    }
+                    return;
+                  }
+                  const suggestion = notesExploration ? findSuggestionForBranch(notesExploration, nodeId) : null;
+                  if (suggestion && notesExploration) {
+                    materializeExplorationSuggestion(notesExploration, suggestion);
+                    return;
+                  }
+                  openCanvasNode(nodeId);
+                }}
+                onPaneClick={notesExploration ? collapseNotesExploration : undefined}
+                onSelectNode={(nodeId) =>
+                  notesExploration
+                    ? handleExplorationSelection(notesExploration, [nodeId])
+                    : handleSelectCanvasNodes([nodeId])
+                }
+                onSelectNodes={(nodeIds) =>
+                  notesExploration
+                    ? handleExplorationSelection(notesExploration, nodeIds)
+                    : handleSelectCanvasNodes(nodeIds)
+                }
+                selectedNodeIds={notesExploration?.activeNodeId ? [notesExploration.activeNodeId] : selectedCanvasNodeIds}
+              />
+              {notesExploration && notesExplorationPresentation.displayDocument ? (
+                <div className={styles.explorationOverlay}>{renderExplorationPanel(notesExploration, notesExplorationPresentation)}</div>
+              ) : null}
+            </>
           )}
         </div>
       </div>
     );
   }
 
-  function renderExplorationTab(session: ExplorationSession | null) {
-    if (!session || !activeExplorationPresentation.displayDocument) {
+  function renderExplorationTab(branch: ExplorationBranch | null) {
+    if (!branch || !activeExplorationPresentation.displayDocument) {
       return <EmptyState message="This exploration is no longer available." />;
     }
 
@@ -2649,8 +2888,8 @@ export default function Home() {
                         <div className={styles.consoleMessageBody}>
                           {renderConsoleMessageContent(
                             message.content,
-                            message.role === "assistant" ? canvasDocument : null,
-                            openCanvasNode,
+                            message.role === "assistant" ? activeContextDocument : null,
+                            handleOpenContextNode,
                           )}
                         </div>
                         {pendingPlan?.messageId === message.id ? (
@@ -2755,7 +2994,7 @@ export default function Home() {
             isConsoleExpanded ? styles.canvasFrameWithConsoleExpanded : styles.canvasFrameWithConsoleCollapsed
           }`}
         >
-          {renderExplorationSurface(session, activeExplorationPresentation, { persistent: true })}
+          {renderExplorationSurface(branch, activeExplorationPresentation, { persistent: true })}
         </div>
       </div>
     );
@@ -2883,255 +3122,6 @@ export default function Home() {
     );
   }
 
-  function renderStructureView() {
-    return (
-      <div className={styles.workspaceSplit}>
-        <div className={styles.workspacePrimary}>
-          <div className={styles.panelSurface}>
-            {!structure ? (
-              <EmptyState message="Index a repository first, then load the structural tree." />
-            ) : (
-              <StructureTree
-                expandedIds={expandedTreeNodeIds}
-                onSelect={inspectTreeNode}
-                onToggle={toggleTreeNode}
-                selectedNodeId={selectedTreeNode?.id ?? null}
-                tree={structure}
-              />
-            )}
-          </div>
-        </div>
-
-        <div className={styles.workspaceSidebar}>
-          <div className={styles.panelSurface}>
-            {!selectedTreeNode ? (
-              <EmptyState message="Select a node in the tree to inspect it." />
-            ) : (
-              <div className={styles.inspectorPane}>
-                <strong className={styles.resultTitle}>{selectedTreeNode.name}</strong>
-                <p className={styles.resultMeta}>
-                  {selectedTreeNode.qualified_name ?? selectedTreeNode.path ?? "No metadata"}
-                </p>
-                <div className={styles.detailGrid}>
-                  <DetailRow label="Kind" value={selectedTreeNode.kind} />
-                  <DetailRow label="Children" value={String(selectedTreeNode.children.length)} />
-                </div>
-                <div className={styles.actionsRow}>
-                  <button
-                    className={styles.primaryButton}
-                    onClick={() => {
-                      startCanvasTransition(() => {
-                        void handleCreateCanvasNodeAt();
-                      });
-                    }}
-                    type="button"
-                  >
-                    Create note
-                  </button>
-                </div>
-                <div>
-                  <span className={styles.fieldLabel}>Outgoing calls</span>
-                  {relationshipsPending ? (
-                    <p className={styles.helperText}>Loading...</p>
-                  ) : structureRelationships.length === 0 ? (
-                    <p className={styles.helperText}>No outgoing calls for this selection.</p>
-                  ) : (
-                    <ul className={styles.relationshipList}>
-                      {structureRelationships.map((item, index) => (
-                        <li className={styles.relationshipItem} key={`${item.relationship}-${index}`}>
-                          <span className={styles.relationshipDirection}>{item.relationship}</span>
-                          <span>{displaySymbol(item.other_node)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderSearchView() {
-    return (
-      <div className={styles.workspaceSplit}>
-        <div className={styles.workspacePrimary}>
-          <div className={styles.panelSurface}>
-            <div className={styles.inlineTabs}>
-              <button
-                className={queryMode === "search" ? styles.activeTab : styles.tab}
-                onClick={() => setQueryMode("search")}
-                type="button"
-              >
-                Search
-              </button>
-              <button
-                className={queryMode === "cypher" ? styles.activeTab : styles.tab}
-                onClick={() => setQueryMode("cypher")}
-                type="button"
-              >
-                Cypher
-              </button>
-            </div>
-
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>{queryMode === "search" ? "Query" : "Cypher"}</span>
-              <textarea
-                className={styles.textarea}
-                onChange={(event) => setQueryInput(event.target.value)}
-                rows={queryMode === "search" ? 3 : 10}
-                value={queryInput}
-              />
-            </label>
-
-            <div className={styles.actionsRow}>
-              <button className={styles.primaryButton} disabled={queryPending} onClick={handleSubmitQuery} type="button">
-                {queryPending ? "Running..." : "Run query"}
-              </button>
-            </div>
-
-            <div className={styles.resultsPane}>
-              {queryResults.length === 0 ? (
-                <EmptyState message="Run a query to inspect the graph." />
-              ) : queryMode === "search" ? (
-                <ul className={styles.resultList}>
-                  {queryResults.map((item, index) =>
-                    isSymbolRecord(item) ? (
-                      <li key={`${displaySymbol(item)}-${index}`}>
-                        <button className={styles.resultButton} onClick={() => inspectSymbol(item)} type="button">
-                          <span className={styles.resultLabel}>{item.labels.join(", ")}</span>
-                          <strong className={styles.resultTitle}>{displaySymbol(item)}</strong>
-                          <span className={styles.resultMeta}>{String(item.properties.path ?? item.properties.name ?? "")}</span>
-                        </button>
-                      </li>
-                    ) : null,
-                  )}
-                </ul>
-              ) : (
-                <pre className={styles.codeBlock}>{JSON.stringify(queryResults, null, 2)}</pre>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.workspaceSidebar}>
-          <div className={styles.panelSurface}>
-            {!selectedSymbol ? (
-              <EmptyState message="Select a search result to inspect its relationships." />
-            ) : (
-              <div className={styles.inspectorPane}>
-                <strong className={styles.resultTitle}>{displaySymbol(selectedSymbol)}</strong>
-                <p className={styles.resultMeta}>{selectedSymbol.labels.join(", ")}</p>
-                {relationshipsPending ? <p className={styles.helperText}>Loading...</p> : null}
-                {relationships.length === 0 ? (
-                  <p className={styles.helperText}>No outgoing CALLS edges were found.</p>
-                ) : (
-                  <ul className={styles.relationshipList}>
-                    {relationships.map((item, index) => (
-                      <li className={styles.relationshipItem} key={`${item.relationship}-${index}`}>
-                        <span className={styles.relationshipDirection}>{item.relationship}</span>
-                        <span>{displaySymbol(item.other_node)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderImpactView() {
-    return (
-      <div className={styles.workspaceSplit}>
-        <div className={styles.workspacePrimary}>
-          <div className={styles.panelSurface}>
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>Change request</span>
-              <textarea
-                className={styles.textarea}
-                onChange={(event) => setImpactPrompt(event.target.value)}
-                rows={4}
-                value={impactPrompt}
-              />
-            </label>
-
-            <div className={styles.actionsRow}>
-              <button className={styles.primaryButton} disabled={impactPending} onClick={handleSubmitImpact} type="button">
-                {impactPending ? "Analyzing..." : "Analyze impact"}
-              </button>
-            </div>
-
-            <div className={styles.resultsPane}>
-              {!impactResult || impactResult.affected_files.length === 0 ? (
-                <EmptyState message="Run impact analysis to see likely files." />
-              ) : (
-                <ul className={styles.resultList}>
-                  {impactResult.affected_files.map((item) => (
-                    <li key={item.path}>
-                      <div className={styles.resultCard}>
-                        <span className={styles.resultLabel}>File</span>
-                        <strong className={styles.resultTitle}>{item.path}</strong>
-                        <ul className={styles.simpleList}>
-                          {item.reasons.map((reason) => (
-                            <li key={`${item.path}-${reason}`}>{reason}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.workspaceSidebar}>
-          <div className={styles.panelSurface}>
-            {!impactResult ? (
-              <EmptyState message="Run impact analysis to inspect matching symbols." />
-            ) : (
-              <div className={styles.inspectorPane}>
-                <p className={styles.helperText}>{impactResult.summary}</p>
-                <div className={styles.actionsRow}>
-                  <button
-                    className={styles.secondaryButton}
-                    onClick={() => {
-                      startCanvasTransition(() => {
-                        void handleCreateCanvasNodeAt();
-                      });
-                    }}
-                    type="button"
-                  >
-                    Capture as note
-                  </button>
-                </div>
-                <ul className={styles.resultList}>
-                  {impactResult.seeds.map((seed, index) => (
-                    <li key={`${displaySymbol(seed.symbol)}-${index}`}>
-                      <button className={styles.resultButton} onClick={() => inspectSymbol(seed.symbol)} type="button">
-                        <span className={styles.resultLabel}>score {seed.score.toFixed(2)}</span>
-                        <strong className={styles.resultTitle}>{displaySymbol(seed.symbol)}</strong>
-                        <span className={styles.resultMeta}>
-                          {seed.reason}
-                          {seed.file_path ? ` • ${seed.file_path}` : ""}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function renderProjectView() {
     return (
       <div className={styles.settingsPane}>
@@ -3248,8 +3238,8 @@ export default function Home() {
                   <div className={styles.consoleMessageBody}>
                     {renderConsoleMessageContent(
                       message.content,
-                      message.role === "assistant" ? canvasDocument : null,
-                      openCanvasNode,
+                      message.role === "assistant" ? activeContextDocument : null,
+                      handleOpenContextNode,
                     )}
                   </div>
                   {pendingPlan?.messageId === message.id ? (
@@ -3316,27 +3306,6 @@ export default function Home() {
             </div>
           </label>
         </div>
-      </div>
-    );
-  }
-
-  function renderInspectView() {
-    return (
-      <div className={styles.inspectPane}>
-        <div className={styles.inlineTabs}>
-          <button className={inspectView === "structure" ? styles.activeTab : styles.tab} onClick={() => setInspectView("structure")} type="button">
-            Structure
-          </button>
-          <button className={inspectView === "search" ? styles.activeTab : styles.tab} onClick={() => setInspectView("search")} type="button">
-            Search
-          </button>
-          <button className={inspectView === "impact" ? styles.activeTab : styles.tab} onClick={() => setInspectView("impact")} type="button">
-            Impact
-          </button>
-        </div>
-        {inspectView === "structure" ? renderStructureView() : null}
-        {inspectView === "search" ? renderSearchView() : null}
-        {inspectView === "impact" ? renderImpactView() : null}
       </div>
     );
   }
@@ -3490,8 +3459,8 @@ export default function Home() {
                     <div className={styles.consoleMessageBody}>
                       {renderConsoleMessageContent(
                         message.content,
-                        message.role === "assistant" ? canvasDocument : null,
-                        openCanvasNode,
+                        message.role === "assistant" ? activeContextDocument : null,
+                        handleOpenContextNode,
                       )}
                     </div>
                   </article>
@@ -3716,8 +3685,6 @@ export default function Home() {
     switch (activeView) {
       case "notes":
         return renderNotesView();
-      case "inspect":
-        return renderInspectView();
       case "project":
         return renderProjectView();
       case "chat":
@@ -3853,15 +3820,6 @@ function StatusRow({
   );
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.detailRow}>
-      <span className={styles.detailLabel}>{label}</span>
-      <span className={styles.detailValue}>{value}</span>
-    </div>
-  );
-}
-
 function EmptyState({ message }: { message: string }) {
   return <p className={styles.helperText}>{message}</p>;
 }
@@ -3870,8 +3828,6 @@ function viewLabel(view: WorkspaceView) {
   switch (view) {
     case "notes":
       return "Notes";
-    case "inspect":
-      return "Inspect";
     case "project":
       return "Project";
     case "chat":
@@ -3887,15 +3843,6 @@ function ViewIcon({ view }: { view: WorkspaceView }) {
       return (
         <svg aria-hidden="true" viewBox="0 0 16 16">
           <path d="M4 4.5h8M4 8h8M4 11.5h6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      );
-    case "inspect":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <rect x="2.5" y="2.5" width="4" height="4" rx="1" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <circle cx="11.5" cy="4.5" r="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
-          <path d="m9.9 9.8 2.7 2.7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-          <circle cx="7" cy="11" r="2.6" fill="none" stroke="currentColor" strokeWidth="1.3" />
         </svg>
       );
     case "project":
@@ -3982,14 +3929,6 @@ function deriveConversationTitle(prompt: string) {
   return cleaned.length > 42 ? `${cleaned.slice(0, 42).trim()}...` : cleaned;
 }
 
-function isSymbolRecord(value: Record<string, unknown> | SymbolRecord): value is SymbolRecord {
-  return Array.isArray((value as SymbolRecord).labels) && typeof (value as SymbolRecord).properties === "object";
-}
-
-function displaySymbol(symbol: SymbolRecord) {
-  return String(symbol.properties.qualified_name ?? symbol.properties.path ?? symbol.properties.name);
-}
-
 function parseLineList(value: string) {
   return value
     .split("\n")
@@ -4015,141 +3954,108 @@ function parseTagList(value: string) {
     });
 }
 
-function buildLinkedFiles(symbol: SymbolRecord | null, treeNode: StructureNode | null) {
-  const values = new Set<string>();
-  const symbolPath = symbol?.properties.path;
-  if (typeof symbolPath === "string") {
-    values.add(symbolPath);
-  }
-  if (treeNode?.path) {
-    values.add(treeNode.path);
-  }
-  return [...values];
-}
-
-function buildLinkedSymbols(symbol: SymbolRecord | null, treeNode: StructureNode | null) {
-  const values = new Set<string>();
-  const qualifiedName = symbol?.properties.qualified_name;
-  if (typeof qualifiedName === "string") {
-    values.add(qualifiedName);
-  }
-  if (treeNode?.qualified_name) {
-    values.add(treeNode.qualified_name);
-  }
-  return [...values];
-}
-
-function buildNewCanvasNodeTitle(symbol: SymbolRecord | null, treeNode: StructureNode | null) {
-  if (symbol) {
-    return displaySymbol(symbol).split(".").at(-1) ?? "New note";
-  }
-  if (treeNode) {
-    return treeNode.name;
-  }
-  return "New note";
-}
-
-function buildNewCanvasNodeDescription(symbol: SymbolRecord | null, treeNode: StructureNode | null) {
-  if (symbol) {
-    return `Describe what ${displaySymbol(symbol)} is responsible for, how it works, and what should stay true when editing it.`;
-  }
-  if (treeNode) {
-    return `Describe how ${treeNode.name} fits into the project and what it should do.`;
-  }
-  return "Describe the feature, screen, module, or constraint this note represents.";
-}
-
-function buildNewCanvasNodeTags(symbol: SymbolRecord | null, treeNode: StructureNode | null) {
-  const label = symbol?.labels[0] ?? treeNode?.kind ?? "";
-  const lowered = label.toLowerCase();
-  if (["file", "module", "function", "method"].includes(lowered)) {
-    return ["module"];
-  }
-  if (lowered) {
-    return [lowered];
-  }
-  return ["feature"];
-}
-
 function findCanvasNodeTitle(document: CanvasDocument | null, nodeId: string) {
   return document?.nodes.find((item) => item.id === nodeId)?.title ?? nodeId;
 }
 
-function explorationTabTitle(document: CanvasDocument | null, session: ExplorationSession | null) {
-  if (!session) {
+function explorationTabTitle(document: CanvasDocument | null, branch: ExplorationBranch | null) {
+  if (!branch) {
     return "Explore";
   }
-  const rootTitle = findCanvasNodeTitle(document, session.rootNodeId);
-  const activeTitle = findCanvasNodeTitle(document, session.activeNodeId);
+  const rootTitle = findCanvasNodeTitle(buildExplorationContextDocument(document, branch), branch.rootNodeId);
+  const activeTitle = findCanvasNodeTitle(buildExplorationContextDocument(document, branch), branch.activeNodeId ?? branch.rootNodeId);
   return rootTitle === activeTitle ? `Explore: ${rootTitle}` : `${rootTitle} -> ${activeTitle}`;
 }
 
-function createExplorationSession(nodeId: string): ExplorationSession {
+function createExplorationBranch(nodeId: string, document: CanvasDocument | null): ExplorationBranch {
+  const rootNode = document?.nodes.find((node) => node.id === nodeId) ?? null;
   return {
     id: `explore-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     rootNodeId: nodeId,
     activeNodeId: nodeId,
     pathNodeIds: [nodeId],
+    revealedNodeIds: [nodeId],
+    transientNodes: [],
+    transientEdges: [],
     relationQuery: "",
+    summaryPosition: {
+      x: (rootNode?.x ?? 96) + 280,
+      y: rootNode?.y ?? 96,
+    },
   };
 }
 
-function normalizeExplorationSession(
-  session: ExplorationSession | null,
+function normalizeExplorationBranch(
+  branch: ExplorationBranch | null,
   validNodeIds: Set<string>,
-): ExplorationSession | null {
-  if (!session) {
+): ExplorationBranch | null {
+  if (!branch) {
     return null;
   }
 
-  const pathNodeIds = uniqueNodeIds(session.pathNodeIds.filter((nodeId) => validNodeIds.has(nodeId)));
-  if (pathNodeIds.length === 0) {
+  const transientNodeIds = new Set(branch.transientNodes.map((node) => node.id));
+  const knownNodeIds = new Set([...validNodeIds, ...transientNodeIds]);
+  const pathNodeIds = uniqueNodeIds(branch.pathNodeIds.filter((nodeId) => knownNodeIds.has(nodeId)));
+  const revealedNodeIds = uniqueNodeIds(branch.revealedNodeIds.filter((nodeId) => knownNodeIds.has(nodeId)));
+  const rootNodeId = knownNodeIds.has(branch.rootNodeId) ? branch.rootNodeId : pathNodeIds[0] ?? revealedNodeIds[0] ?? null;
+  if (!rootNodeId) {
     return null;
   }
-
-  const rootNodeId = validNodeIds.has(session.rootNodeId) ? session.rootNodeId : pathNodeIds[0];
-  const activeNodeId = validNodeIds.has(session.activeNodeId) ? session.activeNodeId : pathNodeIds.at(-1) ?? rootNodeId;
+  const activeNodeId =
+    branch.activeNodeId && knownNodeIds.has(branch.activeNodeId)
+      ? branch.activeNodeId
+      : pathNodeIds.at(-1) ?? revealedNodeIds.at(-1) ?? rootNodeId;
+  const transientNodes = branch.transientNodes.filter((node) => transientNodeIds.has(node.id));
+  const validEdgeNodeIds = new Set([...validNodeIds, ...transientNodes.map((node) => node.id)]);
+  const transientEdges = branch.transientEdges.filter(
+    (edge) => validEdgeNodeIds.has(edge.source_node_id) && validEdgeNodeIds.has(edge.target_node_id),
+  );
 
   return {
-    ...session,
+    ...branch,
     rootNodeId,
     activeNodeId,
     pathNodeIds,
+    revealedNodeIds: uniqueNodeIds([rootNodeId, ...revealedNodeIds, ...pathNodeIds]),
+    transientNodes,
+    transientEdges,
   };
 }
 
-function advanceExplorationSession(session: ExplorationSession, nextNodeId: string): ExplorationSession {
-  const existingIndex = session.pathNodeIds.indexOf(nextNodeId);
+function advanceExplorationBranch(branch: ExplorationBranch, nextNodeId: string): ExplorationBranch {
+  const existingIndex = branch.pathNodeIds.indexOf(nextNodeId);
   if (existingIndex !== -1) {
-    const nextPath = session.pathNodeIds.slice(0, existingIndex + 1);
+    const nextPath = branch.pathNodeIds.slice(0, existingIndex + 1);
     if (
-      nextPath.length === session.pathNodeIds.length &&
-      session.activeNodeId === nextNodeId
+      nextPath.length === branch.pathNodeIds.length &&
+      branch.activeNodeId === nextNodeId
     ) {
-      return session;
+      return branch;
     }
     return {
-      ...session,
+      ...branch,
       activeNodeId: nextNodeId,
       pathNodeIds: nextPath,
+      revealedNodeIds: uniqueNodeIds([...branch.revealedNodeIds, nextNodeId]),
     };
   }
 
   return {
-    ...session,
+    ...branch,
     activeNodeId: nextNodeId,
-    pathNodeIds: [...session.pathNodeIds, nextNodeId],
+    pathNodeIds: [...branch.pathNodeIds, nextNodeId],
+    revealedNodeIds: uniqueNodeIds([...branch.revealedNodeIds, nextNodeId]),
   };
 }
 
 function buildExplorationPresentation(
   document: CanvasDocument | null,
-  session: ExplorationSession | null,
+  branch: ExplorationBranch | null,
+  suggestions: ExplorationSuggestion[],
 ): ExplorationPresentation {
-  if (!document || !session) {
+  if (!document || !branch) {
     return {
       activeNode: null,
-      customMatches: [],
       displayDocument: null,
       pathNodes: [],
       suggestedNodes: [],
@@ -4158,11 +4064,10 @@ function buildExplorationPresentation(
   }
 
   const validNodeIds = new Set(document.nodes.map((node) => node.id));
-  const normalizedSession = normalizeExplorationSession(session, validNodeIds);
-  if (!normalizedSession) {
+  const normalizedBranch = normalizeExplorationBranch(branch, validNodeIds);
+  if (!normalizedBranch) {
     return {
       activeNode: null,
-      customMatches: [],
       displayDocument: null,
       pathNodes: [],
       suggestedNodes: [],
@@ -4170,196 +4075,46 @@ function buildExplorationPresentation(
     };
   }
 
-  const nodesById = new Map(document.nodes.map((node) => [node.id, node] as const));
-  const pathNodes = normalizedSession.pathNodeIds
+  const branchDocument = buildExplorationContextDocument(document, normalizedBranch);
+  if (!branchDocument) {
+    return {
+      activeNode: null,
+      displayDocument: null,
+      pathNodes: [],
+      suggestedNodes: [],
+      visibleNodeIds: [],
+    };
+  }
+  const nodesById = new Map(branchDocument.nodes.map((node) => [node.id, node] as const));
+  const pathNodes = normalizedBranch.pathNodeIds
     .map((nodeId) => nodesById.get(nodeId) ?? null)
     .filter((node): node is CanvasNode => Boolean(node));
-  const suggestedNodes = collectExplorationSuggestions(document, normalizedSession)
-    .map((nodeId) => nodesById.get(nodeId) ?? null)
-    .filter((node): node is CanvasNode => Boolean(node));
-  const customMatches = collectExplorationRelationMatches(document, normalizedSession)
-    .map((nodeId) => nodesById.get(nodeId) ?? null)
-    .filter((node): node is CanvasNode => Boolean(node));
+  const suggestionArtifacts = buildExplorationSuggestionArtifacts(branchDocument, normalizedBranch, suggestions);
+  const displayDocument = {
+    ...branchDocument,
+    nodes: [...branchDocument.nodes, ...suggestionArtifacts.nodes],
+    edges: [...branchDocument.edges, ...suggestionArtifacts.edges],
+  };
   const visibleNodeIds = uniqueNodeIds([
-    ...pathNodes.map((node) => node.id),
-    ...suggestedNodes.map((node) => node.id),
-    ...customMatches.map((node) => node.id),
+    ...normalizedBranch.revealedNodeIds,
+    ...suggestionArtifacts.nodes.map((node) => node.id),
   ]);
 
   return {
-    activeNode: nodesById.get(normalizedSession.activeNodeId) ?? null,
-    customMatches,
-    displayDocument: layoutExplorationDocument(document, normalizedSession, visibleNodeIds, suggestedNodes, customMatches),
+    activeNode: normalizedBranch.activeNodeId ? nodesById.get(normalizedBranch.activeNodeId) ?? null : null,
+    displayDocument: layoutExplorationDocument(displayDocument, visibleNodeIds),
     pathNodes,
-    suggestedNodes,
+    suggestedNodes: suggestions,
     visibleNodeIds,
   };
 }
 
-function collectExplorationSuggestions(document: CanvasDocument, session: ExplorationSession) {
-  const pathIds = new Set(session.pathNodeIds);
-  const candidateScores = new Map<string, number>();
-  const activeNeighbors = getNeighborNodeIds(document, session.activeNodeId);
-
-  for (const nodeId of activeNeighbors) {
-    if (pathIds.has(nodeId)) {
-      continue;
-    }
-    candidateScores.set(nodeId, (candidateScores.get(nodeId) ?? 0) + 80);
-  }
-
-  for (const pathNodeId of session.pathNodeIds) {
-    for (const nodeId of getNeighborNodeIds(document, pathNodeId)) {
-      if (pathIds.has(nodeId)) {
-        continue;
-      }
-      candidateScores.set(nodeId, (candidateScores.get(nodeId) ?? 0) + 24);
-    }
-  }
-
-  for (const neighborId of activeNeighbors) {
-    for (const nodeId of getNeighborNodeIds(document, neighborId)) {
-      if (pathIds.has(nodeId) || nodeId === session.activeNodeId) {
-        continue;
-      }
-      candidateScores.set(nodeId, (candidateScores.get(nodeId) ?? 0) + 8);
-    }
-  }
-
-  return [...candidateScores.keys()]
-    .sort((leftId, rightId) => {
-      const leftNode = document.nodes.find((node) => node.id === leftId);
-      const rightNode = document.nodes.find((node) => node.id === rightId);
-      const leftScore = (candidateScores.get(leftId) ?? 0) + (leftNode ? scoreNote(document, leftNode, session.pathNodeIds) : 0);
-      const rightScore = (candidateScores.get(rightId) ?? 0) + (rightNode ? scoreNote(document, rightNode, session.pathNodeIds) : 0);
-      if (leftScore !== rightScore) {
-        return rightScore - leftScore;
-      }
-      return leftId.localeCompare(rightId);
-    })
-    .slice(0, 3);
-}
-
-function collectExplorationRelationMatches(document: CanvasDocument, session: ExplorationSession) {
-  const query = session.relationQuery.trim().toLowerCase();
-  if (!query) {
-    return [];
-  }
-
-  const queryTerms = query.split(/\s+/).filter(Boolean);
-  const pathIds = new Set(session.pathNodeIds);
-  const suggestedIds = new Set(collectExplorationSuggestions(document, session));
-  const candidateScores = new Map<string, number>();
-  const directNeighbors = new Set<string>();
-
-  for (const pathNodeId of session.pathNodeIds) {
-    for (const nodeId of getNeighborNodeIds(document, pathNodeId)) {
-      if (!pathIds.has(nodeId)) {
-        directNeighbors.add(nodeId);
-      }
-    }
-  }
-
-  const secondDegree = new Set<string>();
-  for (const nodeId of directNeighbors) {
-    for (const nextId of getNeighborNodeIds(document, nodeId)) {
-      if (!pathIds.has(nextId)) {
-        secondDegree.add(nextId);
-      }
-    }
-  }
-
-  const candidateIds = uniqueNodeIds([...directNeighbors, ...secondDegree]).filter((nodeId) => !pathIds.has(nodeId));
-
-  for (const candidateId of candidateIds) {
-    const candidateNode = document.nodes.find((node) => node.id === candidateId);
-    if (!candidateNode) {
-      continue;
-    }
-
-    let score = scoreTextMatch(queryTerms, [
-      candidateNode.title,
-      candidateNode.description,
-      candidateNode.tags.join(" "),
-      candidateNode.linked_files.join(" "),
-      candidateNode.linked_symbols.join(" "),
-    ]);
-
-    for (const edge of document.edges) {
-      const touchesCandidate = edge.source_node_id === candidateId || edge.target_node_id === candidateId;
-      const touchesPath = pathIds.has(edge.source_node_id) || pathIds.has(edge.target_node_id);
-      if (!touchesCandidate || !touchesPath) {
-        continue;
-      }
-      score += scoreTextMatch(queryTerms, [edge.label]) * 18;
-    }
-
-    if (directNeighbors.has(candidateId)) {
-      score += 10;
-    }
-
-    if (suggestedIds.has(candidateId)) {
-      score += 4;
-    }
-
-    if (score > 0) {
-      candidateScores.set(candidateId, score);
-    }
-  }
-
-  return [...candidateScores.keys()]
-    .sort((leftId, rightId) => {
-      const leftScore = candidateScores.get(leftId) ?? 0;
-      const rightScore = candidateScores.get(rightId) ?? 0;
-      if (leftScore !== rightScore) {
-        return rightScore - leftScore;
-      }
-      return leftId.localeCompare(rightId);
-    })
-    .slice(0, 6);
-}
-
 function layoutExplorationDocument(
   document: CanvasDocument,
-  session: ExplorationSession,
   visibleNodeIds: string[],
-  suggestedNodes: CanvasNode[],
-  customMatches: CanvasNode[],
 ) {
-  const nodesById = new Map(document.nodes.map((node) => [node.id, node] as const));
-  const positions = new Map<string, { x: number; y: number }>();
-  const pathY = 244;
-  const pathStartX = 84;
-  const pathStepX = 300;
-
-  session.pathNodeIds.forEach((nodeId, index) => {
-    positions.set(nodeId, { x: pathStartX + index * pathStepX, y: pathY });
-  });
-
-  const activeX = pathStartX + Math.max(session.pathNodeIds.length - 1, 0) * pathStepX;
-  const suggestionX = activeX + 336;
-  suggestedNodes.forEach((node, index) => {
-    positions.set(node.id, { x: suggestionX, y: 88 + index * 184 });
-  });
-
-  const customBaseY = suggestedNodes.length > 0 ? 88 + suggestedNodes.length * 184 + 44 : 88;
-  customMatches.forEach((node, index) => {
-    positions.set(node.id, { x: suggestionX, y: customBaseY + index * 184 });
-  });
-
-  const nodes = visibleNodeIds
-    .map((nodeId) => nodesById.get(nodeId) ?? null)
-    .filter((node): node is CanvasNode => Boolean(node))
-    .map((node) => {
-      const position = positions.get(node.id) ?? { x: 84, y: 88 };
-      return {
-        ...node,
-        x: position.x,
-        y: position.y,
-      };
-    });
-
   const visibleNodeIdSet = new Set(visibleNodeIds);
+  const nodes = document.nodes.filter((node) => visibleNodeIdSet.has(node.id));
   const edges = document.edges.filter(
     (edge) => visibleNodeIdSet.has(edge.source_node_id) && visibleNodeIdSet.has(edge.target_node_id),
   );
@@ -4371,17 +4126,121 @@ function layoutExplorationDocument(
   };
 }
 
-function getNeighborNodeIds(document: CanvasDocument, nodeId: string) {
-  const neighbors = new Set<string>();
-  for (const edge of document.edges) {
-    if (edge.source_node_id === nodeId) {
-      neighbors.add(edge.target_node_id);
-    }
-    if (edge.target_node_id === nodeId) {
-      neighbors.add(edge.source_node_id);
-    }
+function buildExplorationSuggestionArtifacts(
+  document: CanvasDocument,
+  branch: ExplorationBranch,
+  suggestions: ExplorationSuggestion[],
+) {
+  const activeNode = document.nodes.find((node) => node.id === (branch.activeNodeId ?? branch.rootNodeId)) ?? null;
+  if (!activeNode || suggestions.length === 0) {
+    return { nodes: [] as CanvasNode[], edges: [] as CanvasEdge[] };
   }
-  return [...neighbors];
+
+  const offsets = [
+    { x: 310, y: -186 },
+    { x: 352, y: 0 },
+    { x: 310, y: 186 },
+  ];
+
+  const nodes = suggestions.map((suggestion, index) => {
+    const offset = offsets[index] ?? offsets[offsets.length - 1];
+    return {
+      id: suggestion.displayNodeId,
+      title: suggestion.title,
+      description: suggestion.summary,
+      linked_files: [],
+      linked_symbols: [],
+      tags: ["suggestion"],
+      x: activeNode.x + offset.x,
+      y: activeNode.y + offset.y,
+    } satisfies CanvasNode;
+  });
+
+  const edges = suggestions.map((suggestion) => ({
+    id: `suggestion-edge:${branch.id}:${suggestion.id}`,
+    source_node_id: activeNode.id,
+    target_node_id: suggestion.displayNodeId,
+    label: suggestion.edgeLabel,
+  }) satisfies CanvasEdge);
+
+  return { nodes, edges };
+}
+
+function suggestionNodeId(branchId: string, suggestionId: string) {
+  return `suggestion-node:${branchId}:${suggestionId}`;
+}
+
+function toExplorationSuggestion(
+  branchId: string,
+  suggestion: ExplorationSuggestionRecord,
+  index: number,
+): ExplorationSuggestion {
+  return {
+    id: `generated:${branchId}:${index}:${suggestion.title}`,
+    displayNodeId: suggestionNodeId(branchId, `${index}:${suggestion.title}`),
+    title: suggestion.title,
+    summary: suggestion.summary,
+    edgeLabel: suggestion.edge_label,
+  };
+}
+
+function buildExplorationSuggestionKey(branch: ExplorationBranch) {
+  return `${branch.activeNodeId ?? branch.rootNodeId}::${branch.pathNodeIds.join("::")}`;
+}
+
+function buildExplorationContextNode(
+  document: CanvasDocument | null,
+  branch: ExplorationBranch,
+): ExplorationContextNode | null {
+  if (!document) {
+    return null;
+  }
+  const activeNode = document.nodes.find((node) => node.id === (branch.activeNodeId ?? branch.rootNodeId)) ?? null;
+  if (!activeNode) {
+    return null;
+  }
+  return {
+    title: activeNode.title,
+    description: activeNode.description,
+    tags: activeNode.tags,
+    linked_files: activeNode.linked_files,
+    linked_symbols: activeNode.linked_symbols,
+  };
+}
+
+function buildExplorationPathTitles(document: CanvasDocument, branch: ExplorationBranch) {
+  return branch.pathNodeIds.map((nodeId) => findCanvasNodeTitle(document, nodeId));
+}
+
+function buildFallbackExplorationSuggestions(activeTitle: string): ExplorationSuggestionRecord[] {
+  const base = activeTitle.trim() || "Current concept";
+  return [
+    {
+      title: `${base} Decision Points`,
+      summary: `Explore the key decisions and branching logic around ${base.toLowerCase()}.`,
+      edge_label: "shapes",
+    },
+    {
+      title: `${base} Inputs`,
+      summary: `Explore the inputs, triggers, and upstream signals that feed ${base.toLowerCase()}.`,
+      edge_label: "depends on",
+    },
+    {
+      title: `${base} Effects`,
+      summary: `Explore the outputs, side effects, and downstream consequences of ${base.toLowerCase()}.`,
+      edge_label: "drives",
+    },
+  ];
+}
+
+function buildFallbackRelationSuggestion(activeTitle: string, relationQuery: string): ExplorationSuggestionRecord {
+  const base = activeTitle.trim() || "Current concept";
+  const query = relationQuery.trim() || "relationship";
+  return {
+    title: `${base} ${query.charAt(0).toUpperCase()}${query.slice(1)}`,
+    summary: `Explore the ${query.toLowerCase()} angle around ${base.toLowerCase()}.`,
+    edge_label: query.toLowerCase(),
+  };
 }
 
 function uniqueNodeIds(nodeIds: string[]) {
@@ -4397,9 +4256,218 @@ function uniqueNodeIds(nodeIds: string[]) {
   return ordered;
 }
 
-function scoreTextMatch(terms: string[], values: string[]) {
-  const haystack = values.join(" ").toLowerCase();
-  return terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+function branchSummaryNodeId(branchId: string) {
+  return `branch-summary:${branchId}`;
+}
+
+function parseBranchSummaryNodeId(nodeId: string) {
+  return nodeId.startsWith("branch-summary:") ? nodeId.slice("branch-summary:".length) : null;
+}
+
+function isTransientExplorationNodeId(nodeId: string) {
+  return nodeId.startsWith("explore-node:");
+}
+
+function buildOverviewCanvasDocument(
+  document: CanvasDocument | null,
+  branches: Record<string, ExplorationBranch>,
+) {
+  if (!document) {
+    return null;
+  }
+
+  const branchNodes = Object.values(branches).map((branch) => {
+    const branchDocument = buildExplorationContextDocument(document, branch);
+    const rootTitle = findCanvasNodeTitle(branchDocument, branch.rootNodeId);
+    const conceptCount = countExplorationConcepts(branch);
+    return {
+      id: branchSummaryNodeId(branch.id),
+      title: rootTitle,
+      description: `Saved exploration branch for ${rootTitle.toLowerCase()}.`,
+      linked_files: [],
+      linked_symbols: [],
+      tags: ["exploration", `${conceptCount} concepts`],
+      x: branch.summaryPosition.x,
+      y: branch.summaryPosition.y,
+    } satisfies CanvasNode;
+  });
+
+  const branchEdges = Object.values(branches).map((branch) => ({
+    id: `branch-summary-edge:${branch.id}`,
+    source_node_id: branchSummaryNodeId(branch.id),
+    target_node_id: branch.rootNodeId,
+    label: "explores",
+  }) satisfies CanvasEdge);
+
+  return {
+    ...document,
+    nodes: [...document.nodes, ...branchNodes],
+    edges: [...document.edges, ...branchEdges],
+  };
+}
+
+function buildExplorationContextDocument(
+  document: CanvasDocument | null,
+  branch: ExplorationBranch | null,
+) {
+  if (!document || !branch) {
+    return document;
+  }
+
+  const nodes = uniqueNodeIds([...document.nodes.map((node) => node.id), ...branch.transientNodes.map((node) => node.id)]);
+  void nodes;
+  return {
+    ...document,
+    nodes: [...document.nodes, ...branch.transientNodes],
+    edges: [...document.edges, ...branch.transientEdges],
+  };
+}
+
+function countExplorationConcepts(branch: ExplorationBranch) {
+  return uniqueNodeIds([...branch.revealedNodeIds, ...branch.transientNodes.map((node) => node.id)]).length;
+}
+
+function areStringArraysEqual(left: string[], right: string[]) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function areCanvasNodesEqual(left: CanvasNode[], right: CanvasNode[]) {
+  return (
+    left.length === right.length &&
+    left.every((node, index) => {
+      const other = right[index];
+      return (
+        node.id === other.id &&
+        node.title === other.title &&
+        node.description === other.description &&
+        node.x === other.x &&
+        node.y === other.y &&
+        areStringArraysEqual(node.tags, other.tags) &&
+        areStringArraysEqual(node.linked_files, other.linked_files) &&
+        areStringArraysEqual(node.linked_symbols, other.linked_symbols)
+      );
+    })
+  );
+}
+
+function areCanvasEdgesEqual(left: CanvasEdge[], right: CanvasEdge[]) {
+  return (
+    left.length === right.length &&
+    left.every((edge, index) => {
+      const other = right[index];
+      return (
+        edge.id === other.id &&
+        edge.source_node_id === other.source_node_id &&
+        edge.target_node_id === other.target_node_id &&
+        edge.label === other.label
+      );
+    })
+  );
+}
+
+function areExplorationBranchesEqual(left: ExplorationBranch | null, right: ExplorationBranch | null) {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.id === right.id &&
+    left.rootNodeId === right.rootNodeId &&
+    left.activeNodeId === right.activeNodeId &&
+    left.relationQuery === right.relationQuery &&
+    left.summaryPosition.x === right.summaryPosition.x &&
+    left.summaryPosition.y === right.summaryPosition.y &&
+    areStringArraysEqual(left.pathNodeIds, right.pathNodeIds) &&
+    areStringArraysEqual(left.revealedNodeIds, right.revealedNodeIds) &&
+    areCanvasNodesEqual(left.transientNodes, right.transientNodes) &&
+    areCanvasEdgesEqual(left.transientEdges, right.transientEdges)
+  );
+}
+
+function areExplorationBranchMapsEqual(
+  left: Record<string, ExplorationBranch>,
+  right: Record<string, ExplorationBranch>,
+) {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return (
+    areStringArraysEqual(leftKeys, rightKeys) &&
+    leftKeys.every((key) => areExplorationBranchesEqual(left[key], right[key]))
+  );
+}
+
+function addTransientExplorationNode(
+  document: CanvasDocument | null,
+  branch: ExplorationBranch,
+  sourceNodeId: string,
+  title: string,
+  description: string,
+  edgeLabel: string,
+) {
+  const contextDocument = buildExplorationContextDocument(document, branch);
+  const sourceNode = contextDocument?.nodes.find((node) => node.id === sourceNodeId) ?? null;
+  const nextIndex = branch.transientNodes.length;
+  const transientNode: CanvasNode = {
+    id: `explore-node:${branch.id}:${nextIndex + 1}`,
+    title,
+    description,
+    linked_files: sourceNode?.linked_files.slice(0, 3) ?? [],
+    linked_symbols: [],
+    tags: uniqueNodeIds([...(sourceNode?.tags ?? []), "exploration"]),
+    x: (sourceNode?.x ?? branch.summaryPosition.x) + 260,
+    y: (sourceNode?.y ?? branch.summaryPosition.y) + nextIndex * 42,
+  };
+  const transientEdge: CanvasEdge = {
+    id: `explore-edge:${branch.id}:${nextIndex + 1}`,
+    source_node_id: sourceNodeId,
+    target_node_id: transientNode.id,
+    label: edgeLabel,
+  };
+
+  return {
+    ...branch,
+    activeNodeId: transientNode.id,
+    pathNodeIds: [...branch.pathNodeIds, transientNode.id],
+    revealedNodeIds: uniqueNodeIds([...branch.revealedNodeIds, transientNode.id]),
+    transientNodes: [...branch.transientNodes, transientNode],
+    transientEdges: [...branch.transientEdges, transientEdge],
+  };
+}
+
+function buildExplorationStorageKey(repoPath: string) {
+  return `konceptura.explorations:${repoPath}`;
+}
+
+function readStoredExplorationBranches(repoPath: string) {
+  if (typeof window === "undefined" || !repoPath) {
+    return {};
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(buildExplorationStorageKey(repoPath));
+    if (!rawValue) {
+      return {};
+    }
+    const parsed = JSON.parse(rawValue) as Record<string, ExplorationBranch>;
+    return parsed ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredExplorationBranches(repoPath: string, branches: Record<string, ExplorationBranch>) {
+  if (typeof window === "undefined" || !repoPath) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(buildExplorationStorageKey(repoPath), JSON.stringify(branches));
+  } catch {
+    // Ignore localStorage failures and keep the explorer usable.
+  }
 }
 
 function buildSelectedNoteContext(document: CanvasDocument | null, focusNodeIds: string[]) {

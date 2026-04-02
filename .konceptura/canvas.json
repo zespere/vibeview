@@ -1,125 +1,189 @@
 {
   "edges": [
     {
-      "id": "edge_aeabe7f69c",
+      "id": "edge_cea6496dfc",
       "label": "drives",
-      "source_node_id": "node_2c0fc99f95",
-      "target_node_id": "node_7a290437f3"
+      "source_node_id": "node_ebd40f5ec8",
+      "target_node_id": "node_fa4a1e5e5c"
     },
     {
-      "id": "edge_0360a150d0",
-      "label": "populates",
-      "source_node_id": "node_7a290437f3",
-      "target_node_id": "node_eff298cbd3"
-    },
-    {
-      "id": "edge_a8085c7c1f",
-      "label": "drives",
-      "source_node_id": "node_eff298cbd3",
-      "target_node_id": "node_9c02b983a9"
-    },
-    {
-      "id": "edge_de6db44be3",
+      "id": "edge_be7e15232e",
       "label": "renders",
-      "source_node_id": "node_c2a6cc2e5d",
-      "target_node_id": "node_2c0fc99f95"
+      "source_node_id": "node_fa4a1e5e5c",
+      "target_node_id": "node_9ee7a1221b"
     },
     {
-      "id": "edge_e5efaad489",
+      "id": "edge_564648ea12",
       "label": "renders",
-      "source_node_id": "node_c2a6cc2e5d",
-      "target_node_id": "node_a95c1b01dc"
+      "source_node_id": "node_fa4a1e5e5c",
+      "target_node_id": "node_a3d2306114"
     },
     {
-      "id": "edge_3c45560d6d",
+      "id": "edge_1302e595c0",
+      "label": "renders",
+      "source_node_id": "node_fa4a1e5e5c",
+      "target_node_id": "node_43f12afc67"
+    },
+    {
+      "id": "edge_1c50cca600",
+      "label": "persists",
+      "source_node_id": "node_ebd40f5ec8",
+      "target_node_id": "node_19d8b34226"
+    },
+    {
+      "id": "edge_c90c9926fe",
+      "label": "selects",
+      "source_node_id": "node_ebd40f5ec8",
+      "target_node_id": "node_9ee7a1221b"
+    },
+    {
+      "id": "edge_676f81e29f",
+      "label": "opens",
+      "source_node_id": "node_9ee7a1221b",
+      "target_node_id": "node_6efab6f0e4"
+    },
+    {
+      "id": "edge_37efa61dd5",
       "label": "drives",
-      "source_node_id": "node_c2a6cc2e5d",
-      "target_node_id": "node_c8d9b4817d"
+      "source_node_id": "node_9ee7a1221b",
+      "target_node_id": "node_754eb1b4b1"
     },
     {
-      "id": "edge_ca8aeec192",
-      "label": "queries",
-      "source_node_id": "node_c2a6cc2e5d",
-      "target_node_id": "node_eff298cbd3"
+      "id": "edge_246cf64d23",
+      "label": "focuses",
+      "source_node_id": "node_754eb1b4b1",
+      "target_node_id": "node_43f12afc67"
     },
     {
-      "id": "edge_3743769f94",
-      "label": "guides",
-      "source_node_id": "node_9c02b983a9",
-      "target_node_id": "node_c8d9b4817d"
+      "id": "edge_71d9500371",
+      "label": "supplies context to",
+      "source_node_id": "node_7c9cdc572f",
+      "target_node_id": "node_43f12afc67"
     },
     {
-      "id": "edge_2e0442cfde",
-      "label": "conditions",
-      "source_node_id": "node_de000b9c07",
-      "target_node_id": "node_c8d9b4817d"
+      "id": "edge_8d2dbbaccb",
+      "label": "coordinates",
+      "source_node_id": "node_43f12afc67",
+      "target_node_id": "node_a773edf7c8"
     },
     {
-      "id": "edge_60f7f6a529",
-      "label": "constrains",
-      "source_node_id": "node_1a3835289a",
-      "target_node_id": "node_c8d9b4817d"
+      "id": "edge_e608d19255",
+      "label": "persists",
+      "source_node_id": "node_43f12afc67",
+      "target_node_id": "node_7c9cdc572f"
     },
     {
-      "id": "edge_5a03466c55",
+      "id": "edge_c610ae95e5",
       "label": "triggers",
-      "source_node_id": "node_c8d9b4817d",
-      "target_node_id": "node_2a6a455f27"
+      "source_node_id": "node_a3d2306114",
+      "target_node_id": "node_4dd98759cf"
     },
     {
-      "id": "edge_18be163ae4",
+      "id": "edge_7f74b8d8a2",
+      "label": "resets",
+      "source_node_id": "node_a3d2306114",
+      "target_node_id": "node_9ee7a1221b"
+    },
+    {
+      "id": "edge_779affa752",
       "label": "updates",
-      "source_node_id": "node_2a6a455f27",
-      "target_node_id": "node_a95c1b01dc"
+      "source_node_id": "node_a3d2306114",
+      "target_node_id": "node_19d8b34226"
     },
     {
-      "id": "edge_55c5f4f8c1",
-      "label": "provides context",
-      "source_node_id": "node_a95c1b01dc",
-      "target_node_id": "node_c8d9b4817d"
+      "id": "edge_cc6b5fbca0",
+      "label": "coordinates",
+      "source_node_id": "node_f417fe3f1a",
+      "target_node_id": "node_19d8b34226"
     },
     {
-      "id": "edge_80ff80b081",
+      "id": "edge_80231f635e",
+      "label": "coordinates",
+      "source_node_id": "node_f417fe3f1a",
+      "target_node_id": "node_9ee7a1221b"
+    },
+    {
+      "id": "edge_5e66ab5222",
+      "label": "coordinates",
+      "source_node_id": "node_f417fe3f1a",
+      "target_node_id": "node_0fcd125fb8"
+    },
+    {
+      "id": "edge_99386ef06b",
+      "label": "coordinates",
+      "source_node_id": "node_f417fe3f1a",
+      "target_node_id": "node_4dd98759cf"
+    },
+    {
+      "id": "edge_ffea18c9f0",
+      "label": "coordinates",
+      "source_node_id": "node_f417fe3f1a",
+      "target_node_id": "node_a773edf7c8"
+    },
+    {
+      "id": "edge_4e1d28cddd",
       "label": "feeds",
-      "source_node_id": "node_c8d9b4817d",
-      "target_node_id": "node_07bca1ec98"
+      "source_node_id": "node_4dd98759cf",
+      "target_node_id": "node_0fcd125fb8"
     },
     {
-      "id": "edge_81ac7b7da3",
-      "label": "configures",
-      "source_node_id": "node_a108a796b4",
-      "target_node_id": "node_7a290437f3"
+      "id": "edge_b151569de4",
+      "label": "supplies context to",
+      "source_node_id": "node_0fcd125fb8",
+      "target_node_id": "node_a773edf7c8"
     },
     {
-      "id": "edge_a60807004e",
-      "label": "configures",
-      "source_node_id": "node_a108a796b4",
-      "target_node_id": "node_eff298cbd3"
+      "id": "edge_f00b49ae44",
+      "label": "generates",
+      "source_node_id": "node_a773edf7c8",
+      "target_node_id": "node_9ee7a1221b"
     },
     {
-      "id": "edge_ef68748438",
-      "label": "configures",
-      "source_node_id": "node_a108a796b4",
-      "target_node_id": "node_c8d9b4817d"
+      "id": "edge_9fff896e90",
+      "label": "depends on",
+      "source_node_id": "node_fa5298f12c",
+      "target_node_id": "node_a773edf7c8"
+    },
+    {
+      "id": "edge_33171fd88b",
+      "label": "persists through",
+      "source_node_id": "node_fa5298f12c",
+      "target_node_id": "node_19d8b34226"
+    },
+    {
+      "id": "edge_1d50714656",
+      "label": "hosts",
+      "source_node_id": "node_6d791bedf1",
+      "target_node_id": "node_0fcd125fb8"
+    },
+    {
+      "id": "edge_6ed03f833a",
+      "label": "hosts",
+      "source_node_id": "node_6d791bedf1",
+      "target_node_id": "node_f417fe3f1a"
+    },
+    {
+      "id": "edge_2eb904f434",
+      "label": "hosts",
+      "source_node_id": "node_6d791bedf1",
+      "target_node_id": "node_fa4a1e5e5c"
     }
   ],
   "nodes": [
     {
-      "description": "The frontend is organized as one client-side workspace that switches between Notes, Inspect, Project, and Chat views while keeping shared state such as the active repo, open tabs, selected notes, query results, and console messages. Most product behavior is coordinated inside the `Home` component, which refreshes backend state, streams long-running runs, and assembles semantic context from notes and conversations before invoking AI workflows.",
-      "id": "node_c2a6cc2e5d",
+      "description": "The frontend is a single large Next.js page that owns the left rail, tabs, active view switching, and most shared UI state for the workspace. It coordinates notes, project settings, and chat from one client component instead of splitting flows across routes. This makes the shell the main place where repository context, selected notes, exploration state, and console state are merged before requests are sent to the backend.",
+      "id": "node_fa4a1e5e5c",
       "linked_files": [
         "frontend/app/page.tsx",
-        "frontend/lib/api.ts"
+        "frontend/app/layout.tsx"
       ],
       "linked_symbols": [
         "Home",
-        "streamProjectRun",
-        "buildSelectedNoteContext",
-        "buildConversationContext"
+        "renderActiveView",
+        "openViewTab"
       ],
       "tags": [
         "ui-surface",
-        "workflow",
         "state"
       ],
       "title": "Workspace Shell",
@@ -127,202 +191,111 @@
       "y": 120
     },
     {
-      "description": "Users choose the working repository, see recent projects, inspect workspace readiness, and manage per-project conversation threads from the same product surface. The backend persists the active project profile and recent repositories, counts visible files to decide whether setup guidance should appear, and stores project-local metadata under `.konceptura`.",
-      "id": "node_2c0fc99f95",
+      "description": "The product starts by opening a local repository path and keeping a short history of recent projects. The UI exposes a projects tree with per-project conversations, while the backend derives a project name from the path and stores up to eight recent repos. Workspace status also counts visible files so the app can decide whether a blank canvas should be initialized.",
+      "id": "node_ebd40f5ec8",
       "linked_files": [
+        "frontend/app/page.tsx",
         "backend/app/project_service.py",
-        "backend/app/main.py",
-        "frontend/app/page.tsx"
+        "backend/app/models.py"
       ],
       "linked_symbols": [
+        "handleSaveProject",
+        "openProjectConversation",
         "ProjectService.update_project",
         "ProjectService.list_project_items",
-        "ProjectService.get_workspace_status",
-        "update_project",
-        "get_projects_tree",
-        "handleSaveProject"
+        "ProjectService.get_workspace_status"
       ],
       "tags": [
         "workflow",
-        "state",
-        "boundary"
+        "state"
       ],
-      "title": "Project Workspace Setup",
+      "title": "Project Switching",
       "x": 400,
       "y": 120
     },
     {
-      "description": "Indexing is the boundary that turns a repository into a queryable code graph by invoking the local `code-graph-rag` binary with `--update-graph` and optional `--clean`. The backend tracks one async index job at a time, records status in `backend/data/state.json`, and exposes both dry-run command previews and live status for the UI.",
-      "id": "node_7a290437f3",
+      "description": "The core workspace surface is an editable canvas of architecture notes, each with a title, description, tags, linked files, linked symbols, and saved coordinates. Notes are persisted per repository under `.konceptura/canvas.json`, and the backend also keeps a pointer document in its own data directory. Generated notes are merged by normalized title and linked by labeled edges so the canvas becomes a living architectural map instead of a static export.",
+      "id": "node_9ee7a1221b",
       "linked_files": [
-        "backend/app/services.py",
-        "backend/app/main.py",
-        "backend/app/config.py"
-      ],
-      "linked_symbols": [
-        "IndexService.start_index",
-        "IndexService.preview_command",
-        "IndexService._run_index",
-        "index_repo",
-        "get_status"
-      ],
-      "tags": [
-        "workflow",
-        "integration",
-        "state"
-      ],
-      "title": "Repository Indexing",
-      "x": 680,
-      "y": 120
-    },
-    {
-      "description": "Graph inspection is centered on Memgraph, where the backend opens a Neo4j-compatible driver and translates records into JSON-safe structures. This layer provides symbol listing, ranked text search, relationship traversal, and a reconstructed structure tree, which makes the product behave like a semantic browser rather than a file-only explorer.",
-      "id": "node_eff298cbd3",
-      "linked_files": [
-        "backend/app/services.py",
-        "backend/app/main.py"
-      ],
-      "linked_symbols": [
-        "GraphService.run_query",
-        "GraphService.list_symbols",
-        "GraphService.search_symbols_ranked",
-        "GraphService.get_relationships",
-        "GraphService.get_structure",
-        "get_symbols",
-        "get_relationships",
-        "get_structure",
-        "query_graph"
-      ],
-      "tags": [
-        "integration",
-        "boundary",
-        "domain"
-      ],
-      "title": "Code Graph Access",
-      "x": 680,
-      "y": 340
-    },
-    {
-      "description": "Before edits, the product can infer likely touch points by matching prompt tokens against graph symbols and then walking `CALLS` and `IMPORTS` edges in both directions. The result is a ranked impact summary with seed symbols, related symbols, and affected files, which is reused both as a user-facing inspect feature and as machine context for Codex runs.",
-      "id": "node_9c02b983a9",
-      "linked_files": [
-        "backend/app/services.py",
-        "backend/app/main.py",
-        "frontend/app/page.tsx"
-      ],
-      "linked_symbols": [
-        "GraphService.analyze_impact",
-        "assist_impact",
-        "submitImpact"
-      ],
-      "tags": [
-        "workflow",
-        "domain",
-        "policy"
-      ],
-      "title": "Impact Analysis",
-      "x": 960,
-      "y": 340
-    },
-    {
-      "description": "The canvas is the editable knowledge layer for the current repository: users can create, move, edit, delete, and connect notes that represent responsibilities and architecture. Notes are stored per repo in `.konceptura/canvas.json`, deduplicated by title during generated imports, and rendered on a zoomable React Flow board that only shows edges around the current selection.",
-      "id": "node_a95c1b01dc",
-      "linked_files": [
-        "backend/app/canvas_service.py",
-        "backend/app/main.py",
         "frontend/components/canvas-board.tsx",
-        "frontend/app/page.tsx"
+        "frontend/app/page.tsx",
+        "backend/app/canvas_service.py",
+        "backend/app/models.py"
       ],
       "linked_symbols": [
-        "CanvasService.create_node",
-        "CanvasService.update_node",
-        "CanvasService.create_edge",
-        "CanvasService.append_generated_map",
-        "get_canvas",
-        "generate_canvas_from_prompt",
         "CanvasBoard",
-        "handleSaveCanvasNode"
+        "renderNotesView",
+        "CanvasService.get_document_for_repo",
+        "CanvasService.create_node",
+        "CanvasService.append_generated_map"
       ],
       "tags": [
         "ui-surface",
+        "workflow",
+        "state"
+      ],
+      "title": "Notes Canvas",
+      "x": 540,
+      "y": 340
+    },
+    {
+      "description": "The notes view supports temporary exploration branches that grow outward from a selected concept and can later be promoted into regular tabs. These branches track path nodes, transient suggestion nodes, relation queries, and pinned context so the user can inspect neighboring concepts without polluting persisted architecture notes immediately. Suggestions are requested from the backend as conceptual follow-ups rather than direct copies of saved notes.",
+      "id": "node_754eb1b4b1",
+      "linked_files": [
+        "frontend/app/page.tsx",
+        "backend/app/codex_service.py",
+        "backend/app/models.py"
+      ],
+      "linked_symbols": [
+        "createExplorationBranch",
+        "materializeExplorationSuggestion",
+        "materializeRelationQuery",
+        "CodexService.generate_exploration_suggestions",
+        "ExplorationSuggestionRequest"
+      ],
+      "tags": [
+        "workflow",
         "state",
-        "entity"
+        "ui-surface"
       ],
-      "title": "Architecture Notes Canvas",
-      "x": 278,
-      "y": 352
+      "title": "Exploration Paths",
+      "x": 820,
+      "y": 340
     },
     {
-      "description": "The product can ask Codex to inspect the repository and return a compact JSON architecture map in the same schema expected by the visual canvas. The backend validates generated nodes and edges, falls back to generic notes if parsing fails, and appends only new titles so generated maps can enrich an existing workspace instead of replacing it.",
-      "id": "node_2a6a455f27",
+      "description": "Opening a note turns it into a structured editor with description, tags, linked files, linked symbols, and visible incoming and outgoing connections. This is where the architecture map becomes editable workspace knowledge rather than read-only generated output. The editor saves back through partial node updates, while relationship lists let the user navigate directly into connected notes.",
+      "id": "node_6efab6f0e4",
       "linked_files": [
-        "backend/app/codex_service.py",
-        "backend/app/canvas_service.py",
-        "backend/app/main.py",
-        "frontend/app/page.tsx"
+        "frontend/app/page.tsx",
+        "backend/app/canvas_service.py"
       ],
       "linked_symbols": [
-        "CodexService.generate_architecture_notes",
-        "CanvasService.append_generated_map",
-        "generate_canvas_from_prompt",
-        "handleGenerateCanvas",
-        "buildCanvasSetupPrompt"
+        "renderNoteTabView",
+        "handleSaveCanvasNode",
+        "CanvasService.update_node"
       ],
       "tags": [
-        "workflow",
-        "integration",
-        "policy"
+        "ui-surface",
+        "workflow"
       ],
-      "title": "Generated Architecture Mapping",
-      "x": 635,
-      "y": 503
+      "title": "Note Detail Editor",
+      "x": 820,
+      "y": 560
     },
     {
-      "description": "Planning, asking, and building all run through the local Codex CLI, with prompts augmented by selected note context, conversation history, and optional graph-derived impact hints. Build mode makes real repository edits, captures changed files by snapshot diffing, then regenerates architecture notes so the workspace reflects the new code state.",
-      "id": "node_c8d9b4817d",
+      "description": "Each project can hold multiple conversations, and messages are persisted per repository in `.konceptura/conversations.json`. The frontend loads or creates a conversation before ask, plan, or build runs, then saves the evolving message thread so later actions can continue the same context. The project tree surfaces these conversations as a lightweight memory layer attached to each repo.",
+      "id": "node_7c9cdc572f",
       "linked_files": [
-        "backend/app/codex_service.py",
-        "backend/app/main.py",
-        "frontend/app/page.tsx"
-      ],
-      "linked_symbols": [
-        "CodexService.run_change",
-        "CodexService.build_project",
-        "CodexService.plan_project",
-        "CodexService.ask_project",
-        "build_project",
-        "plan_project",
-        "ask_project",
-        "run_project_stream",
-        "submitBuildPrompt",
-        "submitPlanPrompt",
-        "submitAskPrompt"
-      ],
-      "tags": [
-        "workflow",
-        "integration",
-        "boundary"
-      ],
-      "title": "AI Planning And Build Loop",
-      "x": 434,
-      "y": 720
-    },
-    {
-      "description": "Each project keeps lightweight conversation history so planning and build runs can continue a thread instead of treating every request as isolated. The backend stores conversation documents under `.konceptura/conversations.json`, sorts them by last activity, and the frontend injects the most recent messages into AI requests as compact context blocks.",
-      "id": "node_de000b9c07",
-      "linked_files": [
+        "frontend/app/page.tsx",
         "backend/app/project_service.py",
-        "backend/app/main.py",
-        "frontend/app/page.tsx"
+        "backend/app/models.py"
       ],
       "linked_symbols": [
+        "loadConversation",
+        "createConversationForProject",
+        "persistConversationMessages",
         "ProjectService.create_conversation",
-        "ProjectService.update_conversation",
-        "ProjectService.list_conversations",
-        "create_project_conversation",
-        "update_project_conversation",
-        "buildConversationContext",
-        "persistConversationMessages"
+        "ProjectService.update_conversation"
       ],
       "tags": [
         "state",
@@ -330,81 +303,232 @@
         "entity"
       ],
       "title": "Conversation Memory",
-      "x": 1100,
-      "y": 780
+      "x": 460,
+      "y": -60
     },
     {
-      "description": "The workspace exposes `AGENTS.md` as a first-class project document so repository-specific operating rules can be read and updated inside the app. This gives the user a controllable policy layer that lives with the target repo and can shape future AI runs without changing application code.",
-      "id": "node_1a3835289a",
+      "description": "The console is the main execution surface for user intent: it can ask project questions, prepare an implementation plan, or run a real build pass. For each run, the frontend sends selected note context and conversation context to the backend streaming endpoint, then renders incremental assistant chunks and final summaries back into the current conversation. Plan mode is explicitly separable from build mode, and approved plans can be turned into a follow-up build run.",
+      "id": "node_43f12afc67",
       "linked_files": [
-        "backend/app/project_service.py",
+        "frontend/app/page.tsx",
+        "frontend/lib/api.ts",
         "backend/app/main.py",
-        "frontend/app/page.tsx"
+        "backend/app/codex_service.py"
       ],
       "linked_symbols": [
-        "ProjectService.read_agents_document",
-        "ProjectService.write_agents_document",
-        "get_project_agents",
-        "update_project_agents",
-        "handleSaveAgentsDocument"
+        "submitBuildPrompt",
+        "submitPlanPrompt",
+        "submitAskPrompt",
+        "streamProjectRun",
+        "run_project_stream",
+        "CodexService.build_project",
+        "CodexService.plan_project",
+        "CodexService.ask_project"
       ],
       "tags": [
-        "policy",
-        "boundary",
-        "state"
+        "workflow",
+        "ui-surface",
+        "integration"
       ],
-      "title": "Project Policy Documents",
-      "x": 1100,
-      "y": 1000
+      "title": "Build Plan Ask Console",
+      "x": 745,
+      "y": 85
     },
     {
-      "description": "After edits, the backend can inspect git status, ask Codex for a concise conventional commit message suggestion, and create a real commit if the repo is dirty. This turns the workspace into a closed-loop editing surface that not only changes code but also packages the result for source control.",
-      "id": "node_07bca1ec98",
+      "description": "The project view is the operational control panel for the current repo. It exposes repository opening, canvas setup and reset, AGENTS.md editing, and health indicators for the API, Memgraph, code graph binary, Codex binary, and index job state. This makes project configuration and tool readiness visible without leaving the workspace.",
+      "id": "node_a3d2306114",
       "linked_files": [
-        "backend/app/project_service.py",
-        "backend/app/codex_service.py",
+        "frontend/app/page.tsx",
+        "frontend/lib/api.ts",
         "backend/app/main.py",
-        "frontend/app/page.tsx"
+        "backend/app/project_service.py"
       ],
       "linked_symbols": [
-        "ProjectService.get_commit_status",
-        "ProjectService.create_commit",
-        "CodexService.suggest_commit_message",
+        "renderProjectView",
+        "handleGenerateCanvas",
+        "handleResetCanvas",
+        "handleSaveAgentsDocument",
+        "get_project",
+        "update_project",
+        "get_project_agents",
+        "update_project_agents",
+        "get_status"
+      ],
+      "tags": [
+        "ui-surface",
+        "boundary",
+        "workflow"
+      ],
+      "title": "Project Settings",
+      "x": 610,
+      "y": -210
+    },
+    {
+      "description": "After build runs, the app checks whether the repo is a git repository and whether there are uncommitted changes. If there are changes, the backend computes `git diff --stat` and asks Codex for a short conventional-style commit message suggestion before creating the commit. This turns the workspace into a closed loop from prompt to code change to persisted commit.",
+      "id": "node_fa5298f12c",
+      "linked_files": [
+        "frontend/app/page.tsx",
+        "backend/app/main.py",
+        "backend/app/project_service.py",
+        "backend/app/codex_service.py"
+      ],
+      "linked_symbols": [
+        "handleCommitClick",
         "get_project_commit_status",
         "create_project_commit",
-        "handleCommitClick"
+        "ProjectService.get_commit_status",
+        "ProjectService.create_commit",
+        "CodexService.suggest_commit_message"
       ],
       "tags": [
         "workflow",
         "integration",
         "policy"
       ],
-      "title": "Commit Packaging",
-      "x": 1100,
-      "y": 560
+      "title": "Git Commit Assistant",
+      "x": 460,
+      "y": 600
     },
     {
-      "description": "Runtime behavior is intentionally local-first: config comes from `konceptura.toml` plus environment overrides, with paths for Memgraph, the code-graph binary, the Codex binary, state files, and sample repositories. The top-level scripts and Docker compose file complete that boundary by starting Memgraph and the frontend/backend pair as one local stack.",
-      "id": "node_a108a796b4",
+      "description": "The FastAPI app is the central boundary between the UI and local tooling. It exposes endpoints for indexing, graph queries, project metadata, conversations, canvas CRUD, exploration suggestions, Codex change/build/plan/ask runs, and NDJSON streaming. Shared service instances are created once at startup, so the API layer mostly validates repo paths and delegates to focused services.",
+      "id": "node_f417fe3f1a",
       "linked_files": [
-        "backend/app/config.py",
-        "konceptura.toml",
-        "infra/docker-compose.yml",
-        "scripts/dev.sh",
-        "README.md"
+        "backend/app/main.py",
+        "backend/app/models.py"
       ],
       "linked_symbols": [
-        "load_settings",
-        "settings"
+        "app",
+        "index_repo",
+        "build_project",
+        "plan_project",
+        "ask_project",
+        "run_project_stream",
+        "generate_canvas_from_prompt",
+        "get_canvas"
       ],
       "tags": [
         "boundary",
-        "integration",
-        "policy"
+        "integration"
       ],
-      "title": "Local Runtime Configuration",
-      "x": 1007,
-      "y": 193
+      "title": "API Orchestrator",
+      "x": 820,
+      "y": 780
+    },
+    {
+      "description": "Project metadata is persisted as JSON in the backend data directory and mirrored into per-repo `.konceptura` files when needed. This service owns project identity, recent repos, conversation documents, AGENTS.md access, git status checks, commit creation, and visible file counting. It is the persistence layer for workspace-level metadata that is not part of the code graph itself.",
+      "id": "node_19d8b34226",
+      "linked_files": [
+        "backend/app/project_service.py",
+        "backend/app/config.py"
+      ],
+      "linked_symbols": [
+        "ProjectStore",
+        "ProjectService",
+        "ProjectService.read_agents_document",
+        "ProjectService.write_agents_document",
+        "ProjectService._count_visible_project_files"
+      ],
+      "tags": [
+        "state",
+        "boundary"
+      ],
+      "title": "Project State Store",
+      "x": 852,
+      "y": -118
+    },
+    {
+      "description": "Repository structure and semantic search are grounded in a Memgraph-backed code graph populated by `code-graph-rag`. The graph service can list symbols, rank symbol matches for free-text queries, traverse relationships like `CALLS` and `IMPORTS`, derive file paths for symbols, build a structure tree, and summarize likely impact files for a prompt. This is the semantic layer that feeds search, impact analysis, and Codex context hints.",
+      "id": "node_0fcd125fb8",
+      "linked_files": [
+        "backend/app/services.py",
+        "backend/app/main.py"
+      ],
+      "linked_symbols": [
+        "GraphService",
+        "GraphService.list_symbols",
+        "GraphService.search_symbols_ranked",
+        "GraphService.get_relationships",
+        "GraphService.analyze_impact",
+        "GraphService.get_structure"
+      ],
+      "tags": [
+        "integration",
+        "domain",
+        "boundary"
+      ],
+      "title": "Code Graph Services",
+      "x": 1100,
+      "y": 780
+    },
+    {
+      "description": "Indexing is an asynchronous backend job that shells out to the local `cgr start --repo-path ... --update-graph` command and records status in a JSON state file. A clean run also removes the repository hash cache before indexing. The active repo path is only committed into shared state when the index job finishes successfully, which prevents the UI from treating a failed run as the current graph source.",
+      "id": "node_4dd98759cf",
+      "linked_files": [
+        "backend/app/services.py",
+        "backend/app/main.py",
+        "backend/app/config.py"
+      ],
+      "linked_symbols": [
+        "IndexService",
+        "IndexService.preview_command",
+        "IndexService.start_index",
+        "IndexService._run_index",
+        "index_repo"
+      ],
+      "tags": [
+        "workflow",
+        "integration",
+        "state"
+      ],
+      "title": "Indexing Pipeline",
+      "x": 1123,
+      "y": 450
+    },
+    {
+      "description": "Codex is used in three distinct roles: making real repository edits, answering or planning against the current repo, and generating architecture-note JSON for the canvas. The service can prepend semantic note context, conversation history, and graph-derived impact hints to prompts, then parse Codex JSONL output into summaries, command traces, diffs, note suggestions, and commit messages. It is the bridge from workspace context to actual automated reasoning and code change execution.",
+      "id": "node_a773edf7c8",
+      "linked_files": [
+        "backend/app/codex_service.py",
+        "backend/app/main.py"
+      ],
+      "linked_symbols": [
+        "CodexService.run_change",
+        "CodexService.build_project",
+        "CodexService.plan_project",
+        "CodexService.ask_project",
+        "CodexService.generate_architecture_notes",
+        "CodexService._build_command"
+      ],
+      "tags": [
+        "integration",
+        "workflow",
+        "boundary"
+      ],
+      "title": "Codex Runtime",
+      "x": 1013,
+      "y": 957
+    },
+    {
+      "description": "The runtime is intentionally local-first: Memgraph and Memgraph Lab run through Docker, the backend runs on FastAPI, and the frontend runs on Next.js port 3001. Configuration is loaded from `konceptura.toml` plus environment overrides, including binary paths for `code-graph-rag` and Codex, backend data paths, frontend origins, and sample repositories. This keeps the whole product self-hostable around local developer tools rather than remote managed services.",
+      "id": "node_6d791bedf1",
+      "linked_files": [
+        "README.md",
+        "infra/docker-compose.yml",
+        "backend/app/config.py",
+        "frontend/package.json",
+        "backend/pyproject.toml"
+      ],
+      "linked_symbols": [
+        "load_settings",
+        "Settings"
+      ],
+      "tags": [
+        "boundary",
+        "integration"
+      ],
+      "title": "Local Infrastructure",
+      "x": 960,
+      "y": 1220
     }
   ],
   "repo_path": "/home/wniak/konceptura"

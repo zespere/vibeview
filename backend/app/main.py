@@ -32,6 +32,8 @@ from .models import (
     ConversationListResponse,
     ConversationResponse,
     ConversationUpdateRequest,
+    ExplorationSuggestionRequest,
+    ExplorationSuggestionResponse,
     IndexRequest,
     ProjectBuildRequest,
     ProjectBuildResponse,
@@ -443,6 +445,34 @@ def ask_project(request: ProjectAskRequest) -> ProjectAskResponse:
         prompt=request.prompt,
         summary=summary,
         answer_text=answer_text,
+    )
+
+
+@app.post("/project/exploration-suggestions", response_model=ExplorationSuggestionResponse)
+def project_exploration_suggestions(request: ExplorationSuggestionRequest) -> ExplorationSuggestionResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    try:
+        suggestions = codex_service.generate_exploration_suggestions(
+            resolved_repo_path,
+            active_node=request.active_node,
+            path_titles=request.path_titles,
+            suggestion_count=request.suggestion_count,
+            relation_query=request.relation_query,
+            semantic_context=request.semantic_context,
+            conversation_context=request.conversation_context,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return ExplorationSuggestionResponse(
+        repo_path=resolved_repo_path,
+        suggestions=suggestions,
     )
 
 

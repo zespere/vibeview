@@ -335,6 +335,35 @@ class ProjectAskResponse(BaseModel):
     answer_text: str
 
 
+class ExplorationContextNode(BaseModel):
+    title: str
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    linked_files: list[str] = Field(default_factory=list)
+    linked_symbols: list[str] = Field(default_factory=list)
+
+
+class ExplorationSuggestionRequest(BaseModel):
+    repo_path: str
+    active_node: ExplorationContextNode
+    path_titles: list[str] = Field(default_factory=list)
+    relation_query: str | None = None
+    semantic_context: str | None = None
+    conversation_context: str | None = None
+    suggestion_count: int = Field(default=3, ge=1, le=6)
+
+
+class ExplorationSuggestionRecord(BaseModel):
+    title: str
+    summary: str
+    edge_label: str
+
+
+class ExplorationSuggestionResponse(BaseModel):
+    repo_path: str
+    suggestions: list[ExplorationSuggestionRecord] = Field(default_factory=list)
+
+
 class ProjectRunStreamRequest(BaseModel):
     repo_path: str
     prompt: str = Field(min_length=2)
