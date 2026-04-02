@@ -556,7 +556,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
                     }}
                     type="button"
                   >
-                    Reset
+                    Shrink
                   </button>
                 ) : (
                   <button
