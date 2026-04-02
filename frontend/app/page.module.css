@@ -2046,6 +2046,11 @@
   overflow: hidden;
 }
 
+.canvasNodeExpanded {
+  width: 388px;
+  height: 348px;
+}
+
 .canvasNodeSuggestion,
 .canvasNodeSuggestionActive {
   border-style: dashed;
@@ -2066,6 +2071,12 @@
   height: 148px;
   padding: 12px;
   justify-content: flex-start;
+}
+
+.canvasNodeExpanded.canvasNodeCompact,
+.canvasNodeExpanded.canvasNodeMinimal {
+  width: 388px;
+  height: 348px;
 }
 
 .canvasNodeActive {
@@ -2095,6 +2106,44 @@
 .canvasNodeHeader {
   align-items: flex-start;
   gap: 10px;
+}
+
+.canvasNodeActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.canvasNodeAction,
+.canvasNodeActionPrimary {
+  border: 1px solid #d6c7b5;
+  border-radius: 7px;
+  background: #fffaf3;
+  color: #6f563d;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.canvasNodeAction:hover,
+.canvasNodeActionPrimary:hover {
+  background: #f7efe5;
+  border-color: #c6b299;
+}
+
+.canvasNodeActionPrimary {
+  border-color: #b99672;
+  background: #f1e3d1;
+  color: #5d4024;
+}
+
+.canvasNodeActionPrimary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .canvasSuggestionLabel {
@@ -2143,6 +2192,94 @@
   color: #8b745c;
   font-size: 12px;
   font-weight: 600;
+}
+
+.canvasNodeExpandedBody {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.canvasNodeDescriptionExpanded {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #53483b;
+  white-space: pre-wrap;
+}
+
+.canvasNodeMetaExpanded {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 12px;
+  color: #6c6257;
+}
+
+.canvasNodeList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #5f5448;
+}
+
+.canvasExplorationPath {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.canvasExplorationPathChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  border: 1px solid #ddcfbe;
+  border-radius: 999px;
+  background: #f7efe6;
+  color: #695949;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 8px;
+}
+
+.canvasExplorationComposer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+  border-top: 1px solid #eadfce;
+  padding-top: 12px;
+}
+
+.canvasExplorationField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #7b6751;
+}
+
+.canvasExplorationInput {
+  width: 100%;
+  border: 1px solid #d8cab8;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #241d17;
+  font: inherit;
+  padding: 9px 10px;
+}
+
+.canvasExplorationActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .canvasLoadingCard {

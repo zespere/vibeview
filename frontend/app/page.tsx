@@ -144,6 +144,7 @@ export default function Home() {
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<string[]>([]);
+  const [expandedCanvasNodeId, setExpandedCanvasNodeId] = useState<string | null>(null);
   const [notesExploration, setNotesExploration] = useState<ExplorationBranch | null>(null);
   const [explorationBranches, setExplorationBranches] = useState<Record<string, ExplorationBranch>>({});
   const [explorationTabs, setExplorationTabs] = useState<Record<string, ExplorationBranch>>({});
@@ -299,9 +300,56 @@ export default function Home() {
     () => buildOverviewCanvasDocument(canvasDocument, explorationBranches),
     [canvasDocument, explorationBranches],
   );
+  const notesCanvasDocument = useMemo(
+    () => applyExpandedNodeLayout(notesExplorationPresentation.displayDocument ?? overviewCanvasDocument, expandedCanvasNodeId),
+    [expandedCanvasNodeId, notesExplorationPresentation.displayDocument, overviewCanvasDocument],
+  );
+  const explorationCanvasDocument = useMemo(
+    () => applyExpandedNodeLayout(activeExplorationPresentation.displayDocument, expandedCanvasNodeId),
+    [activeExplorationPresentation.displayDocument, expandedCanvasNodeId],
+  );
   const activeContextDocument = useMemo(
     () => buildExplorationContextDocument(canvasDocument, currentExplorationSession),
     [canvasDocument, currentExplorationSession],
+  );
+  const notesExplorationControls = useMemo(
+    () =>
+      notesExploration
+        ? {
+            activeNodeId: notesExploration.activeNodeId,
+            pathTitles: notesExplorationPresentation.pathNodes.map((node) => node.title),
+            relationQuery: notesExploration.relationQuery,
+            persistent: false,
+            onRelationQueryChange: (value: string) =>
+              handleExplorationRelationQueryChange(notesExploration.id, value),
+            onRelationSubmit: () => {
+              void materializeRelationQuery(notesExploration, notesExploration.relationQuery);
+            },
+            onReturnToOverview: collapseNotesExploration,
+          }
+        : null,
+    [notesExploration, notesExplorationPresentation.pathNodes],
+  );
+  const activeExplorationControls = useMemo(
+    () =>
+      activeExplorationSession
+        ? {
+            activeNodeId: activeExplorationSession.activeNodeId,
+            pathTitles: activeExplorationPresentation.pathNodes.map((node) => node.title),
+            relationQuery: activeExplorationSession.relationQuery,
+            persistent: true,
+            onRelationQueryChange: (value: string) =>
+              handleExplorationRelationQueryChange(activeExplorationSession.id, value, { persistent: true }),
+            onRelationSubmit: () => {
+              void materializeRelationQuery(
+                activeExplorationSession,
+                activeExplorationSession.relationQuery,
+                { persistent: true },
+              );
+            },
+          }
+        : null,
+    [activeExplorationPresentation.pathNodes, activeExplorationSession],
   );
 
   useEffect(() => {
@@ -387,6 +435,7 @@ export default function Home() {
   useEffect(() => {
     setExplorationBranches(readStoredExplorationBranches(activeRepoPath));
     setExplorationSuggestionStates({});
+    setExpandedCanvasNodeId(null);
   }, [activeRepoPath]);
 
   useEffect(() => {
@@ -395,6 +444,19 @@ export default function Home() {
     }
     writeStoredExplorationBranches(activeRepoPath, explorationBranches);
   }, [activeRepoPath, explorationBranches]);
+
+  useEffect(() => {
+    if (!expandedCanvasNodeId) {
+      return;
+    }
+    const visibleNodeIds = new Set<string>([
+      ...(notesCanvasDocument?.nodes.map((node) => node.id) ?? []),
+      ...(explorationCanvasDocument?.nodes.map((node) => node.id) ?? []),
+    ]);
+    if (visibleNodeIds.size > 0 && !visibleNodeIds.has(expandedCanvasNodeId)) {
+      setExpandedCanvasNodeId(null);
+    }
+  }, [expandedCanvasNodeId, explorationCanvasDocument, notesCanvasDocument]);
 
   useEffect(() => {
     if (!activeRepoPath || !canvasDocument || !currentExplorationSession) {
@@ -1662,6 +1724,14 @@ export default function Home() {
     setActiveTabId(`note:${nodeId}`);
   }
 
+  function toggleCanvasNodeExpansion(nodeId: string) {
+    setExpandedCanvasNodeId((current) => (current === nodeId ? null : nodeId));
+  }
+
+  function resetCanvasNodeSize(nodeId: string) {
+    setExpandedCanvasNodeId((current) => (current === nodeId ? null : current));
+  }
+
   function promoteNotesExplorationToTab() {
     if (!notesExploration || !canvasDocument) {
       return;
@@ -1703,6 +1773,7 @@ export default function Home() {
     if (!notesExploration) {
       setSelectedCanvasNodeId(null);
       setSelectedCanvasNodeIds([]);
+      setExpandedCanvasNodeId(null);
       return;
     }
     setExplorationBranches((current) => ({
@@ -1712,6 +1783,7 @@ export default function Home() {
     setNotesExploration(null);
     setSelectedCanvasNodeId(null);
     setSelectedCanvasNodeIds([]);
+    setExpandedCanvasNodeId(null);
   }
 
   function materializeExplorationSuggestion(
@@ -1741,6 +1813,7 @@ export default function Home() {
 
     setSelectedCanvasNodeId(branchWithSuggestions.activeNodeId);
     setSelectedCanvasNodeIds(branchWithSuggestions.activeNodeId ? [branchWithSuggestions.activeNodeId] : []);
+    setExpandedCanvasNodeId(branchWithSuggestions.activeNodeId);
     setExplorationSuggestionStates((current) => ({
       ...current,
       [branch.id]: {
@@ -1851,6 +1924,7 @@ export default function Home() {
 
     setSelectedCanvasNodeId(nextBranch.activeNodeId);
     setSelectedCanvasNodeIds(nextBranch.activeNodeId ? [nextBranch.activeNodeId] : []);
+    setExpandedCanvasNodeId(nextBranch.activeNodeId);
     if (options?.persistent) {
       setExplorationTabs((current) => ({
         ...current,
@@ -1900,6 +1974,7 @@ export default function Home() {
     setSelectedCanvasNodeIds((current) =>
       current.length === 1 && current[0] === nextNodeId ? current : [nextNodeId],
     );
+    setExpandedCanvasNodeId(nextNodeId);
 
     if (options?.persistent) {
       setExplorationTabs((current) => ({
@@ -1933,10 +2008,6 @@ export default function Home() {
     setNotesExploration((current) => (current && current.id === sessionId ? { ...current, relationQuery: value } : current));
   }
 
-  function clearExplorationRelationQuery(sessionId: string, options?: { persistent?: boolean }) {
-    handleExplorationRelationQueryChange(sessionId, "", options);
-  }
-
   function handleOpenContextNode(nodeId: string) {
     const branchId = parseBranchSummaryNodeId(nodeId);
     if (branchId) {
@@ -1945,6 +2016,7 @@ export default function Home() {
         setNotesExploration(branch);
         setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
         setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
       }
       return;
     }
@@ -2031,13 +2103,14 @@ export default function Home() {
       const branchId = parseBranchSummaryNodeId(nodeIds[0]);
       if (branchId) {
         const branch = explorationBranches[branchId];
-        if (branch) {
-          setNotesExploration(branch);
-          setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-          setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
-        }
-        return;
+      if (branch) {
+        setNotesExploration(branch);
+        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
       }
+      return;
+    }
     }
 
     const normalized = [...nodeIds].sort();
@@ -2058,6 +2131,7 @@ export default function Home() {
 
     if (activeTab?.type === "view" && activeTab.view === "notes") {
       if (nodeIds.length === 1 && canvasDocument?.nodes.some((node) => node.id === nodeIds[0])) {
+        setExpandedCanvasNodeId(nodeIds[0]);
         setNotesExploration((current) => {
           if (!current) {
             return createExplorationBranch(nodeIds[0], canvasDocument);
@@ -2539,214 +2613,6 @@ export default function Home() {
     });
   }
 
-  function renderExplorationPanel(
-    branch: ExplorationBranch,
-    presentation: ExplorationPresentation,
-    options?: { persistent?: boolean },
-  ) {
-    const isPersistent = options?.persistent ?? false;
-    const activeNode = presentation.activeNode;
-    const relationQuery = branch.relationQuery;
-    const suggestionState = explorationSuggestionStates[branch.id] ?? null;
-
-    return (
-      <aside className={styles.explorationPanel}>
-        <div className={styles.explorationPanelHeader}>
-          <div>
-            <strong className={styles.resultTitle}>{activeNode?.title ?? "Explore concept"}</strong>
-            <p className={styles.resultMeta}>
-              {isPersistent
-                ? "Saved exploration tab"
-                : "Transient exploration from the overview canvas"}
-            </p>
-          </div>
-          <div className={styles.explorationHeaderActions}>
-            {!isPersistent ? (
-              <>
-                <button className={styles.secondaryButton} onClick={promoteNotesExplorationToTab} type="button">
-                  Open as tab
-                </button>
-                <button
-                  className={styles.secondaryButton}
-                  onClick={collapseNotesExploration}
-                  type="button"
-                >
-                  Back to overview
-                </button>
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <div className={styles.explorationSection}>
-          <span className={styles.fieldLabel}>Path</span>
-          <div className={styles.explorationPath}>
-            {presentation.pathNodes.map((node) => (
-              <button
-                className={node.id === branch.activeNodeId ? styles.explorationPathChipActive : styles.explorationPathChip}
-                key={node.id}
-                onClick={() => handleExplorationSelection(branch, [node.id], { persistent: isPersistent })}
-                type="button"
-              >
-                {node.title}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {activeNode ? (
-          <div className={styles.explorationSection}>
-            <span className={styles.fieldLabel}>What this concept does</span>
-            <p className={styles.explorationDescription}>{activeNode.description || "No description yet."}</p>
-            <div className={styles.explorationMetaGrid}>
-              <div>
-                <span className={styles.fieldLabel}>Tags</span>
-                <div className={styles.tagRow}>
-                  {activeNode.tags.length === 0 ? <span className={styles.tagChip}>untagged</span> : null}
-                  {activeNode.tags.map((tag) => (
-                    <span className={styles.tagChip} key={tag}>
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <span className={styles.fieldLabel}>Grounded in</span>
-                <ul className={styles.explorationList}>
-                  {activeNode.linked_files.length === 0 ? (
-                    <li className={styles.helperText}>No linked files</li>
-                  ) : (
-                    activeNode.linked_files.slice(0, 6).map((file) => <li key={file}>{file}</li>)
-                  )}
-                </ul>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        <div className={styles.explorationSection}>
-          <span className={styles.fieldLabel}>Suggested next concepts</span>
-          <div className={styles.explorationSuggestionList}>
-            {suggestionState?.loading ? (
-              <p className={styles.helperTextLoading}>Generating exploration suggestions...</p>
-            ) : suggestionState?.error ? (
-              <p className={styles.helperText}>Could not generate suggestions right now: {suggestionState.error}</p>
-            ) : presentation.suggestedNodes.length === 0 ? (
-              <p className={styles.helperText}>No strong next concepts from the current focus.</p>
-            ) : (
-              presentation.suggestedNodes.map((suggestion) => (
-                <button
-                  className={styles.explorationSuggestion}
-                  key={suggestion.id}
-                  onClick={() => materializeExplorationSuggestion(branch, suggestion, { persistent: isPersistent })}
-                  type="button"
-                >
-                  <strong>{suggestion.title}</strong>
-                  <span>{suggestion.summary}</span>
-                  <span className={styles.explorationSuggestionRelation}>{suggestion.edgeLabel}</span>
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className={styles.explorationSection}>
-          <div className={styles.explorationRelationHeader}>
-            <span className={styles.fieldLabel}>Custom relation</span>
-            {relationQuery ? (
-              <button
-                className={styles.inlineLink}
-                onClick={() => clearExplorationRelationQuery(branch.id, { persistent: isPersistent })}
-                type="button"
-              >
-                Clear
-              </button>
-            ) : null}
-          </div>
-          <input
-            className={styles.input}
-            onChange={(event) =>
-              handleExplorationRelationQueryChange(branch.id, event.target.value, { persistent: isPersistent })
-            }
-            placeholder="Show related state, workflow, persistence..."
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void materializeRelationQuery(branch, relationQuery, { persistent: isPersistent });
-              }
-            }}
-            value={relationQuery}
-          />
-          <div className={styles.explorationRelationActions}>
-            <button
-              className={styles.secondaryButton}
-              disabled={!relationQuery.trim()}
-              onClick={() => {
-                void materializeRelationQuery(branch, relationQuery, { persistent: isPersistent });
-              }}
-              type="button"
-            >
-              Add relation
-            </button>
-            <p className={styles.helperText}>Type an angle and create one connected concept from the current focus.</p>
-          </div>
-        </div>
-      </aside>
-    );
-  }
-
-  function renderExplorationSurface(
-    branch: ExplorationBranch,
-    presentation: ExplorationPresentation,
-    options?: { persistent?: boolean },
-  ) {
-    const isPersistent = options?.persistent ?? false;
-
-    return (
-      <div className={styles.explorationWorkspace}>
-        {renderExplorationPanel(branch, presentation, options)}
-
-        <div className={styles.explorationCanvasStage}>
-          <CanvasBoard
-            document={presentation.displayDocument}
-            edgeNodeIds={presentation.visibleNodeIds}
-            onCreateNodeAt={(x, y) => {
-              startCanvasTransition(() => {
-                void handleCreateCanvasNodeAt(x, y);
-              });
-            }}
-            onDeleteNode={handleDeleteCanvasNode}
-            onMoveNodeEnd={(nodeId, x, y) => {
-              startCanvasTransition(() => {
-                void handlePersistCanvasNodePosition(nodeId, x, y);
-              });
-            }}
-            onOpenNode={(nodeId) => {
-              const suggestion = findSuggestionForBranch(branch, nodeId, { persistent: isPersistent });
-              if (suggestion) {
-                materializeExplorationSuggestion(branch, suggestion, { persistent: isPersistent });
-                return;
-              }
-              if (isTransientExplorationNodeId(nodeId)) {
-                handleExplorationSelection(branch, [nodeId], { persistent: isPersistent });
-                return;
-              }
-              openCanvasNode(nodeId);
-            }}
-            onPaneClick={
-              isPersistent
-                ? undefined
-                : collapseNotesExploration
-            }
-            onSelectNode={(nodeId) => handleExplorationSelection(branch, [nodeId], { persistent: isPersistent })}
-            onSelectNodes={(nodeIds) => handleExplorationSelection(branch, nodeIds, { persistent: isPersistent })}
-            selectedNodeIds={branch.activeNodeId ? [branch.activeNodeId] : []}
-          />
-        </div>
-      </div>
-    );
-  }
-
   function renderNotesView() {
     return (
       <div className={styles.notesWorkspace}>
@@ -2898,8 +2764,10 @@ export default function Home() {
             <>
               <CanvasBoard
                 onDeleteNode={handleDeleteCanvasNode}
-                document={notesExplorationPresentation.displayDocument ?? overviewCanvasDocument}
+                document={notesCanvasDocument}
                 edgeNodeIds={notesExploration ? notesExplorationPresentation.visibleNodeIds : selectedCanvasNodeIds}
+                expandedNodeId={expandedCanvasNodeId}
+                explorationControls={notesExploration ? notesExplorationControls : null}
                 onCreateNodeAt={(x, y) => {
                   startCanvasTransition(() => {
                     void handleCreateCanvasNodeAt(x, y);
@@ -2935,6 +2803,7 @@ export default function Home() {
                       setNotesExploration(branch);
                       setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
                       setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+                      setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
                     }
                     return;
                   }
@@ -2956,11 +2825,10 @@ export default function Home() {
                     ? handleExplorationSelection(notesExploration, nodeIds)
                     : handleSelectCanvasNodes(nodeIds)
                 }
+                onToggleExpandNode={toggleCanvasNodeExpansion}
+                onResetNodeSize={resetCanvasNodeSize}
                 selectedNodeIds={notesExploration?.activeNodeId ? [notesExploration.activeNodeId] : selectedCanvasNodeIds}
               />
-              {notesExploration && notesExplorationPresentation.displayDocument ? (
-                <div className={styles.explorationOverlay}>{renderExplorationPanel(notesExploration, notesExplorationPresentation)}</div>
-              ) : null}
             </>
           )}
         </div>
@@ -3099,7 +2967,40 @@ export default function Home() {
             isConsoleExpanded ? styles.canvasFrameWithConsoleExpanded : styles.canvasFrameWithConsoleCollapsed
           }`}
         >
-          {renderExplorationSurface(branch, activeExplorationPresentation, { persistent: true })}
+          <CanvasBoard
+            document={explorationCanvasDocument}
+            edgeNodeIds={activeExplorationPresentation.visibleNodeIds}
+            expandedNodeId={expandedCanvasNodeId}
+            explorationControls={activeExplorationControls}
+            onCreateNodeAt={(x, y) => {
+              startCanvasTransition(() => {
+                void handleCreateCanvasNodeAt(x, y);
+              });
+            }}
+            onDeleteNode={handleDeleteCanvasNode}
+            onMoveNodeEnd={(nodeId, x, y) => {
+              startCanvasTransition(() => {
+                void handlePersistCanvasNodePosition(nodeId, x, y);
+              });
+            }}
+            onOpenNode={(nodeId) => {
+              const suggestion = findSuggestionForBranch(branch, nodeId, { persistent: true });
+              if (suggestion) {
+                materializeExplorationSuggestion(branch, suggestion, { persistent: true });
+                return;
+              }
+              if (isTransientExplorationNodeId(nodeId)) {
+                handleExplorationSelection(branch, [nodeId], { persistent: true });
+                return;
+              }
+              openCanvasNode(nodeId);
+            }}
+            onSelectNode={(nodeId) => handleExplorationSelection(branch, [nodeId], { persistent: true })}
+            onSelectNodes={(nodeIds) => handleExplorationSelection(branch, nodeIds, { persistent: true })}
+            onToggleExpandNode={toggleCanvasNodeExpansion}
+            onResetNodeSize={resetCanvasNodeSize}
+            selectedNodeIds={branch.activeNodeId ? [branch.activeNodeId] : []}
+          />
         </div>
       </div>
     );
@@ -4245,6 +4146,67 @@ function layoutExplorationDocument(
     ...document,
     nodes,
     edges,
+  };
+}
+
+const DEFAULT_CANVAS_NODE_WIDTH = 240;
+const DEFAULT_CANVAS_NODE_HEIGHT = 148;
+const EXPANDED_CANVAS_NODE_WIDTH = 388;
+const EXPANDED_CANVAS_NODE_HEIGHT = 348;
+const EXPANDED_CANVAS_NODE_GAP_X = 44;
+const EXPANDED_CANVAS_NODE_GAP_Y = 40;
+
+function applyExpandedNodeLayout(
+  document: CanvasDocument | null,
+  expandedNodeId: string | null,
+) {
+  if (!document || !expandedNodeId) {
+    return document;
+  }
+
+  const expandedNode = document.nodes.find((node) => node.id === expandedNodeId);
+  if (!expandedNode) {
+    return document;
+  }
+
+  const expandedBounds = {
+    left: expandedNode.x,
+    top: expandedNode.y,
+    right: expandedNode.x + EXPANDED_CANVAS_NODE_WIDTH,
+    bottom: expandedNode.y + EXPANDED_CANVAS_NODE_HEIGHT,
+  };
+  const defaultBounds = {
+    right: expandedNode.x + DEFAULT_CANVAS_NODE_WIDTH,
+    bottom: expandedNode.y + DEFAULT_CANVAS_NODE_HEIGHT,
+  };
+  const horizontalShift = EXPANDED_CANVAS_NODE_WIDTH - DEFAULT_CANVAS_NODE_WIDTH + EXPANDED_CANVAS_NODE_GAP_X;
+  const verticalShift = EXPANDED_CANVAS_NODE_HEIGHT - DEFAULT_CANVAS_NODE_HEIGHT + EXPANDED_CANVAS_NODE_GAP_Y;
+
+  const nodes = document.nodes.map((node) => {
+    if (node.id === expandedNodeId) {
+      return node;
+    }
+
+    const overlapsExpandedVertically =
+      node.y < expandedBounds.bottom && node.y + DEFAULT_CANVAS_NODE_HEIGHT > expandedBounds.top;
+    const overlapsExpandedHorizontally =
+      node.x < expandedBounds.right && node.x + DEFAULT_CANVAS_NODE_WIDTH > expandedBounds.left;
+
+    const shouldShiftRight =
+      node.x >= defaultBounds.right - 8 && overlapsExpandedVertically;
+    const shouldShiftDown =
+      node.y >= defaultBounds.bottom - 8 && overlapsExpandedHorizontally;
+
+    return {
+      ...node,
+      x: node.x + (shouldShiftRight ? horizontalShift : 0),
+      y: node.y + (shouldShiftDown ? verticalShift : 0),
+    };
+  });
+
+  return {
+    ...document,
+    nodes,
   };
 }
 
