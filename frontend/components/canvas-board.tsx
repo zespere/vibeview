@@ -24,12 +24,14 @@ import type { CanvasDocument, CanvasNode } from "@/lib/api";
 interface CanvasBoardProps {
   document: CanvasDocument | null;
   selectedNodeIds: string[];
+  edgeNodeIds?: string[];
   onCreateNodeAt: (x: number, y: number) => void;
   onDeleteNode: (nodeId: string) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   onOpenNode: (nodeId: string) => void;
+  onPaneClick?: () => void;
 }
 
 interface ContextMenuState {
@@ -59,12 +61,14 @@ const nodeTypes: ReactFlowProps<Node<NoteNodeData>, Edge>["nodeTypes"] = {
 export function CanvasBoard({
   document,
   selectedNodeIds,
+  edgeNodeIds,
   onCreateNodeAt,
   onDeleteNode,
   onMoveNodeEnd,
   onSelectNode,
   onSelectNodes,
   onOpenNode,
+  onPaneClick,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
   const isDraggingRef = useRef(false);
@@ -142,11 +146,12 @@ export function CanvasBoard({
   const edges: Edge[] = useMemo(
     () => {
       const nodesById = new Map((document?.nodes ?? []).map((node) => [node.id, node]));
+      const visibleEdgeNodeIds = edgeNodeIds ?? selectedNodeIds;
 
       return (document?.edges ?? [])
         .filter((edge) =>
-          selectedNodeIds.length > 0
-            ? selectedNodeIds.includes(edge.source_node_id) || selectedNodeIds.includes(edge.target_node_id)
+          visibleEdgeNodeIds.length > 0
+            ? visibleEdgeNodeIds.includes(edge.source_node_id) || visibleEdgeNodeIds.includes(edge.target_node_id)
             : false,
         )
         .map((edge) => {
@@ -172,7 +177,7 @@ export function CanvasBoard({
           };
         });
     },
-    [document?.edges, document?.nodes, selectedNodeIds],
+    [document?.edges, document?.nodes, edgeNodeIds, selectedNodeIds],
   );
 
   const handleNodeDragStart: NodeMouseHandler<Node<NoteNodeData>> = () => {
@@ -347,6 +352,12 @@ export function CanvasBoard({
         onNodeDoubleClick={handleNodeDoubleClick}
         onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
+        onPaneClick={() => {
+          if (onPaneClick) {
+            onSelectNodes([]);
+            onPaneClick();
+          }
+        }}
         onNodeContextMenu={(event, node) => {
           event.preventDefault();
           event.stopPropagation();

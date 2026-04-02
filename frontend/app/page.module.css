@@ -467,6 +467,10 @@
   position: sticky;
   top: 0;
   z-index: 12;
+  align-items: flex-end;
+  flex-wrap: nowrap;
+  min-height: 52px;
+  max-height: 52px;
   overflow-x: auto;
   overflow-y: hidden;
   border-bottom: 1px solid #ddd5ca;
@@ -474,6 +478,7 @@
   background: #f7f4ee;
   overscroll-behavior: contain;
   scrollbar-width: none;
+  box-sizing: border-box;
 }
 
 .tabStrip::-webkit-scrollbar {
@@ -500,6 +505,7 @@
 .documentTab,
 .documentTabActive {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -671,6 +677,128 @@
 
 .canvasFrameWithConsoleExpanded {
   padding-bottom: 438px;
+}
+
+.explorationWorkspace {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.explorationPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  border-right: 1px solid #e2d8ca;
+  background: rgba(255, 251, 245, 0.92);
+  padding: 18px;
+  overflow: auto;
+}
+
+.explorationPanelHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.explorationHeaderActions,
+.explorationRelationHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.explorationSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.explorationCanvasStage {
+  min-width: 0;
+  min-height: 0;
+}
+
+.explorationPath {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.explorationPathChip,
+.explorationPathChipActive {
+  border: 1px solid #ddd1c0;
+  border-radius: 8px;
+  background: #fffaf3;
+  color: #372c22;
+  font: inherit;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.explorationPathChipActive {
+  border-color: #8b5c32;
+  background: #fff1df;
+}
+
+.explorationDescription {
+  margin: 0;
+  color: #4d4034;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.explorationMetaGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.explorationList {
+  margin: 0;
+  padding-left: 18px;
+  color: #594c40;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.explorationSuggestionList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.explorationSuggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid #e0d4c3;
+  border-radius: 10px;
+  background: #fffdf9;
+  color: #2e241b;
+  font: inherit;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.explorationSuggestion:hover,
+.explorationPathChip:hover,
+.explorationPathChipActive:hover {
+  background: #f7efe3;
+}
+
+.explorationSuggestion strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.explorationSuggestion span {
+  color: #6b5f52;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .helperTextLoading {
@@ -1991,6 +2119,15 @@
 @media (max-width: 1180px) {
   .workspaceSplit {
     grid-template-columns: 1fr;
+  }
+
+  .explorationWorkspace {
+    grid-template-columns: 1fr;
+  }
+
+  .explorationPanel {
+    border-right: 0;
+    border-bottom: 1px solid #e2d8ca;
   }
 
   .noteEditorLayout {

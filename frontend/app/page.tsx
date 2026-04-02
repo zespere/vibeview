@@ -52,7 +52,8 @@ import {
 type WorkspaceView = "notes" | "inspect" | "project" | "chat";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
-  | { id: `note:${string}`; type: "note"; nodeId: string };
+  | { id: `note:${string}`; type: "note"; nodeId: string }
+  | { id: `explore:${string}`; type: "exploration"; explorationId: string };
 
 const RAIL_VIEW_ITEMS: Array<{ id: Exclude<WorkspaceView, "chat">; label: string }> = [
   { id: "notes", label: "Notes" },
@@ -71,6 +72,23 @@ interface CommandResultItem {
   subtitle?: string;
   group: "navigate" | "action" | "ask" | "execute";
   run: () => void;
+}
+
+interface ExplorationSession {
+  id: string;
+  rootNodeId: string;
+  activeNodeId: string;
+  pathNodeIds: string[];
+  relationQuery: string;
+}
+
+interface ExplorationPresentation {
+  activeNode: CanvasNode | null;
+  customMatches: CanvasNode[];
+  displayDocument: CanvasDocument | null;
+  pathNodes: CanvasNode[];
+  suggestedNodes: CanvasNode[];
+  visibleNodeIds: string[];
 }
 
 export default function Home() {
@@ -125,6 +143,8 @@ export default function Home() {
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<string[]>([]);
+  const [notesExploration, setNotesExploration] = useState<ExplorationSession | null>(null);
+  const [explorationTabs, setExplorationTabs] = useState<Record<string, ExplorationSession>>({});
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
   const [canvasDraftTitle, setCanvasDraftTitle] = useState("");
   const [canvasDraftDescription, setCanvasDraftDescription] = useState("");
@@ -168,6 +188,11 @@ export default function Home() {
   );
 
   const activeView = activeTab?.type === "view" ? activeTab.view : "notes";
+  const activeExplorationSession =
+    activeTab?.type === "exploration" ? explorationTabs[activeTab.explorationId] ?? null : null;
+  const transientNotesExploration =
+    activeTab?.type === "view" && activeTab.view === "notes" ? notesExploration : null;
+  const currentExplorationSession = activeExplorationSession ?? transientNotesExploration;
 
   const openCanvasNodes = useMemo(() => {
     if (!canvasDocument) {
@@ -185,7 +210,10 @@ export default function Home() {
   const sampleRepos = Object.entries(status?.sample_repos ?? {});
   const currentRailWidth = isRailExpanded ? railWidth : 72;
   const activeRepoPath = (project?.repo_path || repoPath).trim();
-  const focusedCanvasNodeId = activeTab?.type === "note" ? activeTab.nodeId : selectedCanvasNodeId;
+  const focusedCanvasNodeId =
+    activeTab?.type === "note"
+      ? activeTab.nodeId
+      : currentExplorationSession?.activeNodeId ?? selectedCanvasNodeId;
   const activeProjectTreeItem = useMemo(
     () => projectsTree.find((item) => item.repo_path === activeRepoPath) ?? null,
     [activeRepoPath, projectsTree],
@@ -195,6 +223,9 @@ export default function Home() {
     if (focusedCanvasNodeId) {
       ids.add(focusedCanvasNodeId);
     }
+    for (const nodeId of currentExplorationSession?.pathNodeIds ?? []) {
+      ids.add(nodeId);
+    }
     for (const nodeId of selectedCanvasNodeIds) {
       ids.add(nodeId);
     }
@@ -202,7 +233,7 @@ export default function Home() {
       ids.add(nodeId);
     }
     return [...ids];
-  }, [focusedCanvasNodeId, pinnedCanvasNodeIds, selectedCanvasNodeIds]);
+  }, [currentExplorationSession?.pathNodeIds, focusedCanvasNodeId, pinnedCanvasNodeIds, selectedCanvasNodeIds]);
   const pinnedCanvasNodes = useMemo(() => {
     if (!canvasDocument) {
       return [];
@@ -244,6 +275,14 @@ export default function Home() {
     }
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
   }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding, isPlanning]);
+  const notesExplorationPresentation = useMemo(
+    () => buildExplorationPresentation(canvasDocument, notesExploration),
+    [canvasDocument, notesExploration],
+  );
+  const activeExplorationPresentation = useMemo(
+    () => buildExplorationPresentation(canvasDocument, activeExplorationSession),
+    [activeExplorationSession, canvasDocument],
+  );
 
   useEffect(() => {
     expectedRepoPathRef.current = activeRepoPath;
@@ -386,6 +425,18 @@ export default function Home() {
         return;
       }
 
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "n" &&
+        activeTab?.type === "view" &&
+        activeTab.view === "notes" &&
+        notesExploration
+      ) {
+        event.preventDefault();
+        promoteNotesExplorationToTab();
+        return;
+      }
+
       if (event.key === "Escape" && isCommandPaletteOpen) {
         setIsCommandPaletteOpen(false);
       }
@@ -393,7 +444,7 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCommandPaletteOpen]);
+  }, [activeTab, isCommandPaletteOpen, notesExploration]);
 
   useEffect(() => {
     if (!isCommandDragging || !commandDragOffset) {
@@ -434,8 +485,23 @@ export default function Home() {
     setPinnedCanvasNodeIds((current) => current.filter((nodeId) => validNodeIds.has(nodeId)));
     setOpenCanvasNodeIds((current) => current.filter((nodeId) => validNodeIds.has(nodeId)));
     setOpenTabs((current) =>
-      current.filter((tab) => tab.type === "view" || validNodeIds.has(tab.nodeId)),
+      current.filter((tab) => {
+        if (tab.type === "view") {
+          return true;
+        }
+        if (tab.type === "note") {
+          return validNodeIds.has(tab.nodeId);
+        }
+        return true;
+      }),
     );
+    setNotesExploration((current) => normalizeExplorationSession(current, validNodeIds));
+    setExplorationTabs((current) => {
+      const nextEntries = Object.entries(current)
+        .map(([id, session]) => [id, normalizeExplorationSession(session, validNodeIds)] as const)
+        .filter((entry): entry is readonly [string, ExplorationSession] => Boolean(entry[1]));
+      return Object.fromEntries(nextEntries);
+    });
 
     if (selectedCanvasNodeId && !validNodeIds.has(selectedCanvasNodeId)) {
       const fallbackNodeId = canvasDocument.nodes[0]?.id ?? null;
@@ -448,6 +514,33 @@ export default function Home() {
       }
     }
   }, [canvasDocument, selectedCanvasNodeId]);
+
+  useEffect(() => {
+    if (
+      !canvasDocument ||
+      activeTab?.type !== "view" ||
+      activeTab.view !== "notes"
+    ) {
+      return;
+    }
+
+    if (selectedCanvasNodeIds.length !== 1) {
+      setNotesExploration((current) => (current ? null : current));
+      return;
+    }
+
+    const nextNodeId = selectedCanvasNodeIds[0];
+    if (!canvasDocument.nodes.some((node) => node.id === nextNodeId)) {
+      return;
+    }
+
+    setNotesExploration((current) => {
+      if (!current) {
+        return createExplorationSession(nextNodeId);
+      }
+      return advanceExplorationSession(current, nextNodeId);
+    });
+  }, [activeTab, canvasDocument, selectedCanvasNodeIds]);
 
   useEffect(() => {
     if (status?.index_job.status === "completed") {
@@ -1347,6 +1440,9 @@ export default function Home() {
         setWorkspaceStatus(null);
         setCanvasDocument(null);
         setSelectedCanvasNodeId(null);
+        setSelectedCanvasNodeIds([]);
+        setNotesExploration(null);
+        setExplorationTabs({});
         setOpenCanvasNodeIds([]);
         setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
         setActiveTabId("view:notes");
@@ -1383,6 +1479,9 @@ export default function Home() {
           setWorkspaceStatus(null);
           setCanvasDocument(null);
           setSelectedCanvasNodeId(null);
+          setSelectedCanvasNodeIds([]);
+          setNotesExploration(null);
+          setExplorationTabs({});
           setOpenCanvasNodeIds([]);
           setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
           setActiveTabId("view:notes");
@@ -1430,6 +1529,9 @@ export default function Home() {
           const response = await resetCanvas(targetRepoPath);
           setCanvasDocument(response.document);
           setSelectedCanvasNodeId(null);
+          setSelectedCanvasNodeIds([]);
+          setNotesExploration(null);
+          setExplorationTabs({});
           setOpenCanvasNodeIds([]);
           setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
           setActiveTabId("view:notes");
@@ -1504,6 +1606,92 @@ export default function Home() {
         : [...current, { id: `note:${nodeId}`, type: "note", nodeId }],
     );
     setActiveTabId(`note:${nodeId}`);
+  }
+
+  function promoteNotesExplorationToTab() {
+    if (!notesExploration || !canvasDocument) {
+      return;
+    }
+
+    const promotedSession = {
+      ...notesExploration,
+      id: `saved-${Date.now()}`,
+      pathNodeIds: [...notesExploration.pathNodeIds],
+    };
+
+    setExplorationTabs((current) => ({
+      ...current,
+      [promotedSession.id]: promotedSession,
+    }));
+    setOpenTabs((current) =>
+      current.some((tab) => tab.id === `explore:${promotedSession.id}`)
+        ? current
+        : [...current, { id: `explore:${promotedSession.id}`, type: "exploration", explorationId: promotedSession.id }],
+    );
+    setActiveTabId(`explore:${promotedSession.id}`);
+    setComposerStatus(`Opened an exploration tab for ${findCanvasNodeTitle(canvasDocument, promotedSession.rootNodeId)}.`);
+  }
+
+  function handleExplorationSelection(
+    session: ExplorationSession,
+    nodeIds: string[],
+    options?: { persistent?: boolean },
+  ) {
+    if (nodeIds.length === 0) {
+      if (options?.persistent) {
+        return;
+      }
+      setNotesExploration(null);
+      setSelectedCanvasNodeId(null);
+      setSelectedCanvasNodeIds([]);
+      return;
+    }
+
+    if (nodeIds.length !== 1) {
+      return;
+    }
+
+    const nextNodeId = nodeIds[0];
+    const nextSession = advanceExplorationSession(session, nextNodeId);
+    setSelectedCanvasNodeId((current) => (current === nextNodeId ? current : nextNodeId));
+    setSelectedCanvasNodeIds((current) =>
+      current.length === 1 && current[0] === nextNodeId ? current : [nextNodeId],
+    );
+
+    if (options?.persistent) {
+      setExplorationTabs((current) => ({
+        ...current,
+        [session.id]: nextSession,
+      }));
+    } else {
+      setNotesExploration(nextSession);
+    }
+  }
+
+  function handleExplorationRelationQueryChange(
+    sessionId: string,
+    value: string,
+    options?: { persistent?: boolean },
+  ) {
+    if (options?.persistent) {
+      setExplorationTabs((current) => {
+        const session = current[sessionId];
+        if (!session) {
+          return current;
+        }
+        return {
+          ...current,
+          [sessionId]: { ...session, relationQuery: value },
+        };
+      });
+      return;
+    }
+
+    setNotesExploration((current) => (current && current.id === sessionId ? { ...current, relationQuery: value } : current));
+  }
+
+  function clearExplorationRelationQuery(sessionId: string, options?: { persistent?: boolean }) {
+    handleExplorationRelationQueryChange(sessionId, "", options);
   }
 
   function openChatViewTab() {
@@ -1959,6 +2147,14 @@ export default function Home() {
         current.length === 1 && current[0] === tab.nodeId ? current : [tab.nodeId],
       );
     }
+    if (tab.type === "exploration") {
+      const session = explorationTabs[tab.explorationId] ?? null;
+      const activeNodeId = session?.activeNodeId ?? null;
+      setSelectedCanvasNodeId((current) => (current === activeNodeId ? current : activeNodeId));
+      setSelectedCanvasNodeIds((current) =>
+        activeNodeId && current.length === 1 && current[0] === activeNodeId ? current : activeNodeId ? [activeNodeId] : [],
+      );
+    }
     setActiveTabId(tab.id);
   }
 
@@ -1973,6 +2169,13 @@ export default function Home() {
     if (tab.type === "note") {
       handleCloseCanvasTab(tab.nodeId);
       return;
+    }
+    if (tab.type === "exploration") {
+      setExplorationTabs((current) => {
+        const next = { ...current };
+        delete next[tab.explorationId];
+        return next;
+      });
     }
     setOpenTabs((current) => {
       const next = current.filter((item) => item.id !== tabId);
@@ -2052,6 +2255,195 @@ export default function Home() {
         }
       })();
     });
+  }
+
+  function renderExplorationSurface(
+    session: ExplorationSession,
+    presentation: ExplorationPresentation,
+    options?: { persistent?: boolean },
+  ) {
+    const isPersistent = options?.persistent ?? false;
+    const activeNode = presentation.activeNode;
+    const relationQuery = session.relationQuery;
+
+    return (
+      <div className={styles.explorationWorkspace}>
+        <aside className={styles.explorationPanel}>
+          <div className={styles.explorationPanelHeader}>
+            <div>
+              <strong className={styles.resultTitle}>{activeNode?.title ?? "Explore concept"}</strong>
+              <p className={styles.resultMeta}>
+                {isPersistent
+                  ? "Saved exploration tab"
+                  : "Transient exploration from the overview canvas"}
+              </p>
+            </div>
+            <div className={styles.explorationHeaderActions}>
+              {!isPersistent ? (
+                <>
+                  <button className={styles.secondaryButton} onClick={promoteNotesExplorationToTab} type="button">
+                    Open as tab
+                  </button>
+                  <button
+                    className={styles.secondaryButton}
+                    onClick={() => {
+                      setNotesExploration(null);
+                      setSelectedCanvasNodeId(null);
+                      setSelectedCanvasNodeIds([]);
+                    }}
+                    type="button"
+                  >
+                    Back to overview
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          <div className={styles.explorationSection}>
+            <span className={styles.fieldLabel}>Path</span>
+            <div className={styles.explorationPath}>
+              {presentation.pathNodes.map((node) => (
+                <button
+                  className={node.id === session.activeNodeId ? styles.explorationPathChipActive : styles.explorationPathChip}
+                  key={node.id}
+                  onClick={() => handleExplorationSelection(session, [node.id], { persistent: isPersistent })}
+                  type="button"
+                >
+                  {node.title}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activeNode ? (
+            <div className={styles.explorationSection}>
+              <span className={styles.fieldLabel}>What this concept does</span>
+              <p className={styles.explorationDescription}>{activeNode.description || "No description yet."}</p>
+              <div className={styles.explorationMetaGrid}>
+                <div>
+                  <span className={styles.fieldLabel}>Tags</span>
+                  <div className={styles.tagRow}>
+                    {activeNode.tags.length === 0 ? <span className={styles.tagChip}>untagged</span> : null}
+                    {activeNode.tags.map((tag) => (
+                      <span className={styles.tagChip} key={tag}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className={styles.fieldLabel}>Grounded in</span>
+                  <ul className={styles.explorationList}>
+                    {activeNode.linked_files.length === 0 ? (
+                      <li className={styles.helperText}>No linked files</li>
+                    ) : (
+                      activeNode.linked_files.slice(0, 6).map((file) => <li key={file}>{file}</li>)
+                    )}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div className={styles.explorationSection}>
+            <span className={styles.fieldLabel}>Suggested next concepts</span>
+            <div className={styles.explorationSuggestionList}>
+              {presentation.suggestedNodes.length === 0 ? (
+                <p className={styles.helperText}>No strong next concepts from the current focus.</p>
+              ) : (
+                presentation.suggestedNodes.map((node) => (
+                  <button
+                    className={styles.explorationSuggestion}
+                    key={node.id}
+                    onClick={() => handleExplorationSelection(session, [node.id], { persistent: isPersistent })}
+                    type="button"
+                  >
+                    <strong>{node.title}</strong>
+                    <span>{summarizeNote(node.description)}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className={styles.explorationSection}>
+            <div className={styles.explorationRelationHeader}>
+              <span className={styles.fieldLabel}>Custom relation</span>
+              {relationQuery ? (
+                <button
+                  className={styles.inlineLink}
+                  onClick={() => clearExplorationRelationQuery(session.id, { persistent: isPersistent })}
+                  type="button"
+                >
+                  Clear
+                </button>
+              ) : null}
+            </div>
+            <input
+              className={styles.input}
+              onChange={(event) =>
+                handleExplorationRelationQueryChange(session.id, event.target.value, { persistent: isPersistent })
+              }
+              placeholder="Show related state, workflow, persistence..."
+              value={relationQuery}
+            />
+            {relationQuery ? (
+              <div className={styles.explorationSuggestionList}>
+                {presentation.customMatches.length === 0 ? (
+                  <p className={styles.helperText}>No nearby concepts matched that relation yet.</p>
+                ) : (
+                  presentation.customMatches.map((node) => (
+                    <button
+                      className={styles.explorationSuggestion}
+                      key={node.id}
+                      onClick={() => handleExplorationSelection(session, [node.id], { persistent: isPersistent })}
+                      type="button"
+                    >
+                      <strong>{node.title}</strong>
+                      <span>{summarizeNote(node.description)}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : (
+              <p className={styles.helperText}>Type a relation or angle to surface a different branch of the architecture.</p>
+            )}
+          </div>
+        </aside>
+
+        <div className={styles.explorationCanvasStage}>
+          <CanvasBoard
+            document={presentation.displayDocument}
+            edgeNodeIds={presentation.visibleNodeIds}
+            onCreateNodeAt={(x, y) => {
+              startCanvasTransition(() => {
+                void handleCreateCanvasNodeAt(x, y);
+              });
+            }}
+            onDeleteNode={handleDeleteCanvasNode}
+            onMoveNodeEnd={(nodeId, x, y) => {
+              startCanvasTransition(() => {
+                void handlePersistCanvasNodePosition(nodeId, x, y);
+              });
+            }}
+            onOpenNode={openCanvasNode}
+            onPaneClick={
+              isPersistent
+                ? undefined
+                : () => {
+                    setNotesExploration(null);
+                    setSelectedCanvasNodeId(null);
+                    setSelectedCanvasNodeIds([]);
+                  }
+            }
+            onSelectNode={(nodeId) => handleExplorationSelection(session, [nodeId], { persistent: isPersistent })}
+            onSelectNodes={(nodeIds) => handleExplorationSelection(session, nodeIds, { persistent: isPersistent })}
+            selectedNodeIds={session.activeNodeId ? [session.activeNodeId] : []}
+          />
+        </div>
+      </div>
+    );
   }
 
   function renderNotesView() {
@@ -2201,10 +2593,13 @@ export default function Home() {
                 </button>
               </div>
             </div>
+          ) : notesExploration && notesExplorationPresentation.displayDocument ? (
+            renderExplorationSurface(notesExploration, notesExplorationPresentation)
           ) : (
             <CanvasBoard
               onDeleteNode={handleDeleteCanvasNode}
               document={canvasDocument}
+              edgeNodeIds={selectedCanvasNodeIds}
               onCreateNodeAt={(x, y) => {
                 startCanvasTransition(() => {
                   void handleCreateCanvasNodeAt(x, y);
@@ -2216,11 +2611,151 @@ export default function Home() {
                 });
               }}
               onOpenNode={openCanvasNode}
+              onPaneClick={() => {
+                setNotesExploration(null);
+              }}
               onSelectNode={(nodeId) => handleSelectCanvasNodes([nodeId])}
               onSelectNodes={handleSelectCanvasNodes}
               selectedNodeIds={selectedCanvasNodeIds}
             />
           )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderExplorationTab(session: ExplorationSession | null) {
+    if (!session || !activeExplorationPresentation.displayDocument) {
+      return <EmptyState message="This exploration is no longer available." />;
+    }
+
+    return (
+      <div className={styles.notesWorkspace}>
+        <div className={styles.notesConsoleShell}>
+          <div className={styles.notesConsoleDock}>
+            {isConsoleExpanded ? (
+              <div className={styles.notesConsolePanel}>
+                <div className={styles.notesConsoleMessages} ref={consoleMessagesRef}>
+                  {consoleMessages.length === 0 ? (
+                    <p className={styles.helperText}>Ask about the current exploration, its path, or the surrounding architecture.</p>
+                  ) : (
+                    consoleMessages.map((message) => (
+                      <article
+                        className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
+                        key={message.id}
+                      >
+                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
+                        {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                        <div className={styles.consoleMessageBody}>
+                          {renderConsoleMessageContent(
+                            message.content,
+                            message.role === "assistant" ? canvasDocument : null,
+                            openCanvasNode,
+                          )}
+                        </div>
+                        {pendingPlan?.messageId === message.id ? (
+                          <div className={styles.consoleMessageActions}>
+                            <button
+                              className={styles.secondaryButton}
+                              disabled={isBuilding}
+                              onClick={handleApprovePlan}
+                              type="button"
+                            >
+                              Approve
+                            </button>
+                          </div>
+                        ) : null}
+                      </article>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            <button
+              className={isConsoleExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
+              onClick={() => setIsConsoleExpanded((current) => !current)}
+              type="button"
+            >
+              <span className={styles.notesConsoleBarLabel}>Console</span>
+              <span className={styles.notesConsoleBarSummary}>{latestConsoleSummary}</span>
+              <span className={styles.notesConsoleBarAction}>{isConsoleExpanded ? "Hide" : "Show"}</span>
+            </button>
+
+            <label className={styles.consoleComposer}>
+              <textarea
+                className={styles.consoleComposerInput}
+                disabled={isBuilding || isPlanning}
+                onChange={(event) => setCodexPrompt(event.target.value)}
+                placeholder={isPlanMode ? "Describe what to plan in this project." : "Ask or build from this exploration."}
+                rows={3}
+                value={codexPrompt}
+              />
+              <div className={styles.consoleComposerActions}>
+                <div className={styles.consoleComposerLeft}>
+                  <button
+                    className={styles.commitButton}
+                    disabled={isCommitting || !commitStatus?.has_changes}
+                    onClick={handleCommitClick}
+                    title={
+                      !commitStatus?.is_git_repo
+                        ? "Repository is not a git repository"
+                        : !commitStatus?.has_changes
+                          ? "Nothing to commit"
+                          : commitStatus.suggested_message ?? "Create commit"
+                    }
+                    type="button"
+                  >
+                    Commit
+                  </button>
+                  <span className={styles.buildComposerMeta}>
+                    {visibleContextNodeIds.length
+                      ? `Using ${visibleContextNodeIds.length} focused/pinned notes`
+                      : "Using project context"}
+                  </span>
+                </div>
+                <div className={styles.consoleComposerRight}>
+                  <label className={styles.planModeToggle}>
+                    <input
+                      checked={isPlanMode}
+                      disabled={isBuilding || isPlanning}
+                      onChange={(event) => setIsPlanMode(event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Plan mode</span>
+                  </label>
+                  <button
+                    className={styles.primaryButton}
+                    disabled={isBuilding || isPlanning || codexPending || !activeRepoPath || !codexPrompt.trim()}
+                    onClick={handleSubmitArchitecturePrompt}
+                    type="button"
+                  >
+                    {isPlanning ? (
+                      <>
+                        <span aria-hidden="true" className={styles.buttonSpinner} />
+                        <span>Planning...</span>
+                      </>
+                    ) : isBuilding ? (
+                      <>
+                        <span aria-hidden="true" className={styles.buttonSpinner} />
+                        <span>Building...</span>
+                      </>
+                    ) : (
+                      isPlanMode ? "Plan" : "Build"
+                    )}
+                  </button>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div
+          className={`${styles.canvasFrame} ${
+            isConsoleExpanded ? styles.canvasFrameWithConsoleExpanded : styles.canvasFrameWithConsoleCollapsed
+          }`}
+        >
+          {renderExplorationSurface(session, activeExplorationPresentation, { persistent: true })}
         </div>
       </div>
     );
@@ -3174,6 +3709,9 @@ export default function Home() {
     if (activeTab?.type === "note") {
       return renderNoteTabView(activeTab.nodeId);
     }
+    if (activeTab?.type === "exploration") {
+      return renderExplorationTab(explorationTabs[activeTab.explorationId] ?? null);
+    }
 
     switch (activeView) {
       case "notes":
@@ -3270,7 +3808,9 @@ export default function Home() {
                 >
                   {tab.type === "view"
                     ? viewLabel(tab.view)
-                    : canvasDocument?.nodes.find((node) => node.id === tab.nodeId)?.title ?? "Note"}
+                    : tab.type === "note"
+                      ? canvasDocument?.nodes.find((node) => node.id === tab.nodeId)?.title ?? "Note"
+                      : explorationTabTitle(canvasDocument, explorationTabs[tab.explorationId] ?? null)}
                 </button>
                 {tab.id !== "view:notes" ? (
                   <button className={styles.documentTabClose} onClick={() => closeTab(tab.id)} type="button">
@@ -3533,6 +4073,333 @@ function buildNewCanvasNodeTags(symbol: SymbolRecord | null, treeNode: Structure
 
 function findCanvasNodeTitle(document: CanvasDocument | null, nodeId: string) {
   return document?.nodes.find((item) => item.id === nodeId)?.title ?? nodeId;
+}
+
+function explorationTabTitle(document: CanvasDocument | null, session: ExplorationSession | null) {
+  if (!session) {
+    return "Explore";
+  }
+  const rootTitle = findCanvasNodeTitle(document, session.rootNodeId);
+  const activeTitle = findCanvasNodeTitle(document, session.activeNodeId);
+  return rootTitle === activeTitle ? `Explore: ${rootTitle}` : `${rootTitle} -> ${activeTitle}`;
+}
+
+function createExplorationSession(nodeId: string): ExplorationSession {
+  return {
+    id: `explore-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    rootNodeId: nodeId,
+    activeNodeId: nodeId,
+    pathNodeIds: [nodeId],
+    relationQuery: "",
+  };
+}
+
+function normalizeExplorationSession(
+  session: ExplorationSession | null,
+  validNodeIds: Set<string>,
+): ExplorationSession | null {
+  if (!session) {
+    return null;
+  }
+
+  const pathNodeIds = uniqueNodeIds(session.pathNodeIds.filter((nodeId) => validNodeIds.has(nodeId)));
+  if (pathNodeIds.length === 0) {
+    return null;
+  }
+
+  const rootNodeId = validNodeIds.has(session.rootNodeId) ? session.rootNodeId : pathNodeIds[0];
+  const activeNodeId = validNodeIds.has(session.activeNodeId) ? session.activeNodeId : pathNodeIds.at(-1) ?? rootNodeId;
+
+  return {
+    ...session,
+    rootNodeId,
+    activeNodeId,
+    pathNodeIds,
+  };
+}
+
+function advanceExplorationSession(session: ExplorationSession, nextNodeId: string): ExplorationSession {
+  const existingIndex = session.pathNodeIds.indexOf(nextNodeId);
+  if (existingIndex !== -1) {
+    const nextPath = session.pathNodeIds.slice(0, existingIndex + 1);
+    if (
+      nextPath.length === session.pathNodeIds.length &&
+      session.activeNodeId === nextNodeId
+    ) {
+      return session;
+    }
+    return {
+      ...session,
+      activeNodeId: nextNodeId,
+      pathNodeIds: nextPath,
+    };
+  }
+
+  return {
+    ...session,
+    activeNodeId: nextNodeId,
+    pathNodeIds: [...session.pathNodeIds, nextNodeId],
+  };
+}
+
+function buildExplorationPresentation(
+  document: CanvasDocument | null,
+  session: ExplorationSession | null,
+): ExplorationPresentation {
+  if (!document || !session) {
+    return {
+      activeNode: null,
+      customMatches: [],
+      displayDocument: null,
+      pathNodes: [],
+      suggestedNodes: [],
+      visibleNodeIds: [],
+    };
+  }
+
+  const validNodeIds = new Set(document.nodes.map((node) => node.id));
+  const normalizedSession = normalizeExplorationSession(session, validNodeIds);
+  if (!normalizedSession) {
+    return {
+      activeNode: null,
+      customMatches: [],
+      displayDocument: null,
+      pathNodes: [],
+      suggestedNodes: [],
+      visibleNodeIds: [],
+    };
+  }
+
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node] as const));
+  const pathNodes = normalizedSession.pathNodeIds
+    .map((nodeId) => nodesById.get(nodeId) ?? null)
+    .filter((node): node is CanvasNode => Boolean(node));
+  const suggestedNodes = collectExplorationSuggestions(document, normalizedSession)
+    .map((nodeId) => nodesById.get(nodeId) ?? null)
+    .filter((node): node is CanvasNode => Boolean(node));
+  const customMatches = collectExplorationRelationMatches(document, normalizedSession)
+    .map((nodeId) => nodesById.get(nodeId) ?? null)
+    .filter((node): node is CanvasNode => Boolean(node));
+  const visibleNodeIds = uniqueNodeIds([
+    ...pathNodes.map((node) => node.id),
+    ...suggestedNodes.map((node) => node.id),
+    ...customMatches.map((node) => node.id),
+  ]);
+
+  return {
+    activeNode: nodesById.get(normalizedSession.activeNodeId) ?? null,
+    customMatches,
+    displayDocument: layoutExplorationDocument(document, normalizedSession, visibleNodeIds, suggestedNodes, customMatches),
+    pathNodes,
+    suggestedNodes,
+    visibleNodeIds,
+  };
+}
+
+function collectExplorationSuggestions(document: CanvasDocument, session: ExplorationSession) {
+  const pathIds = new Set(session.pathNodeIds);
+  const candidateScores = new Map<string, number>();
+  const activeNeighbors = getNeighborNodeIds(document, session.activeNodeId);
+
+  for (const nodeId of activeNeighbors) {
+    if (pathIds.has(nodeId)) {
+      continue;
+    }
+    candidateScores.set(nodeId, (candidateScores.get(nodeId) ?? 0) + 80);
+  }
+
+  for (const pathNodeId of session.pathNodeIds) {
+    for (const nodeId of getNeighborNodeIds(document, pathNodeId)) {
+      if (pathIds.has(nodeId)) {
+        continue;
+      }
+      candidateScores.set(nodeId, (candidateScores.get(nodeId) ?? 0) + 24);
+    }
+  }
+
+  for (const neighborId of activeNeighbors) {
+    for (const nodeId of getNeighborNodeIds(document, neighborId)) {
+      if (pathIds.has(nodeId) || nodeId === session.activeNodeId) {
+        continue;
+      }
+      candidateScores.set(nodeId, (candidateScores.get(nodeId) ?? 0) + 8);
+    }
+  }
+
+  return [...candidateScores.keys()]
+    .sort((leftId, rightId) => {
+      const leftNode = document.nodes.find((node) => node.id === leftId);
+      const rightNode = document.nodes.find((node) => node.id === rightId);
+      const leftScore = (candidateScores.get(leftId) ?? 0) + (leftNode ? scoreNote(document, leftNode, session.pathNodeIds) : 0);
+      const rightScore = (candidateScores.get(rightId) ?? 0) + (rightNode ? scoreNote(document, rightNode, session.pathNodeIds) : 0);
+      if (leftScore !== rightScore) {
+        return rightScore - leftScore;
+      }
+      return leftId.localeCompare(rightId);
+    })
+    .slice(0, 3);
+}
+
+function collectExplorationRelationMatches(document: CanvasDocument, session: ExplorationSession) {
+  const query = session.relationQuery.trim().toLowerCase();
+  if (!query) {
+    return [];
+  }
+
+  const queryTerms = query.split(/\s+/).filter(Boolean);
+  const pathIds = new Set(session.pathNodeIds);
+  const suggestedIds = new Set(collectExplorationSuggestions(document, session));
+  const candidateScores = new Map<string, number>();
+  const directNeighbors = new Set<string>();
+
+  for (const pathNodeId of session.pathNodeIds) {
+    for (const nodeId of getNeighborNodeIds(document, pathNodeId)) {
+      if (!pathIds.has(nodeId)) {
+        directNeighbors.add(nodeId);
+      }
+    }
+  }
+
+  const secondDegree = new Set<string>();
+  for (const nodeId of directNeighbors) {
+    for (const nextId of getNeighborNodeIds(document, nodeId)) {
+      if (!pathIds.has(nextId)) {
+        secondDegree.add(nextId);
+      }
+    }
+  }
+
+  const candidateIds = uniqueNodeIds([...directNeighbors, ...secondDegree]).filter((nodeId) => !pathIds.has(nodeId));
+
+  for (const candidateId of candidateIds) {
+    const candidateNode = document.nodes.find((node) => node.id === candidateId);
+    if (!candidateNode) {
+      continue;
+    }
+
+    let score = scoreTextMatch(queryTerms, [
+      candidateNode.title,
+      candidateNode.description,
+      candidateNode.tags.join(" "),
+      candidateNode.linked_files.join(" "),
+      candidateNode.linked_symbols.join(" "),
+    ]);
+
+    for (const edge of document.edges) {
+      const touchesCandidate = edge.source_node_id === candidateId || edge.target_node_id === candidateId;
+      const touchesPath = pathIds.has(edge.source_node_id) || pathIds.has(edge.target_node_id);
+      if (!touchesCandidate || !touchesPath) {
+        continue;
+      }
+      score += scoreTextMatch(queryTerms, [edge.label]) * 18;
+    }
+
+    if (directNeighbors.has(candidateId)) {
+      score += 10;
+    }
+
+    if (suggestedIds.has(candidateId)) {
+      score += 4;
+    }
+
+    if (score > 0) {
+      candidateScores.set(candidateId, score);
+    }
+  }
+
+  return [...candidateScores.keys()]
+    .sort((leftId, rightId) => {
+      const leftScore = candidateScores.get(leftId) ?? 0;
+      const rightScore = candidateScores.get(rightId) ?? 0;
+      if (leftScore !== rightScore) {
+        return rightScore - leftScore;
+      }
+      return leftId.localeCompare(rightId);
+    })
+    .slice(0, 6);
+}
+
+function layoutExplorationDocument(
+  document: CanvasDocument,
+  session: ExplorationSession,
+  visibleNodeIds: string[],
+  suggestedNodes: CanvasNode[],
+  customMatches: CanvasNode[],
+) {
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node] as const));
+  const positions = new Map<string, { x: number; y: number }>();
+  const pathY = 244;
+  const pathStartX = 84;
+  const pathStepX = 300;
+
+  session.pathNodeIds.forEach((nodeId, index) => {
+    positions.set(nodeId, { x: pathStartX + index * pathStepX, y: pathY });
+  });
+
+  const activeX = pathStartX + Math.max(session.pathNodeIds.length - 1, 0) * pathStepX;
+  const suggestionX = activeX + 336;
+  suggestedNodes.forEach((node, index) => {
+    positions.set(node.id, { x: suggestionX, y: 88 + index * 184 });
+  });
+
+  const customBaseY = suggestedNodes.length > 0 ? 88 + suggestedNodes.length * 184 + 44 : 88;
+  customMatches.forEach((node, index) => {
+    positions.set(node.id, { x: suggestionX, y: customBaseY + index * 184 });
+  });
+
+  const nodes = visibleNodeIds
+    .map((nodeId) => nodesById.get(nodeId) ?? null)
+    .filter((node): node is CanvasNode => Boolean(node))
+    .map((node) => {
+      const position = positions.get(node.id) ?? { x: 84, y: 88 };
+      return {
+        ...node,
+        x: position.x,
+        y: position.y,
+      };
+    });
+
+  const visibleNodeIdSet = new Set(visibleNodeIds);
+  const edges = document.edges.filter(
+    (edge) => visibleNodeIdSet.has(edge.source_node_id) && visibleNodeIdSet.has(edge.target_node_id),
+  );
+
+  return {
+    ...document,
+    nodes,
+    edges,
+  };
+}
+
+function getNeighborNodeIds(document: CanvasDocument, nodeId: string) {
+  const neighbors = new Set<string>();
+  for (const edge of document.edges) {
+    if (edge.source_node_id === nodeId) {
+      neighbors.add(edge.target_node_id);
+    }
+    if (edge.target_node_id === nodeId) {
+      neighbors.add(edge.source_node_id);
+    }
+  }
+  return [...neighbors];
+}
+
+function uniqueNodeIds(nodeIds: string[]) {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const nodeId of nodeIds) {
+    if (seen.has(nodeId)) {
+      continue;
+    }
+    seen.add(nodeId);
+    ordered.push(nodeId);
+  }
+  return ordered;
+}
+
+function scoreTextMatch(terms: string[], values: string[]) {
+  const haystack = values.join(" ").toLowerCase();
+  return terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
 }
 
 function buildSelectedNoteContext(document: CanvasDocument | null, focusNodeIds: string[]) {
