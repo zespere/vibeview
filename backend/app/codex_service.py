@@ -57,6 +57,8 @@ class CodexService:
         use_graph_context: bool,
         bypass_sandbox: bool | None,
         semantic_context: str | None,
+        model: str | None = None,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> CodexChangeResponse:
         if not self.is_available():
             raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
@@ -104,7 +106,7 @@ class CodexService:
             )
 
         bypass = settings.codex_bypass_sandbox_default if bypass_sandbox is None else bypass_sandbox
-        command = self._build_command(repo_dir, final_prompt, dry_run, bypass)
+        command = self._build_command(repo_dir, final_prompt, dry_run, bypass, model, reasoning_effort)
         logger.info("Starting Codex change run for %s", repo_path)
         result = subprocess.run(
             command,
@@ -144,6 +146,8 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        model: str | None = None,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> CodexChangeResponse:
         implementation_prompt = (
             "Implement the user's request directly in the repository.\n"
@@ -164,6 +168,8 @@ class CodexService:
                 semantic_context,
                 conversation_context,
             ),
+            model=model,
+            reasoning_effort=reasoning_effort,
         )
 
     def plan_project(
@@ -172,6 +178,8 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        model: str | None = None,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> tuple[str, str]:
         if not self.is_available():
             raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
@@ -194,7 +202,7 @@ class CodexService:
         final_prompt = (
             f"{context_prefix}\n\nTask:\n{planning_prompt}" if context_prefix else planning_prompt
         )
-        command = self._build_command(repo_dir, final_prompt, True, True)
+        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort)
         try:
             result = subprocess.run(
                 command,
@@ -221,6 +229,8 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        model: str | None = None,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> Literal["ask", "build"]:
         fallback = self._fallback_prompt_mode(prompt)
         if not self.is_available():
@@ -241,7 +251,7 @@ class CodexService:
         final_prompt = (
             f"{context_prefix}\n\nTask:\n{classifier_prompt}" if context_prefix else classifier_prompt
         )
-        command = self._build_command(repo_dir, final_prompt, True, True)
+        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort)
         try:
             result = subprocess.run(
                 command,
@@ -269,6 +279,8 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        model: str | None = None,
+        reasoning_effort: Literal["low", "medium", "high"] | None = None,
     ) -> tuple[str, str]:
         if not self.is_available():
             raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
@@ -285,7 +297,7 @@ class CodexService:
         final_prompt = (
             f"{context_prefix}\n\nTask:\n{question_prompt}" if context_prefix else question_prompt
         )
-        command = self._build_command(repo_dir, final_prompt, True, True)
+        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort)
         result = subprocess.run(command, capture_output=True, text=True, check=False)
         events = self._parse_jsonl_output(result.stdout)
         answer_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
@@ -518,6 +530,8 @@ class CodexService:
         prompt: str,
         dry_run: bool,
         bypass_sandbox: bool,
+        model: str | None = None,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> list[str]:
         assert settings.codex_binary is not None
         command = [
@@ -528,8 +542,11 @@ class CodexService:
             "--skip-git-repo-check",
             "--json",
         ]
-        if settings.codex_model:
-            command.extend(["-m", settings.codex_model])
+        effective_model = model or settings.codex_model
+        if effective_model:
+            command.extend(["-m", effective_model])
+        if reasoning_effort:
+            command.extend(["-c", f'reasoning_effort="{reasoning_effort}"'])
         if bypass_sandbox:
             command.append("--dangerously-bypass-approvals-and-sandbox")
         else:

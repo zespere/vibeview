@@ -515,6 +515,8 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     request.prompt,
                     request.semantic_context,
                     conversation_context=request.conversation_context,
+                    model=request.model,
+                    reasoning_effort=request.reasoning_effort,
                 )
 
             if resolved_mode == "ask":
@@ -524,6 +526,8 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     request.prompt,
                     request.semantic_context,
                     conversation_context=request.conversation_context,
+                    model=request.model,
+                    reasoning_effort=request.reasoning_effort,
                 )
                 for chunk in stream_text_chunks(answer_text):
                     yield chunk
@@ -544,6 +548,8 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     prompt=request.prompt,
                     semantic_context=request.semantic_context,
                     conversation_context=request.conversation_context,
+                    model=request.model,
+                    reasoning_effort=request.reasoning_effort,
                 )
                 for chunk in stream_text_chunks(plan_text):
                     yield chunk
@@ -563,6 +569,8 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                 prompt=request.prompt,
                 semantic_context=request.semantic_context,
                 conversation_context=request.conversation_context,
+                model=request.model,
+                reasoning_effort=request.reasoning_effort,
             )
             yield emit({"type": "phase", "phase": "updating_notes", "label": "Updating notes..."})
             generated_nodes, generated_edges, note_summary = codex_service.generate_architecture_notes(

@@ -453,6 +453,8 @@ export async function streamProjectRun(
   prompt: string,
   semanticContext: string | undefined,
   conversationContext: string | undefined,
+  model: string | undefined,
+  reasoningEffort: "low" | "medium" | "high" | "xhigh" | undefined,
   onEvent: (event: ProjectRunStreamEvent) => void,
 ) {
   const response = await fetch(`${API_BASE_URL}/project/run-stream`, {
@@ -464,6 +466,8 @@ export async function streamProjectRun(
       prompt,
       semantic_context: semanticContext,
       conversation_context: conversationContext,
+      model,
+      reasoning_effort: reasoningEffort,
     }),
   });
 

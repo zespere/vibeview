@@ -616,10 +616,10 @@
   width: min(980px, 100%);
   flex-direction: column;
   gap: 0;
-  border: 1px solid rgba(212, 200, 186, 0.92);
-  border-radius: 18px;
-  background: rgba(255, 253, 249, 0.92);
-  box-shadow: none;
+  border: 1px solid rgba(214, 204, 191, 0.76);
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.95);
+  box-shadow: 0 10px 22px rgba(75, 59, 42, 0.035);
   overflow: hidden;
   pointer-events: auto;
 }
@@ -859,20 +859,18 @@
   cursor: pointer;
   border: 0;
   border-radius: 0;
-  padding: 12px 14px 10px;
+  padding: 11px 16px 9px;
   pointer-events: auto;
 }
 
 .notesConsoleBarExpanded {
-  border-bottom: 1px solid #e2d8cb;
+  border-bottom: 1px solid rgba(228, 219, 208, 0.7);
 }
 
 .notesConsoleBarLabel {
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #7a6f60;
+  font-weight: 600;
+  color: #746858;
 }
 
 .notesConsoleBarSummary {
@@ -880,12 +878,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  color: #3b3026;
+  color: #45382c;
 }
 
 .notesConsoleBarAction {
   font-size: 12px;
-  color: #7a6f60;
+  color: #817464;
 }
 
 .notesConsolePanel {
@@ -976,7 +974,6 @@
 .consoleComposer {
   display: block;
   border: 0;
-  border-top: 1px solid #e2d8cb;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -994,17 +991,18 @@
   box-shadow: none;
   color: #241d17;
   font: inherit;
-  line-height: 1.35;
-  min-height: 28px;
-  max-height: 128px;
-  padding: 14px 18px 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 62px;
+  max-height: 148px;
+  padding: 15px 20px 12px;
   border-radius: 0;
   overflow-y: auto;
   resize: none;
 }
 
 .consoleComposerInput::placeholder {
-  color: #817261;
+  color: #7a6d5d;
 }
 
 .consoleComposerInput:focus {
@@ -1015,17 +1013,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
   margin-top: 0;
-  border-top: 1px solid #e2d8cb;
-  padding: 10px 18px 12px;
+  border-top: 0;
+  padding: 6px 16px 14px;
 }
 
 .consoleComposerLeft {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .consoleComposerRight {
@@ -1035,26 +1034,112 @@
   flex: 0 0 auto;
 }
 
-.consoleComposerHint {
-  font-size: 12px;
-  color: #6c6257;
+.consoleControlCluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  border-right: 0;
+  padding-right: 0;
+}
+
+.consoleInlineControl {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0;
+}
+
+.consoleInlineControl + .consoleInlineControl {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.consoleInlineSelect {
+  border: 1px solid rgba(222, 212, 200, 0.92);
+  background: rgba(255, 253, 249, 0.82);
+  color: #4a3d31;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  min-width: 0;
+  min-height: 38px;
+  border-radius: 11px;
+}
+
+.consoleInlineSelect:focus {
+  outline: none;
+  border-color: #bf9e78;
+  background: #fffdfa;
+}
+
+.consoleInlineSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0 36px 0 12px;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #8b7a67 50%),
+    linear-gradient(135deg, #8b7a67 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 16px,
+    calc(100% - 13px) 16px;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.consoleInlineControl:first-child .consoleInlineSelect {
+  min-width: 164px;
+}
+
+.consoleModeSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+  min-width: 0;
+  border: 1px solid rgba(222, 212, 200, 0.92);
+  border-radius: 11px;
+  background: rgba(255, 253, 249, 0.82);
+  padding: 3px;
+}
+
+.consoleModeButton,
+.consoleModeButtonActive {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6d6153;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.consoleModeButtonActive {
+  background: #efe1d0;
+  color: #2d241d;
 }
 
 .commitButton {
-  min-height: 30px;
-  border: 1px solid #d4c7b8;
-  border-radius: 7px;
-  background: #f4ede2;
+  min-height: 36px;
+  border: 1px solid rgba(222, 212, 200, 0.92);
+  border-radius: 10px;
+  background: rgba(255, 253, 249, 0.82);
   color: #54483b;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 0 14px;
   cursor: pointer;
 }
 
 .commitButton:hover:not(:disabled) {
-  background: #efe6d8;
+  background: rgba(244, 236, 225, 0.98);
   color: #2f261f;
 }
 

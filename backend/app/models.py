@@ -370,6 +370,8 @@ class ProjectRunStreamRequest(BaseModel):
     mode: Literal["ask", "plan", "build", "auto"]
     semantic_context: str | None = None
     conversation_context: str | None = None
+    model: str | None = None
+    reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
 
 
 class CanvasNode(BaseModel):

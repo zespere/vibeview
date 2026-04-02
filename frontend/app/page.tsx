@@ -99,6 +99,19 @@ interface ExplorationPresentation {
   visibleNodeIds: string[];
 }
 
+type ComposerRunMode = "auto" | "build" | "plan";
+type ComposerReasoningEffort = "low" | "medium" | "high" | "xhigh";
+
+const GPT_MODEL_OPTIONS = [
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.3-codex",
+  "gpt-5.2",
+  "gpt-5.2-codex",
+  "gpt-5.1-codex-max",
+  "gpt-5.1-codex-mini",
+];
+
 export default function Home() {
   const [isRailExpanded, setIsRailExpanded] = useState(true);
   const [railWidth, setRailWidth] = useState(292);
@@ -121,6 +134,9 @@ export default function Home() {
   const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [codexPrompt, setCodexPrompt] = useState("");
+  const [composerModel, setComposerModel] = useState("gpt-5.4");
+  const [composerReasoning, setComposerReasoning] = useState<ComposerReasoningEffort>("medium");
+  const [composerMode, setComposerMode] = useState<ComposerRunMode>("auto");
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isPlanning, setIsPlanning] = useState(false);
@@ -256,6 +272,10 @@ export default function Home() {
     }
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
   }, [activeConversationSummary, composerStatus, consoleMessages, isAnswering, isBuilding, isPlanning]);
+  const availableComposerModels = useMemo(() => {
+    const items = [status?.codex_model, composerModel, ...GPT_MODEL_OPTIONS];
+    return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
+  }, [composerModel, status?.codex_model]);
   const notesExplorationPresentation = useMemo(
     () =>
       buildExplorationPresentation(
@@ -724,6 +744,12 @@ export default function Home() {
   }, [codexPrompt]);
 
   useEffect(() => {
+    if (status?.codex_model) {
+      setComposerModel((current) => (current === "gpt-5.4" ? status.codex_model! : current));
+    }
+  }, [status?.codex_model]);
+
+  useEffect(() => {
     explorationSuggestionStatesRef.current = explorationSuggestionStates;
   }, [explorationSuggestionStates]);
 
@@ -1121,6 +1147,8 @@ export default function Home() {
         prompt,
         buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
+        composerModel,
+        composerReasoning,
         (event) => {
           handleProjectRunEvent(event, {
             assistantId,
@@ -1256,6 +1284,8 @@ export default function Home() {
         prompt,
         buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
+        composerModel,
+        composerReasoning,
         (event) => {
           handleProjectRunEvent(event, {
             assistantId,
@@ -1409,6 +1439,8 @@ export default function Home() {
         prompt,
         buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
+        composerModel,
+        composerReasoning,
         (event) => {
           handleProjectRunEvent(event, {
             assistantId,
@@ -1535,6 +1567,8 @@ export default function Home() {
         ].join("\n\n"),
         buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
+        composerModel,
+        composerReasoning,
         (event) => {
           handleProjectRunEvent(event, {
             assistantId,
@@ -2526,6 +2560,14 @@ export default function Home() {
     }
 
     startCodexTransition(() => {
+      if (composerMode === "build") {
+        void submitBuildPrompt(value, { preserveActiveView: true });
+        return;
+      }
+      if (composerMode === "plan") {
+        void submitPlanPrompt(value, { preserveActiveView: true });
+        return;
+      }
       void submitAutoPrompt(value, { preserveActiveView: true });
     });
   }
@@ -3189,11 +3231,59 @@ export default function Home() {
               onKeyDown={handleComposerKeyDown}
               placeholder="Ask about the project, describe a change, or type / for commands."
               ref={composerInputRef}
-              rows={1}
+              rows={2}
               value={codexPrompt}
             />
             <div className={styles.consoleComposerActions}>
               <div className={styles.consoleComposerLeft}>
+                <div className={styles.consoleControlCluster}>
+                  <label className={styles.consoleInlineControl}>
+                    <select
+                      aria-label="Model"
+                      className={styles.consoleInlineSelect}
+                      disabled={isComposerBusy}
+                      onChange={(event) => setComposerModel(event.target.value)}
+                      value={composerModel}
+                    >
+                      {availableComposerModels.map((model) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.consoleInlineControl}>
+                    <select
+                      aria-label="Reasoning"
+                      className={styles.consoleInlineSelect}
+                      disabled={isComposerBusy}
+                      onChange={(event) => setComposerReasoning(event.target.value as ComposerReasoningEffort)}
+                      value={composerReasoning}
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="xhigh">Extra high</option>
+                    </select>
+                  </label>
+                </div>
+                <div aria-label="Run mode" className={styles.consoleModeSwitch} role="tablist">
+                  {(["auto", "build", "plan"] as const).map((mode) => (
+                    <button
+                      aria-selected={composerMode === mode}
+                      className={composerMode === mode ? styles.consoleModeButtonActive : styles.consoleModeButton}
+                      disabled={isComposerBusy}
+                      key={mode}
+                      onClick={() => setComposerMode(mode)}
+                      role="tab"
+                      type="button"
+                    >
+                      {mode === "auto" ? "Auto" : mode === "build" ? "Build" : "Plan"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className={styles.consoleComposerRight}>
                 <button
                   className={styles.commitButton}
                   disabled={isCommitting || !commitStatus?.has_changes}
@@ -3209,9 +3299,6 @@ export default function Home() {
                 >
                   Commit
                 </button>
-                <span className={styles.consoleComposerHint}>Type / for commands</span>
-              </div>
-              <div className={styles.consoleComposerRight}>
                 <button
                   className={styles.primaryButton}
                   disabled={
@@ -3238,7 +3325,15 @@ export default function Home() {
                       <span>Working...</span>
                     </>
                   ) : (
-                    <span>{isSlashCommandMode ? "Run" : "Send"}</span>
+                    <span>
+                      {isSlashCommandMode
+                        ? "Run"
+                        : composerMode === "build"
+                          ? "Build"
+                          : composerMode === "plan"
+                            ? "Plan"
+                            : "Send"}
+                    </span>
                   )}
                 </button>
               </div>
@@ -4587,7 +4682,7 @@ function resizeComposerInput(element: HTMLTextAreaElement | null) {
   }
 
   element.style.height = "0px";
-  const nextHeight = Math.min(Math.max(element.scrollHeight, 28), 128);
+  const nextHeight = Math.min(Math.max(element.scrollHeight, 54), 148);
   element.style.height = `${nextHeight}px`;
 }
 
