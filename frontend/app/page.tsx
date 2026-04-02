@@ -101,6 +101,8 @@ interface ExplorationPresentation {
 
 type ComposerRunMode = "auto" | "build" | "plan";
 type ComposerReasoningEffort = "low" | "medium" | "high" | "xhigh";
+type DockVisibilityState = "hidden" | "visible";
+type ConsoleVisibilityState = "collapsed" | "expanded";
 
 const GPT_MODEL_OPTIONS = [
   "gpt-5.4",
@@ -144,7 +146,8 @@ export default function Home() {
   const [isCommitting, setIsCommitting] = useState(false);
   const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
-  const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
+  const [dockVisibility, setDockVisibility] = useState<DockVisibilityState>("visible");
+  const [consoleVisibility, setConsoleVisibility] = useState<ConsoleVisibilityState>("collapsed");
   const [isProjectTrayExpanded, setIsProjectTrayExpanded] = useState(false);
   const [isNoteSidebarCollapsed, setIsNoteSidebarCollapsed] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
@@ -199,6 +202,21 @@ export default function Home() {
   const transientNotesExploration =
     activeTab?.type === "view" && activeTab.view === "notes" ? notesExploration : null;
   const currentExplorationSession = activeExplorationSession ?? transientNotesExploration;
+
+  useEffect(() => {
+    if (activeTab?.type === "note") {
+      setDockVisibility("hidden");
+      setConsoleVisibility("collapsed");
+      return;
+    }
+    if (activeView === "project") {
+      setDockVisibility("hidden");
+      setConsoleVisibility("collapsed");
+      return;
+    }
+    setDockVisibility("visible");
+    setConsoleVisibility("collapsed");
+  }, [activeTab?.type, activeView]);
 
   const openCanvasNodes = useMemo(() => {
     if (!canvasDocument) {
@@ -731,7 +749,8 @@ export default function Home() {
   }, [selectedCanvasNode]);
 
   useEffect(() => {
-    if (!isConsoleExpanded) {
+    const isAnyDockExpanded = dockVisibility === "visible" && consoleVisibility === "expanded";
+    if (!isAnyDockExpanded) {
       return;
     }
     const container = consoleMessagesRef.current;
@@ -739,7 +758,7 @@ export default function Home() {
       return;
     }
     container.scrollTop = container.scrollHeight;
-  }, [consoleMessages, isConsoleExpanded]);
+  }, [consoleMessages, consoleVisibility, dockVisibility]);
 
   useEffect(() => {
     resizeComposerInput(composerInputRef.current);
@@ -794,7 +813,8 @@ export default function Home() {
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setIsConsoleExpanded(true);
+        setDockVisibility("visible");
+        setConsoleVisibility("expanded");
         window.setTimeout(() => {
           composerInputRef.current?.focus();
           composerInputRef.current?.setSelectionRange(
@@ -813,7 +833,8 @@ export default function Home() {
         !isTypingIntoField
       ) {
         event.preventDefault();
-        setIsConsoleExpanded(true);
+        setDockVisibility("visible");
+        setConsoleVisibility("expanded");
         setCodexPrompt((current) => (current.trim() ? current : "/"));
         window.setTimeout(() => {
           composerInputRef.current?.focus();
@@ -868,7 +889,7 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTab, canvasDocument, codexPrompt, notesExploration]);
+  }, [activeTab, activeView, canvasDocument, codexPrompt, notesExploration]);
 
   useEffect(() => {
     setCommandSelectedIndex(0);
@@ -876,7 +897,8 @@ export default function Home() {
 
   useEffect(() => {
     if (isSlashCommandMode) {
-      setIsConsoleExpanded(true);
+      setDockVisibility("visible");
+      setConsoleVisibility("expanded");
     }
   }, [isSlashCommandMode]);
 
@@ -1434,7 +1456,8 @@ export default function Home() {
     }
     setIsPlanning(true);
     if (promptValue === codexPrompt.trim()) {
-      setIsConsoleExpanded(true);
+      setDockVisibility("visible");
+      setConsoleVisibility("expanded");
     }
     let ensuredConversationId: string | null = null;
 
@@ -2294,7 +2317,8 @@ export default function Home() {
           group: "execute",
           run: () => {
             setCodexPrompt("");
-            setIsConsoleExpanded(true);
+            setDockVisibility("visible");
+            setConsoleVisibility("expanded");
             startCodexTransition(() => {
               void submitBuildPrompt(buildPrompt, { preserveActiveView: true });
             });
@@ -2312,7 +2336,8 @@ export default function Home() {
           group: "execute",
           run: () => {
             setCodexPrompt("");
-            setIsConsoleExpanded(true);
+            setDockVisibility("visible");
+            setConsoleVisibility("expanded");
             startCodexTransition(() => {
               void submitPlanPrompt(planPrompt, { preserveActiveView: true });
             });
@@ -2559,7 +2584,8 @@ export default function Home() {
   })();
 
   useEffect(() => {
-    if (!isSlashCommandMode || !isConsoleExpanded || commandResults.length === 0) {
+    const isAnyDockExpanded = dockVisibility === "visible" && consoleVisibility === "expanded";
+    if (!isSlashCommandMode || !isAnyDockExpanded || commandResults.length === 0) {
       return;
     }
 
@@ -2571,7 +2597,7 @@ export default function Home() {
 
     const node = commandResultRefs.current[selectedResult.id];
     node?.scrollIntoView({ block: "nearest" });
-  }, [commandResults, commandSelectedIndex, isConsoleExpanded, isSlashCommandMode]);
+  }, [commandResults, commandSelectedIndex, consoleVisibility, dockVisibility, isSlashCommandMode]);
 
   function handleSubmitOmnibox() {
     const value = codexPrompt.trim();
@@ -2579,7 +2605,8 @@ export default function Home() {
       return;
     }
 
-    setIsConsoleExpanded(true);
+    setDockVisibility("visible");
+    setConsoleVisibility("expanded");
 
     if (isSlashCommandMode) {
       const selectedResult =
@@ -2604,18 +2631,28 @@ export default function Home() {
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    const collapseComposer = () => {
+      if (consoleVisibility === "expanded") {
+        setConsoleVisibility("collapsed");
+        return;
+      }
+      if (dockVisibility === "visible") {
+        setDockVisibility("hidden");
+      }
+    };
+
     if (event.key === "Escape") {
       if (codexPrompt.trim() === "/") {
         event.preventDefault();
         setCodexPrompt("");
-        setIsConsoleExpanded(false);
+        collapseComposer();
         event.currentTarget.blur();
         return;
       }
 
       if (!codexPrompt.trim()) {
         event.preventDefault();
-        setIsConsoleExpanded(false);
+        collapseComposer();
         event.currentTarget.blur();
         return;
       }
@@ -3208,11 +3245,34 @@ export default function Home() {
   function renderUnifiedDock(mode: "floating" | "embedded" = "floating") {
     const selectedCommandResult =
       commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? null;
+    const isEmbedded = mode === "embedded";
+    const isDockHidden = dockVisibility === "hidden";
+    const isDockExpanded = consoleVisibility === "expanded";
+
+    if (isDockHidden) {
+      return (
+        <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell}>
+          <div className={styles.notesConsoleHiddenRail}>
+            <button
+              className={styles.notesConsoleHiddenHandle}
+              onClick={() => {
+                setDockVisibility("visible");
+                setConsoleVisibility("collapsed");
+              }}
+              type="button"
+            >
+              <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
+              <span className={styles.notesConsoleHiddenMeta}>Show</span>
+            </button>
+          </div>
+        </div>
+      );
+    }
 
     return (
-      <div className={mode === "embedded" ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell}>
-        <div className={mode === "embedded" ? styles.notesConsoleDockEmbedded : styles.notesConsoleDock}>
-          {isConsoleExpanded ? (
+      <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell}>
+        <div className={isEmbedded ? styles.notesConsoleDockEmbedded : styles.notesConsoleDock}>
+          {isDockExpanded ? (
             <div className={styles.notesConsolePanel}>
               {isSlashCommandMode ? (
                 <div className={styles.commandResults}>
@@ -3275,15 +3335,25 @@ export default function Home() {
           ) : null}
 
           <button
-            className={isConsoleExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
-            onClick={() => setIsConsoleExpanded((current) => !current)}
+            className={isDockExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
+            onClick={() => setConsoleVisibility((current) => (current === "expanded" ? "collapsed" : "expanded"))}
             type="button"
           >
             <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
             <span className={styles.notesConsoleBarSummary}>
               {isSlashCommandMode && selectedCommandResult ? selectedCommandResult.title : latestConsoleSummary}
             </span>
-            <span className={styles.notesConsoleBarAction}>{isConsoleExpanded ? "Hide" : "Show"}</span>
+            <button
+              className={styles.notesConsoleBarActionButton}
+              onClick={(event) => {
+                event.stopPropagation();
+                setConsoleVisibility("collapsed");
+                setDockVisibility("hidden");
+              }}
+              type="button"
+            >
+              Hide
+            </button>
           </button>
 
           <label className={styles.consoleComposer}>
@@ -3680,7 +3750,7 @@ export default function Home() {
               activeTab?.type === "exploration" || (activeTab?.type === "view" && activeView === "notes")
                 ? styles.workspaceStageFlush
                 : styles.workspaceStage,
-              isConsoleExpanded ? styles.workspaceStageWithDockExpanded : styles.workspaceStageWithDockCollapsed,
+              dockVisibility === "visible" ? styles.workspaceStageWithDockExpanded : styles.workspaceStageWithDockCollapsed,
             ].join(" ")}
           >
             {renderActiveView()}
