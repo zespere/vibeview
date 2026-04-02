@@ -2577,6 +2577,41 @@ export default function Home() {
   }
 
   async function handleDeleteCanvasNode(nodeId: string) {
+    const branchId = parseBranchSummaryNodeId(nodeId);
+    if (branchId) {
+      setExplorationBranches((current) => {
+        if (!current[branchId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[branchId];
+        return next;
+      });
+      setExplorationTabs((current) => {
+        if (!current[branchId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[branchId];
+        return next;
+      });
+      setExplorationSuggestionStates((current) => {
+        if (!current[branchId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[branchId];
+        return next;
+      });
+      setOpenTabs((current) => current.filter((tab) => !(tab.type === "exploration" && tab.explorationId === branchId)));
+      setNotesExploration((current) => (current?.id === branchId ? null : current));
+      setSelectedCanvasNodeId((current) => (current === nodeId ? null : current));
+      setSelectedCanvasNodeIds((current) => current.filter((item) => item !== nodeId));
+      setExpandedCanvasNodeId((current) => (current === nodeId ? null : current));
+      setActiveTabId((current) => (current === `explore:${branchId}` ? "view:notes" : current));
+      return;
+    }
+
     startCanvasTransition(() => {
       void (async () => {
         try {
