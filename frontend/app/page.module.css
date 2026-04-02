@@ -2063,14 +2063,17 @@
 }
 
 .canvasNodeCompact {
-  height: 148px;
-  padding: 12px;
+  width: 164px;
+  height: 54px;
+  justify-content: center;
+  padding: 8px 10px;
 }
 
 .canvasNodeMinimal {
-  height: 148px;
-  padding: 12px;
-  justify-content: flex-start;
+  width: 164px;
+  height: 54px;
+  justify-content: center;
+  padding: 8px 10px;
 }
 
 .canvasNodeExpanded.canvasNodeCompact,
@@ -2166,16 +2169,41 @@
   font-size: 15px;
   line-height: 1.35;
   color: #241d17;
+  word-break: break-word;
 }
 
 .canvasNodeCompact .canvasNodeTitle,
 .canvasNodeMinimal .canvasNodeTitle {
   margin-top: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .canvasNodeMinimal .canvasNodeTitle {
+  -webkit-line-clamp: 2;
   font-size: 14px;
-  line-height: 1.25;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.canvasNodeCompact .canvasNodeHeader,
+.canvasNodeCompact .canvasNodeActions,
+.canvasNodeMinimal .canvasNodeHeader,
+.canvasNodeMinimal .canvasNodeActions {
+  display: none;
+}
+
+.canvasNodeCompact .canvasSuggestionLabel,
+.canvasNodeMinimal .canvasSuggestionLabel {
+  display: none;
+}
+
+.canvasNodeCompact .canvasNodeTitle {
+  -webkit-line-clamp: 2;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .canvasNodeDescription,

@@ -132,10 +132,10 @@ export function CanvasBoard({
   }, [contextMenu]);
 
   const detailLevel: NoteNodeData["detailLevel"] = useMemo(() => {
-    if (zoom < 0.68) {
+    if (zoom < 0.58) {
       return "minimal";
     }
-    if (zoom < 0.95) {
+    if (zoom < 0.9) {
       return "compact";
     }
     return "full";
@@ -537,6 +537,9 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
               {canOpenInTab ? (
                 <button
                   className={styles.canvasNodeAction}
+                  onDoubleClick={stopInteraction}
+                  onMouseDown={stopInteraction}
+                  onPointerDown={stopInteraction}
                   onClick={(event) => {
                     stopInteraction(event);
                     onOpenNode(node.id);
@@ -550,6 +553,9 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
                 isExpanded ? (
                   <button
                     className={styles.canvasNodeAction}
+                    onDoubleClick={stopInteraction}
+                    onMouseDown={stopInteraction}
+                    onPointerDown={stopInteraction}
                     onClick={(event) => {
                       stopInteraction(event);
                       onResetNodeSize(node.id);
@@ -561,6 +567,9 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
                 ) : (
                   <button
                     className={styles.canvasNodeAction}
+                    onDoubleClick={stopInteraction}
+                    onMouseDown={stopInteraction}
+                    onPointerDown={stopInteraction}
                     onClick={(event) => {
                       stopInteraction(event);
                       onToggleExpandNode(node.id);
@@ -623,6 +632,8 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
                         }}
                         onClick={stopInteraction}
                         onDoubleClick={stopInteraction}
+                        onMouseDown={stopInteraction}
+                        onPointerDown={stopInteraction}
                         placeholder="e.g. persistence, UI state, side effects"
                         value={explorationControls.relationQuery}
                       />
@@ -631,6 +642,9 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
                       <button
                         className={styles.canvasNodeActionPrimary}
                         disabled={!explorationControls.relationQuery.trim()}
+                        onDoubleClick={stopInteraction}
+                        onMouseDown={stopInteraction}
+                        onPointerDown={stopInteraction}
                         onClick={(event) => {
                           stopInteraction(event);
                           explorationControls.onRelationSubmit();
@@ -642,6 +656,9 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
                       {!explorationControls.persistent && explorationControls.onReturnToOverview ? (
                         <button
                           className={styles.canvasNodeAction}
+                          onDoubleClick={stopInteraction}
+                          onMouseDown={stopInteraction}
+                          onPointerDown={stopInteraction}
                           onClick={(event) => {
                             stopInteraction(event);
                             explorationControls.onReturnToOverview?.();

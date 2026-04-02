@@ -312,45 +312,37 @@ export default function Home() {
     () => buildExplorationContextDocument(canvasDocument, currentExplorationSession),
     [canvasDocument, currentExplorationSession],
   );
-  const notesExplorationControls = useMemo(
-    () =>
-      notesExploration
-        ? {
-            activeNodeId: notesExploration.activeNodeId,
-            pathTitles: notesExplorationPresentation.pathNodes.map((node) => node.title),
-            relationQuery: notesExploration.relationQuery,
-            persistent: false,
-            onRelationQueryChange: (value: string) =>
-              handleExplorationRelationQueryChange(notesExploration.id, value),
-            onRelationSubmit: () => {
-              void materializeRelationQuery(notesExploration, notesExploration.relationQuery);
-            },
-            onReturnToOverview: collapseNotesExploration,
-          }
-        : null,
-    [notesExploration, notesExplorationPresentation.pathNodes],
-  );
-  const activeExplorationControls = useMemo(
-    () =>
-      activeExplorationSession
-        ? {
-            activeNodeId: activeExplorationSession.activeNodeId,
-            pathTitles: activeExplorationPresentation.pathNodes.map((node) => node.title),
-            relationQuery: activeExplorationSession.relationQuery,
-            persistent: true,
-            onRelationQueryChange: (value: string) =>
-              handleExplorationRelationQueryChange(activeExplorationSession.id, value, { persistent: true }),
-            onRelationSubmit: () => {
-              void materializeRelationQuery(
-                activeExplorationSession,
-                activeExplorationSession.relationQuery,
-                { persistent: true },
-              );
-            },
-          }
-        : null,
-    [activeExplorationPresentation.pathNodes, activeExplorationSession],
-  );
+  const notesExplorationControls = notesExploration
+    ? {
+        activeNodeId: notesExploration.activeNodeId,
+        pathTitles: notesExplorationPresentation.pathNodes.map((node) => node.title),
+        relationQuery: notesExploration.relationQuery,
+        persistent: false as const,
+        onRelationQueryChange: (value: string) =>
+          handleExplorationRelationQueryChange(notesExploration.id, value),
+        onRelationSubmit: () => {
+          void materializeRelationQuery(notesExploration, notesExploration.relationQuery);
+        },
+        onReturnToOverview: collapseNotesExploration,
+      }
+    : null;
+  const activeExplorationControls = activeExplorationSession
+    ? {
+        activeNodeId: activeExplorationSession.activeNodeId,
+        pathTitles: activeExplorationPresentation.pathNodes.map((node) => node.title),
+        relationQuery: activeExplorationSession.relationQuery,
+        persistent: true as const,
+        onRelationQueryChange: (value: string) =>
+          handleExplorationRelationQueryChange(activeExplorationSession.id, value, { persistent: true }),
+        onRelationSubmit: () => {
+          void materializeRelationQuery(
+            activeExplorationSession,
+            activeExplorationSession.relationQuery,
+            { persistent: true },
+          );
+        },
+      }
+    : null;
 
   useEffect(() => {
     expectedRepoPathRef.current = activeRepoPath;
@@ -358,16 +350,59 @@ export default function Home() {
 
   useEffect(() => {
     startStatusTransition(() => {
-      void refreshStatus();
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const nextStatus = await fetchStatus();
+          setStatus(nextStatus);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
     });
     startProjectTransition(() => {
-      void refreshProject();
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await fetchProject();
+          setProject(response.project);
+          if (response.project.repo_path) {
+            try {
+              const commitResponse = await fetchCommitStatus(response.project.repo_path);
+              setCommitStatus(commitResponse);
+            } catch (error) {
+              setCommitStatus(null);
+              setErrorMessage(getErrorMessage(error));
+            }
+          } else {
+            setCommitStatus(null);
+          }
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
     });
     startProjectTransition(() => {
-      void refreshProjectsTree();
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await fetchProjectsTree();
+          setProjectsTree(response.projects);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
     });
     startCanvasTransition(() => {
-      void refreshCanvas();
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await fetchCanvas();
+          setCanvasDocument(response.document);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
     });
   }, []);
 
@@ -419,17 +454,70 @@ export default function Home() {
       setExplorationSuggestionStates({});
       return;
     }
+    const repoPathValue = project.repo_path;
     startAgentsTransition(() => {
-      void refreshAgentsDocument(project.repo_path);
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await fetchProjectAgents(repoPathValue || undefined);
+          if (repoPathValue && expectedRepoPathRef.current && expectedRepoPathRef.current !== repoPathValue) {
+            return;
+          }
+          setAgentsDocument(response);
+          setAgentsContent(response.content);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
     });
     startCanvasTransition(() => {
-      void refreshCanvas(project.repo_path);
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await fetchCanvas(repoPathValue);
+          if (expectedRepoPathRef.current && expectedRepoPathRef.current !== repoPathValue) {
+            return;
+          }
+          setCanvasDocument(response.document);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
     });
     startProjectTransition(() => {
-      void refreshProjectsTree();
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await fetchProjectsTree();
+          setProjectsTree(response.projects);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
     });
-    void refreshCommitStatus(project.repo_path);
-    void refreshWorkspaceStatus(project.repo_path);
+    void (async () => {
+      try {
+        const response = await fetchCommitStatus(repoPathValue);
+        if (expectedRepoPathRef.current && expectedRepoPathRef.current !== repoPathValue) {
+          return;
+        }
+        setCommitStatus(response);
+      } catch (error) {
+        setCommitStatus(null);
+        setErrorMessage(getErrorMessage(error));
+      }
+    })();
+    void (async () => {
+      try {
+        const response = await fetchProjectWorkspaceStatus(repoPathValue);
+        if (expectedRepoPathRef.current && expectedRepoPathRef.current !== repoPathValue) {
+          return;
+        }
+        setWorkspaceStatus(response);
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error));
+      }
+    })();
   }, [project?.repo_path]);
 
   useEffect(() => {
@@ -488,6 +576,43 @@ export default function Home() {
     }
 
     let cancelled = false;
+    const applySuggestions = (suggestions: ExplorationSuggestion[]) => {
+      const branchId = currentExplorationSession.id;
+      const sourceNodeId = currentNodeId;
+      setExplorationTabs((current) => {
+        const branch = current[branchId];
+        if (!branch) {
+          return current;
+        }
+        const next = {
+          ...branch,
+          suggestionsByNodeId: {
+            ...(branch.suggestionsByNodeId ?? {}),
+            [sourceNodeId]: suggestions,
+          },
+        };
+        return areExplorationBranchesEqual(branch, next)
+          ? current
+          : {
+              ...current,
+              [branchId]: next,
+            };
+      });
+      setNotesExploration((current) => {
+        if (!current || current.id !== branchId) {
+          return current;
+        }
+        const next = {
+          ...current,
+          suggestionsByNodeId: {
+            ...(current.suggestionsByNodeId ?? {}),
+            [sourceNodeId]: suggestions,
+          },
+        };
+        return areExplorationBranchesEqual(current, next) ? current : next;
+      });
+    };
+
     setExplorationSuggestionStates((current) => ({
       ...current,
       [currentExplorationSession.id]: {
@@ -521,7 +646,7 @@ export default function Home() {
           branchDocument,
           currentExplorationSession,
         );
-        applyExplorationBranchSuggestionUpdate(currentExplorationSession.id, currentNodeId, filteredSuggestions);
+        applySuggestions(filteredSuggestions);
         setExplorationSuggestionStates((current) => ({
           ...current,
           [currentExplorationSession.id]: {
@@ -546,7 +671,7 @@ export default function Home() {
           branchDocument,
           currentExplorationSession,
         );
-        applyExplorationBranchSuggestionUpdate(currentExplorationSession.id, currentNodeId, fallbackSuggestions);
+        applySuggestions(fallbackSuggestions);
         setExplorationSuggestionStates((current) => ({
           ...current,
           [currentExplorationSession.id]: {
@@ -566,6 +691,7 @@ export default function Home() {
   }, [
     activeRepoPath,
     canvasDocument,
+    currentExplorationSession,
     currentExplorationSession?.activeNodeId,
     currentExplorationSession?.id,
     currentExplorationSession?.pathNodeIds,
@@ -635,10 +761,39 @@ export default function Home() {
         event.key.toLowerCase() === "n" &&
         activeTab?.type === "view" &&
         activeTab.view === "notes" &&
-        notesExploration
+        notesExploration &&
+        canvasDocument
       ) {
         event.preventDefault();
-        promoteNotesExplorationToTab();
+        const promotedBranch = {
+          ...notesExploration,
+          id: `saved-${Date.now()}`,
+          pathNodeIds: [...notesExploration.pathNodeIds],
+          revealedNodeIds: [...notesExploration.revealedNodeIds],
+          suggestionsByNodeId: Object.fromEntries(
+            Object.entries(notesExploration.suggestionsByNodeId ?? {}).map(([nodeId, suggestions]) => [
+              nodeId,
+              [...suggestions],
+            ]),
+          ),
+          transientNodes: [...notesExploration.transientNodes],
+          transientEdges: [...notesExploration.transientEdges],
+        };
+        setExplorationBranches((current) => ({
+          ...current,
+          [promotedBranch.id]: promotedBranch,
+        }));
+        setExplorationTabs((current) => ({
+          ...current,
+          [promotedBranch.id]: promotedBranch,
+        }));
+        setOpenTabs((current) =>
+          current.some((tab) => tab.id === `explore:${promotedBranch.id}`)
+            ? current
+            : [...current, { id: `explore:${promotedBranch.id}`, type: "exploration", explorationId: promotedBranch.id }],
+        );
+        setActiveTabId(`explore:${promotedBranch.id}`);
+        setComposerStatus(`Opened an exploration tab for ${findCanvasNodeTitle(canvasDocument, promotedBranch.rootNodeId)}.`);
         return;
       }
 
@@ -649,7 +804,7 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTab, isCommandPaletteOpen, notesExploration]);
+  }, [activeTab, canvasDocument, isCommandPaletteOpen, notesExploration]);
 
   useEffect(() => {
     if (!isCommandDragging || !commandDragOffset) {
@@ -765,21 +920,6 @@ export default function Home() {
     }
   }
 
-  async function refreshProject() {
-    try {
-      setErrorMessage(null);
-      const response = await fetchProject();
-      setProject(response.project);
-      if (response.project.repo_path) {
-        void refreshCommitStatus(response.project.repo_path);
-      } else {
-        setCommitStatus(null);
-      }
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    }
-  }
-
   async function refreshProjectsTree() {
     try {
       setErrorMessage(null);
@@ -802,21 +942,6 @@ export default function Home() {
         return;
       }
       setWorkspaceStatus(response);
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
-    }
-  }
-
-  async function refreshAgentsDocument(nextRepoPath?: string) {
-    try {
-      setErrorMessage(null);
-      const targetRepoPath = (nextRepoPath ?? activeRepoPath).trim();
-      const response = await fetchProjectAgents(targetRepoPath || undefined);
-      if (targetRepoPath && expectedRepoPathRef.current && expectedRepoPathRef.current !== targetRepoPath) {
-        return;
-      }
-      setAgentsDocument(response);
-      setAgentsContent(response.content);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
     }
@@ -1671,45 +1796,6 @@ export default function Home() {
     setComposerStatus("Cleared pinned context.");
   }
 
-  function applyExplorationBranchSuggestionUpdate(
-    branchId: string,
-    sourceNodeId: string,
-    suggestions: ExplorationSuggestion[],
-  ) {
-    const applyUpdate = (branch: ExplorationBranch) => ({
-      ...branch,
-      suggestionsByNodeId: {
-        ...(branch.suggestionsByNodeId ?? {}),
-        [sourceNodeId]: suggestions,
-      },
-    });
-
-    if (activeTab?.type === "exploration" && activeExplorationSession?.id === branchId) {
-      setExplorationTabs((current) => {
-        const branch = current[branchId];
-        if (!branch) {
-          return current;
-        }
-        const next = applyUpdate(branch);
-        return areExplorationBranchesEqual(branch, next)
-          ? current
-          : {
-              ...current,
-              [branchId]: next,
-            };
-      });
-      return;
-    }
-
-    setNotesExploration((current) => {
-      if (!current || current.id !== branchId) {
-        return current;
-      }
-      const next = applyUpdate(current);
-      return areExplorationBranchesEqual(current, next) ? current : next;
-    });
-  }
-
   function openCanvasNode(nodeId: string) {
     setSelectedCanvasNodeId((current) => (current === nodeId ? current : nodeId));
     setSelectedCanvasNodeIds((current) =>
@@ -1730,43 +1816,6 @@ export default function Home() {
 
   function resetCanvasNodeSize(nodeId: string) {
     setExpandedCanvasNodeId((current) => (current === nodeId ? null : current));
-  }
-
-  function promoteNotesExplorationToTab() {
-    if (!notesExploration || !canvasDocument) {
-      return;
-    }
-
-    const promotedBranch = {
-      ...notesExploration,
-      id: `saved-${Date.now()}`,
-      pathNodeIds: [...notesExploration.pathNodeIds],
-      revealedNodeIds: [...notesExploration.revealedNodeIds],
-      suggestionsByNodeId: Object.fromEntries(
-        Object.entries(notesExploration.suggestionsByNodeId ?? {}).map(([nodeId, suggestions]) => [
-          nodeId,
-          [...suggestions],
-        ]),
-      ),
-      transientNodes: [...notesExploration.transientNodes],
-      transientEdges: [...notesExploration.transientEdges],
-    };
-
-    setExplorationBranches((current) => ({
-      ...current,
-      [promotedBranch.id]: promotedBranch,
-    }));
-    setExplorationTabs((current) => ({
-      ...current,
-      [promotedBranch.id]: promotedBranch,
-    }));
-    setOpenTabs((current) =>
-      current.some((tab) => tab.id === `explore:${promotedBranch.id}`)
-        ? current
-        : [...current, { id: `explore:${promotedBranch.id}`, type: "exploration", explorationId: promotedBranch.id }],
-    );
-    setActiveTabId(`explore:${promotedBranch.id}`);
-    setComposerStatus(`Opened an exploration tab for ${findCanvasNodeTitle(canvasDocument, promotedBranch.rootNodeId)}.`);
   }
 
   function collapseNotesExploration() {
@@ -2144,7 +2193,7 @@ export default function Home() {
     }
   }
 
-  const commandResults = useMemo<CommandResultItem[]>(() => {
+  const commandResults: CommandResultItem[] = (() => {
     const trimmed = commandInput.trim();
 
     if (commandMode === "ask") {
@@ -2470,17 +2519,7 @@ export default function Home() {
       }));
 
     return [...noteItems, ...projectItems, ...conversationItems, ...viewItems].slice(0, 14);
-  }, [
-    activeRepoPath,
-    canvasDocument,
-    commandInput,
-    commandMode,
-    commitStatus,
-    focusedCanvasNodeId,
-    pinnedCanvasNodeIds,
-    projectsTree,
-    visibleContextNodeIds,
-  ]);
+  })();
 
   function pinPreviewTab(tabId: OpenTab["id"]) {
     setOpenTabs((current) =>
