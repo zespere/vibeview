@@ -145,6 +145,8 @@ export default function Home() {
   const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
+  const [isProjectTrayExpanded, setIsProjectTrayExpanded] = useState(false);
+  const [isNoteSidebarCollapsed, setIsNoteSidebarCollapsed] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
   const [pendingPlan, setPendingPlan] = useState<{
     messageId: string;
@@ -748,6 +750,35 @@ export default function Home() {
       setComposerModel((current) => (current === "gpt-5.4" ? status.codex_model! : current));
     }
   }, [status?.codex_model]);
+
+  useEffect(() => {
+    if (!activeRepoPath) {
+      return;
+    }
+    try {
+      const rawValue = window.localStorage.getItem(`konceptura:project-tray:${activeRepoPath}`);
+      if (rawValue === "1") {
+        setIsProjectTrayExpanded(true);
+        return;
+      }
+      if (rawValue === "0") {
+        setIsProjectTrayExpanded(false);
+      }
+    } catch {
+      // Ignore storage errors and keep default UI state.
+    }
+  }, [activeRepoPath]);
+
+  useEffect(() => {
+    if (!activeRepoPath) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(`konceptura:project-tray:${activeRepoPath}`, isProjectTrayExpanded ? "1" : "0");
+    } catch {
+      // Ignore storage errors and keep the project page usable.
+    }
+  }, [activeRepoPath, isProjectTrayExpanded]);
 
   useEffect(() => {
     explorationSuggestionStatesRef.current = explorationSuggestionStates;
@@ -2945,113 +2976,128 @@ export default function Home() {
 
     return (
       <div className={styles.workspaceSingle}>
-        <div className={styles.noteEditorLayout}>
-          <div className={styles.noteEditorMain}>
-            <div className={styles.noteEditorHeader}>
-              <div className={styles.tagRow}>
-                {node.tags.length === 0 ? (
-                  <span className={styles.tagChip}>untagged</span>
-                ) : (
-                  node.tags.map((tag) => (
-                    <span className={styles.tagChip} key={tag}>
-                      {tag}
-                    </span>
-                  ))
-                )}
-              </div>
+        <div className={styles.noteEditorWorkspace}>
+          <div className={isNoteSidebarCollapsed ? styles.noteEditorLayoutSidebarHidden : styles.noteEditorLayout}>
+            <div className={styles.noteEditorMain}>
+              <div className={styles.noteEditorHeader}>
+                <div className={styles.noteHeaderTop}>
+                  <div className={styles.tagRow}>
+                    {node.tags.length === 0 ? (
+                      <span className={styles.tagChip}>untagged</span>
+                    ) : (
+                      node.tags.map((tag) => (
+                        <span className={styles.tagChip} key={tag}>
+                          {tag}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  <button
+                    className={styles.noteSidebarToggle}
+                    onClick={() => setIsNoteSidebarCollapsed((current) => !current)}
+                    type="button"
+                  >
+                    {isNoteSidebarCollapsed ? "Show details" : "Hide details"}
+                  </button>
+                </div>
 
-              <input
-                className={styles.noteTitleInput}
-                onChange={(event) => setCanvasDraftTitle(event.target.value)}
-                placeholder="Untitled note"
-                value={canvasDraftTitle}
-              />
-
-              <div className={styles.noteMetaBar}>
-                <span>{node.linked_files.length} linked files</span>
-                <span>{node.linked_symbols.length} linked symbols</span>
-                <span>{canvasOutgoingEdges.length} outgoing</span>
-                <span>{canvasIncomingEdges.length} incoming</span>
-              </div>
-            </div>
-
-            <label className={styles.noteField}>
-              <span className={styles.fieldLabel}>Description</span>
-              <textarea
-                className={styles.noteBodyInput}
-                onChange={(event) => setCanvasDraftDescription(event.target.value)}
-                rows={18}
-                value={canvasDraftDescription}
-              />
-            </label>
-
-            <div className={styles.noteActions}>
-              <button className={styles.primaryButton} onClick={handleSaveCanvasNode} type="button">
-                Save note
-              </button>
-            </div>
-          </div>
-
-            <div className={styles.noteEditorSidebar}>
-              <div className={styles.noteSidebarSection}>
-                <span className={styles.fieldLabel}>Tags</span>
                 <input
-                  className={styles.noteSidebarInput}
-                  onChange={(event) => setCanvasDraftTags(event.target.value)}
-                  placeholder="screen, users, crud"
-                  value={canvasDraftTags}
+                  className={styles.noteTitleInput}
+                  onChange={(event) => setCanvasDraftTitle(event.target.value)}
+                  placeholder="Untitled note"
+                  value={canvasDraftTitle}
                 />
+
+                <div className={styles.noteMetaBar}>
+                  <span>{node.linked_files.length} linked files</span>
+                  <span>{node.linked_symbols.length} linked symbols</span>
+                  <span>{canvasOutgoingEdges.length} outgoing</span>
+                  <span>{canvasIncomingEdges.length} incoming</span>
+                </div>
               </div>
 
-              <div className={styles.noteSidebarSection}>
-                <span className={styles.fieldLabel}>Linked files</span>
+              <label className={styles.noteField}>
+                <span className={styles.fieldLabel}>Description</span>
                 <textarea
-                  className={styles.noteSidebarTextarea}
-                  onChange={(event) => setCanvasDraftFiles(event.target.value)}
-                  rows={6}
-                  value={canvasDraftFiles}
+                  className={styles.noteBodyInput}
+                  onChange={(event) => setCanvasDraftDescription(event.target.value)}
+                  rows={18}
+                  value={canvasDraftDescription}
                 />
+              </label>
+
+              <div className={styles.noteActions}>
+                <button className={styles.primaryButton} onClick={handleSaveCanvasNode} type="button">
+                  Save note
+                </button>
               </div>
 
-              <div className={styles.noteSidebarSection}>
-                <span className={styles.fieldLabel}>Linked symbols</span>
-                <textarea
-                  className={styles.noteSidebarTextarea}
-                  onChange={(event) => setCanvasDraftSymbols(event.target.value)}
-                  rows={6}
-                  value={canvasDraftSymbols}
-                />
-              </div>
-
-            <div className={styles.noteSidebarSection}>
-              <span className={styles.fieldLabel}>Connections</span>
-              <ul className={styles.noteRelationshipList}>
-                {canvasOutgoingEdges.map((edge) => (
-                  <li className={styles.noteRelationshipItem} key={edge.id}>
-                    <span className={styles.relationshipDirection}>{edge.label || "out"}</span>
-                    <button
-                      className={styles.inlineLink}
-                      onClick={() => openCanvasNode(edge.target_node_id)}
-                      type="button"
-                    >
-                      {findCanvasNodeTitle(canvasDocument, edge.target_node_id)}
-                    </button>
-                  </li>
-                ))}
-                {canvasIncomingEdges.map((edge) => (
-                  <li className={styles.noteRelationshipItem} key={edge.id}>
-                    <span className={styles.relationshipDirection}>{edge.label || "in"}</span>
-                    <button
-                      className={styles.inlineLink}
-                      onClick={() => openCanvasNode(edge.source_node_id)}
-                      type="button"
-                    >
-                      {findCanvasNodeTitle(canvasDocument, edge.source_node_id)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <div className={styles.noteDockSlotInline}>{renderUnifiedDock("embedded")}</div>
             </div>
+
+            {isNoteSidebarCollapsed ? null : (
+              <div className={styles.noteEditorSidebar}>
+                <div className={styles.noteSidebarSection}>
+                  <span className={styles.fieldLabel}>Tags</span>
+                  <input
+                    className={styles.noteSidebarInput}
+                    onChange={(event) => setCanvasDraftTags(event.target.value)}
+                    placeholder="screen, users, crud"
+                    value={canvasDraftTags}
+                  />
+                </div>
+
+                <div className={styles.noteSidebarSection}>
+                  <span className={styles.fieldLabel}>Linked files</span>
+                  <textarea
+                    className={styles.noteSidebarTextarea}
+                    onChange={(event) => setCanvasDraftFiles(event.target.value)}
+                    rows={6}
+                    value={canvasDraftFiles}
+                  />
+                </div>
+
+                <div className={styles.noteSidebarSection}>
+                  <span className={styles.fieldLabel}>Linked symbols</span>
+                  <textarea
+                    className={styles.noteSidebarTextarea}
+                    onChange={(event) => setCanvasDraftSymbols(event.target.value)}
+                    rows={6}
+                    value={canvasDraftSymbols}
+                  />
+                </div>
+
+                <div className={styles.noteSidebarSection}>
+                  <span className={styles.fieldLabel}>Connections</span>
+                  <ul className={styles.noteRelationshipList}>
+                    {canvasOutgoingEdges.map((edge) => (
+                      <li className={styles.noteRelationshipItem} key={edge.id}>
+                        <span className={styles.relationshipDirection}>{edge.label || "out"}</span>
+                        <button
+                          className={styles.inlineLink}
+                          onClick={() => openCanvasNode(edge.target_node_id)}
+                          type="button"
+                        >
+                          {findCanvasNodeTitle(canvasDocument, edge.target_node_id)}
+                        </button>
+                      </li>
+                    ))}
+                    {canvasIncomingEdges.map((edge) => (
+                      <li className={styles.noteRelationshipItem} key={edge.id}>
+                        <span className={styles.relationshipDirection}>{edge.label || "in"}</span>
+                        <button
+                          className={styles.inlineLink}
+                          onClick={() => openCanvasNode(edge.source_node_id)}
+                          type="button"
+                        >
+                          {findCanvasNodeTitle(canvasDocument, edge.source_node_id)}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -3060,8 +3106,8 @@ export default function Home() {
 
   function renderProjectView() {
     return (
-      <div className={styles.settingsPane}>
-        <div className={styles.panelSurface}>
+      <div className={styles.projectPage}>
+        <div className={styles.projectPrimaryCard}>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Repository path</span>
             <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
@@ -3099,56 +3145,73 @@ export default function Home() {
           </div>
         </div>
 
-        <div className={styles.panelSurface}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>AGENTS.md</span>
-            <textarea className={styles.textarea} onChange={(event) => setAgentsContent(event.target.value)} rows={18} value={agentsContent} />
-          </label>
+        <div className={styles.projectTray}>
+          <button
+            className={isProjectTrayExpanded ? styles.projectTrayToggleOpen : styles.projectTrayToggle}
+            onClick={() => setIsProjectTrayExpanded((current) => !current)}
+            type="button"
+          >
+            <span>{isProjectTrayExpanded ? "Hide project details" : "Show project details"}</span>
+            <span className={styles.projectTrayToggleMeta}>{isProjectTrayExpanded ? "Collapse" : "Expand"}</span>
+          </button>
 
-          <div className={styles.actionsRow}>
-            <button className={styles.primaryButton} disabled={agentsPending || !activeRepoPath} onClick={handleSaveAgentsDocument} type="button">
-              {agentsPending ? "Saving..." : "Save AGENTS.md"}
-            </button>
-            {agentsDocument?.path ? <span className={styles.helperText}>{agentsDocument.path}</span> : null}
-          </div>
-        </div>
+          {isProjectTrayExpanded ? (
+            <div className={styles.projectTrayPanel}>
+              <div className={styles.projectTrayGrid}>
+                <div className={styles.panelSurface}>
+                  <label className={styles.field}>
+                    <span className={styles.fieldLabel}>AGENTS.md</span>
+                    <textarea className={styles.textarea} onChange={(event) => setAgentsContent(event.target.value)} rows={18} value={agentsContent} />
+                  </label>
 
-        <div className={styles.panelSurface}>
-          <dl className={styles.statusList}>
-            <StatusRow label="API" tone={statusPending ? "muted" : "ok"} value={API_BASE_URL} />
-            <StatusRow
-              label="Memgraph"
-              tone={status?.memgraph_ok ? "ok" : "error"}
-              value={status?.memgraph_ok ? "connected" : "unreachable"}
-            />
-            <StatusRow
-              label="Code graph"
-              tone={status?.cgr_ok ? "ok" : "error"}
-              value={status?.cgr_ok ? "ready" : "missing"}
-            />
-            <StatusRow
-              label="Codex"
-              tone={status?.codex_ok ? "ok" : "error"}
-              value={status?.codex_ok ? "ready" : "missing"}
-            />
-            <StatusRow
-              label="Index job"
-              tone={statusTone(status?.index_job.status)}
-              value={status?.index_job.status ?? "idle"}
-            />
-          </dl>
+                  <div className={styles.actionsRow}>
+                    <button className={styles.primaryButton} disabled={agentsPending || !activeRepoPath} onClick={handleSaveAgentsDocument} type="button">
+                      {agentsPending ? "Saving..." : "Save AGENTS.md"}
+                    </button>
+                    {agentsDocument?.path ? <span className={styles.helperText}>{agentsDocument.path}</span> : null}
+                  </div>
+                </div>
+
+                <div className={styles.panelSurface}>
+                  <dl className={styles.statusList}>
+                    <StatusRow label="API" tone={statusPending ? "muted" : "ok"} value={API_BASE_URL} />
+                    <StatusRow
+                      label="Memgraph"
+                      tone={status?.memgraph_ok ? "ok" : "error"}
+                      value={status?.memgraph_ok ? "connected" : "unreachable"}
+                    />
+                    <StatusRow
+                      label="Code graph"
+                      tone={status?.cgr_ok ? "ok" : "error"}
+                      value={status?.cgr_ok ? "ready" : "missing"}
+                    />
+                    <StatusRow
+                      label="Codex"
+                      tone={status?.codex_ok ? "ok" : "error"}
+                      value={status?.codex_ok ? "ready" : "missing"}
+                    />
+                    <StatusRow
+                      label="Index job"
+                      tone={statusTone(status?.index_job.status)}
+                      value={status?.index_job.status ?? "idle"}
+                    />
+                  </dl>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     );
   }
 
-  function renderUnifiedDock() {
+  function renderUnifiedDock(mode: "floating" | "embedded" = "floating") {
     const selectedCommandResult =
       commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? null;
 
     return (
-      <div className={styles.notesConsoleShell}>
-        <div className={styles.notesConsoleDock}>
+      <div className={mode === "embedded" ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell}>
+        <div className={mode === "embedded" ? styles.notesConsoleDockEmbedded : styles.notesConsoleDock}>
           {isConsoleExpanded ? (
             <div className={styles.notesConsolePanel}>
               {isSlashCommandMode ? (
@@ -3623,7 +3686,7 @@ export default function Home() {
             {renderActiveView()}
           </section>
 
-          {renderUnifiedDock()}
+          {activeTab?.type === "note" ? null : renderUnifiedDock()}
         </main>
       </div>
     </div>
