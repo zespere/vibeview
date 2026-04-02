@@ -155,6 +155,7 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const expectedRepoPathRef = useRef("");
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
 
@@ -724,18 +725,39 @@ export default function Home() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      const isTypingIntoField =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable);
+
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setIsConsoleExpanded(true);
-        if (!codexPrompt.trim()) {
-          setCodexPrompt("/");
-        }
         window.setTimeout(() => {
           composerInputRef.current?.focus();
           composerInputRef.current?.setSelectionRange(
             composerInputRef.current.value.length,
             composerInputRef.current.value.length,
           );
+        }, 0);
+        return;
+      }
+
+      if (
+        event.key === "/" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isTypingIntoField
+      ) {
+        event.preventDefault();
+        setIsConsoleExpanded(true);
+        setCodexPrompt((current) => (current.trim() ? current : "/"));
+        window.setTimeout(() => {
+          composerInputRef.current?.focus();
+          const value = composerInputRef.current?.value ?? "/";
+          composerInputRef.current?.setSelectionRange(value.length, value.length);
         }, 0);
         return;
       }
@@ -2467,6 +2489,21 @@ export default function Home() {
     return [...actionMatches, ...noteItems, ...projectItems, ...conversationItems, ...viewItems].slice(0, 14);
   })();
 
+  useEffect(() => {
+    if (!isSlashCommandMode || !isConsoleExpanded || commandResults.length === 0) {
+      return;
+    }
+
+    const selectedResult =
+      commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? null;
+    if (!selectedResult) {
+      return;
+    }
+
+    const node = commandResultRefs.current[selectedResult.id];
+    node?.scrollIntoView({ block: "nearest" });
+  }, [commandResults, commandSelectedIndex, isConsoleExpanded, isSlashCommandMode]);
+
   function handleSubmitOmnibox() {
     const value = codexPrompt.trim();
     if (!value) {
@@ -2490,6 +2527,23 @@ export default function Home() {
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape") {
+      if (codexPrompt.trim() === "/") {
+        event.preventDefault();
+        setCodexPrompt("");
+        setIsConsoleExpanded(false);
+        event.currentTarget.blur();
+        return;
+      }
+
+      if (!codexPrompt.trim()) {
+        event.preventDefault();
+        setIsConsoleExpanded(false);
+        event.currentTarget.blur();
+        return;
+      }
+    }
+
     if (isSlashCommandMode) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -3053,6 +3107,9 @@ export default function Home() {
                       <button
                         className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
                         key={item.id}
+                        ref={(node) => {
+                          commandResultRefs.current[item.id] = node;
+                        }}
                         onClick={item.run}
                         type="button"
                       >
