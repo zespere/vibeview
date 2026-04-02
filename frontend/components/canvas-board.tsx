@@ -173,6 +173,8 @@ export function CanvasBoard({
           const targetNode = nodesById.get(edge.target_node_id);
           const sourceSide = sourceNode && targetNode ? resolveHandleSide(sourceNode, targetNode) : "bottom";
           const targetSide = sourceNode && targetNode ? resolveHandleSide(targetNode, sourceNode) : "top";
+          const isSuggestionEdge =
+            edge.id.startsWith("suggestion-edge:") || edge.id.startsWith("suggestion-edge-loading:");
 
           return {
           id: edge.id,
@@ -183,9 +185,15 @@ export function CanvasBoard({
           label: edge.label || undefined,
           type: "smoothstep",
           animated: false,
-          style: { stroke: "#8b5c32", strokeWidth: 2.25 },
-          labelStyle: { fill: "#6f451f", fontWeight: 600 },
-          labelBgStyle: { fill: "#fff8ef", fillOpacity: 0.92 },
+          style: isSuggestionEdge
+            ? { stroke: "#ab8d6e", strokeWidth: 1.8, strokeDasharray: "6 6" }
+            : { stroke: "#8b5c32", strokeWidth: 2.25 },
+          labelStyle: isSuggestionEdge
+            ? { fill: "#8a745d", fontWeight: 600 }
+            : { fill: "#6f451f", fontWeight: 600 },
+          labelBgStyle: isSuggestionEdge
+            ? { fill: "#fffaf4", fillOpacity: 0.88 }
+            : { fill: "#fff8ef", fillOpacity: 0.92 },
           labelBgPadding: [6, 4],
           labelBgBorderRadius: 6,
           };
@@ -430,6 +438,11 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
   const { node, onOpenNode, onSelectNode, detailLevel } = data;
   const isMinimal = detailLevel === "minimal";
   const isCompact = detailLevel === "compact";
+  const isSuggestion = node.tags.includes("suggestion");
+  const isLoadingSuggestion = node.tags.includes("suggestion-loading");
+  const nodeClassName = selected
+    ? `${styles.canvasNodeActive} ${isSuggestion ? styles.canvasNodeSuggestionActive : ""} ${isLoadingSuggestion ? styles.canvasNodeSuggestionLoading : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
+    : `${styles.canvasNode} ${isSuggestion ? styles.canvasNodeSuggestion : ""} ${isLoadingSuggestion ? styles.canvasNodeSuggestionLoading : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim();
 
   return (
     <div className={styles.canvasNodeShell}>
@@ -442,37 +455,61 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
       <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-bottom`} position={Position.Bottom} type="target" />
       <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-left`} position={Position.Left} type="target" />
       <button
-        className={
-          selected
-            ? `${styles.canvasNodeActive} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
-            : `${styles.canvasNode} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
-        }
-        onClick={() => onSelectNode(node.id)}
-        onDoubleClick={() => onOpenNode(node.id)}
+        className={nodeClassName}
+        disabled={isLoadingSuggestion}
+        onClick={() => {
+          if (!isLoadingSuggestion) {
+            onSelectNode(node.id);
+          }
+        }}
+        onDoubleClick={() => {
+          if (!isLoadingSuggestion) {
+            onOpenNode(node.id);
+          }
+        }}
         type="button"
       >
-        {!isMinimal ? (
+        {!isMinimal && !isLoadingSuggestion ? (
           <div className={styles.canvasNodeHeader}>
             <div className={styles.canvasTagList}>
-              {node.tags.length === 0 ? <span className={styles.canvasTag}>untagged</span> : null}
-              {node.tags.slice(0, isCompact ? 2 : 3).map((tag) => (
-                <span className={styles.canvasTag} key={tag}>
-                  {tag}
-                </span>
-              ))}
+              {isSuggestion ? (
+                <span className={styles.canvasSuggestionLabel}>suggestion</span>
+              ) : (
+                <>
+                  {node.tags.length === 0 ? <span className={styles.canvasTag}>untagged</span> : null}
+                  {node.tags.slice(0, isCompact ? 2 : 3).map((tag) => (
+                    <span className={styles.canvasTag} key={tag}>
+                      {tag}
+                    </span>
+                  ))}
+                </>
+              )}
             </div>
           </div>
         ) : null}
-        <strong className={styles.canvasNodeTitle}>{node.title}</strong>
-        {detailLevel === "full" ? (
+        {isLoadingSuggestion ? (
+          <div className={styles.canvasLoadingCard}>
+            <span aria-hidden="true" className={styles.canvasLoadingSpinner} />
+            <strong className={styles.canvasLoadingTitle}>Generating suggestion</strong>
+          </div>
+        ) : (
           <>
-            <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
-            <div className={styles.canvasNodeMeta}>
-              <span>{node.linked_files.length} files</span>
-              <span>{node.linked_symbols.length} symbols</span>
-            </div>
+            <strong className={styles.canvasNodeTitle}>{node.title}</strong>
+            {detailLevel === "full" ? (
+              <>
+              <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
+              {isSuggestion ? (
+              <div className={styles.canvasSuggestionMeta}>Click to explore</div>
+              ) : (
+              <div className={styles.canvasNodeMeta}>
+                <span>{node.linked_files.length} files</span>
+                <span>{node.linked_symbols.length} symbols</span>
+              </div>
+              )}
+              </>
+            ) : null}
           </>
-        ) : null}
+        )}
       </button>
     </div>
   );

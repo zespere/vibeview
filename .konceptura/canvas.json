@@ -303,8 +303,8 @@
         "entity"
       ],
       "title": "Conversation Memory",
-      "x": 460,
-      "y": -60
+      "x": 342,
+      "y": -55
     },
     {
       "description": "The console is the main execution surface for user intent: it can ask project questions, prepare an implementation plan, or run a real build pass. For each run, the frontend sends selected note context and conversation context to the backend streaming endpoint, then renders incremental assistant chunks and final summaries back into the current conversation. Plan mode is explicitly separable from build mode, and approved plans can be turned into a follow-up build run.",

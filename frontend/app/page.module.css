@@ -2046,6 +2046,17 @@
   overflow: hidden;
 }
 
+.canvasNodeSuggestion,
+.canvasNodeSuggestionActive {
+  border-style: dashed;
+}
+
+.canvasNodeSuggestionLoading {
+  border-color: #d7c8b6;
+  background: #fffdf9;
+  cursor: default;
+}
+
 .canvasNodeCompact {
   height: 148px;
   padding: 12px;
@@ -2062,6 +2073,20 @@
   background: #fff4e7;
 }
 
+.canvasNodeSuggestion {
+  border-color: #cbb9a4;
+  background: #fffdf8;
+}
+
+.canvasNodeSuggestionActive {
+  border-color: #9b7a59;
+  background: #fff7ee;
+}
+
+.canvasNodeSuggestionLoading:disabled {
+  opacity: 1;
+}
+
 .canvasNodeHeader,
 .canvasNodeMeta {
   justify-content: space-between;
@@ -2070,6 +2095,20 @@
 .canvasNodeHeader {
   align-items: flex-start;
   gap: 10px;
+}
+
+.canvasSuggestionLabel {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border: 1px dashed #c5b19b;
+  border-radius: 6px;
+  background: #fffaf4;
+  color: #8a745d;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0 7px;
 }
 
 .canvasNodeTitle {
@@ -2092,11 +2131,49 @@
 
 .canvasNodeDescription,
 .canvasNodeMeta,
+.canvasSuggestionMeta,
 .graphNodeMeta {
   margin-top: 8px;
   font-size: 13px;
   line-height: 1.45;
   color: #6c6257;
+}
+
+.canvasSuggestionMeta {
+  color: #8b745c;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.canvasLoadingCard {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+}
+
+.canvasLoadingSpinner {
+  width: 30px;
+  height: 30px;
+  border: 2px solid rgba(198, 178, 156, 0.38);
+  border-top-color: #a48461;
+  border-radius: 999px;
+  animation: canvas-spin 0.85s linear infinite;
+}
+
+.canvasLoadingTitle {
+  font-size: 13px;
+  line-height: 1.35;
+  color: #7e6954;
+  font-weight: 600;
+}
+
+@keyframes canvas-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .canvasToggle {

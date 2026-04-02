@@ -78,6 +78,8 @@ interface ExplorationSuggestionState {
   key: string;
   loading: boolean;
   error: string | null;
+  kind: "suggestions" | "relation" | null;
+  neededCount: number;
   suggestions: ExplorationSuggestion[];
 }
 
@@ -87,6 +89,7 @@ interface ExplorationBranch {
   activeNodeId: string | null;
   pathNodeIds: string[];
   revealedNodeIds: string[];
+  suggestionsByNodeId: Record<string, ExplorationSuggestion[]>;
   transientNodes: CanvasNode[];
   transientEdges: CanvasEdge[];
   relationQuery: string;
@@ -277,7 +280,8 @@ export default function Home() {
       buildExplorationPresentation(
         canvasDocument,
         notesExploration,
-        notesExploration ? explorationSuggestionStates[notesExploration.id]?.suggestions ?? [] : [],
+        notesExploration ? getActiveExplorationSuggestions(notesExploration) : [],
+        notesExploration ? explorationSuggestionStates[notesExploration.id] ?? null : null,
       ),
     [canvasDocument, explorationSuggestionStates, notesExploration],
   );
@@ -286,7 +290,8 @@ export default function Home() {
       buildExplorationPresentation(
         canvasDocument,
         activeExplorationSession,
-        activeExplorationSession ? explorationSuggestionStates[activeExplorationSession.id]?.suggestions ?? [] : [],
+        activeExplorationSession ? getActiveExplorationSuggestions(activeExplorationSession) : [],
+        activeExplorationSession ? explorationSuggestionStates[activeExplorationSession.id] ?? null : null,
       ),
     [activeExplorationSession, canvasDocument, explorationSuggestionStates],
   );
@@ -404,12 +409,18 @@ export default function Home() {
     if (!activeNode) {
       return;
     }
+    const currentNodeId = currentExplorationSession.activeNodeId ?? currentExplorationSession.rootNodeId;
+    const currentSuggestions = currentExplorationSession.suggestionsByNodeId?.[currentNodeId] ?? [];
+    const neededSuggestionCount = Math.max(0, 3 - currentSuggestions.length);
+    if (neededSuggestionCount === 0) {
+      return;
+    }
 
     const requestKey = buildExplorationSuggestionKey(currentExplorationSession);
     const existingState = explorationSuggestionStatesRef.current[currentExplorationSession.id];
     if (
       existingState?.key === requestKey &&
-      (existingState.loading || existingState.suggestions.length > 0 || existingState.error !== null)
+      (existingState.loading || existingState.error !== null)
     ) {
       return;
     }
@@ -421,6 +432,8 @@ export default function Home() {
         key: requestKey,
         loading: true,
         error: null,
+        kind: "suggestions",
+        neededCount: neededSuggestionCount,
         suggestions: current[currentExplorationSession.id]?.key === requestKey ? current[currentExplorationSession.id].suggestions : [],
       },
     }));
@@ -431,37 +444,56 @@ export default function Home() {
       buildExplorationPathTitles(branchDocument, currentExplorationSession),
       buildSelectedNoteContext(branchDocument, currentExplorationSession.pathNodeIds),
       undefined,
+      undefined,
+      neededSuggestionCount,
     )
       .then((response) => {
         if (cancelled) {
           return;
         }
+        const filteredSuggestions = mergeExplorationSuggestions(
+          currentSuggestions,
+          response.suggestions.map((suggestion, index) =>
+            toExplorationSuggestion(currentExplorationSession.id, suggestion, currentSuggestions.length + index),
+          ),
+          branchDocument,
+          currentExplorationSession,
+        );
+        applyExplorationBranchSuggestionUpdate(currentExplorationSession.id, currentNodeId, filteredSuggestions);
         setExplorationSuggestionStates((current) => ({
           ...current,
           [currentExplorationSession.id]: {
             key: requestKey,
             loading: false,
             error: null,
-            suggestions: response.suggestions.map((suggestion, index) =>
-              toExplorationSuggestion(currentExplorationSession.id, suggestion, index),
-            ),
+            kind: null,
+            neededCount: 0,
+            suggestions: [],
           },
         }));
       })
-      .catch((error) => {
+      .catch(() => {
         if (cancelled) {
           return;
         }
-        const fallbackSuggestions = buildFallbackExplorationSuggestions(activeNode.title).map((suggestion, index) =>
-          toExplorationSuggestion(currentExplorationSession.id, suggestion, index),
+        const fallbackSuggestions = mergeExplorationSuggestions(
+          currentSuggestions,
+          buildFallbackExplorationSuggestions(activeNode.title).map((suggestion, index) =>
+            toExplorationSuggestion(currentExplorationSession.id, suggestion, currentSuggestions.length + index),
+          ),
+          branchDocument,
+          currentExplorationSession,
         );
+        applyExplorationBranchSuggestionUpdate(currentExplorationSession.id, currentNodeId, fallbackSuggestions);
         setExplorationSuggestionStates((current) => ({
           ...current,
           [currentExplorationSession.id]: {
             key: requestKey,
             loading: false,
             error: null,
-            suggestions: fallbackSuggestions,
+            kind: null,
+            neededCount: 0,
+            suggestions: [],
           },
         }));
       });
@@ -1577,6 +1609,45 @@ export default function Home() {
     setComposerStatus("Cleared pinned context.");
   }
 
+  function applyExplorationBranchSuggestionUpdate(
+    branchId: string,
+    sourceNodeId: string,
+    suggestions: ExplorationSuggestion[],
+  ) {
+    const applyUpdate = (branch: ExplorationBranch) => ({
+      ...branch,
+      suggestionsByNodeId: {
+        ...(branch.suggestionsByNodeId ?? {}),
+        [sourceNodeId]: suggestions,
+      },
+    });
+
+    if (activeTab?.type === "exploration" && activeExplorationSession?.id === branchId) {
+      setExplorationTabs((current) => {
+        const branch = current[branchId];
+        if (!branch) {
+          return current;
+        }
+        const next = applyUpdate(branch);
+        return areExplorationBranchesEqual(branch, next)
+          ? current
+          : {
+              ...current,
+              [branchId]: next,
+            };
+      });
+      return;
+    }
+
+    setNotesExploration((current) => {
+      if (!current || current.id !== branchId) {
+        return current;
+      }
+      const next = applyUpdate(current);
+      return areExplorationBranchesEqual(current, next) ? current : next;
+    });
+  }
+
   function openCanvasNode(nodeId: string) {
     setSelectedCanvasNodeId((current) => (current === nodeId ? current : nodeId));
     setSelectedCanvasNodeIds((current) =>
@@ -1601,6 +1672,12 @@ export default function Home() {
       id: `saved-${Date.now()}`,
       pathNodeIds: [...notesExploration.pathNodeIds],
       revealedNodeIds: [...notesExploration.revealedNodeIds],
+      suggestionsByNodeId: Object.fromEntries(
+        Object.entries(notesExploration.suggestionsByNodeId ?? {}).map(([nodeId, suggestions]) => [
+          nodeId,
+          [...suggestions],
+        ]),
+      ),
       transientNodes: [...notesExploration.transientNodes],
       transientEdges: [...notesExploration.transientEdges],
     };
@@ -1642,24 +1719,46 @@ export default function Home() {
     suggestion: ExplorationSuggestion,
     options?: { persistent?: boolean },
   ) {
+    const sourceNodeId = branch.activeNodeId ?? branch.rootNodeId;
     const nextBranch = addTransientExplorationNode(
       canvasDocument,
       branch,
-      branch.activeNodeId ?? branch.rootNodeId,
+      sourceNodeId,
       suggestion.title,
       suggestion.summary,
       suggestion.edgeLabel,
     );
+    const remainingSuggestions = (branch.suggestionsByNodeId?.[sourceNodeId] ?? []).filter(
+      (item) => item.displayNodeId !== suggestion.displayNodeId,
+    );
+    const branchWithSuggestions = {
+      ...nextBranch,
+      suggestionsByNodeId: {
+        ...(branch.suggestionsByNodeId ?? {}),
+        [sourceNodeId]: remainingSuggestions,
+      },
+    };
 
-    setSelectedCanvasNodeId(nextBranch.activeNodeId);
-    setSelectedCanvasNodeIds(nextBranch.activeNodeId ? [nextBranch.activeNodeId] : []);
+    setSelectedCanvasNodeId(branchWithSuggestions.activeNodeId);
+    setSelectedCanvasNodeIds(branchWithSuggestions.activeNodeId ? [branchWithSuggestions.activeNodeId] : []);
+    setExplorationSuggestionStates((current) => ({
+      ...current,
+      [branch.id]: {
+        key: buildExplorationSuggestionKey(branchWithSuggestions),
+        loading: false,
+        error: null,
+        kind: null,
+        neededCount: 0,
+        suggestions: [],
+      },
+    }));
     if (options?.persistent) {
       setExplorationTabs((current) => ({
         ...current,
-        [branch.id]: nextBranch,
+        [branch.id]: branchWithSuggestions,
       }));
     } else {
-      setNotesExploration(nextBranch);
+      setNotesExploration(branchWithSuggestions);
     }
   }
 
@@ -1699,6 +1798,8 @@ export default function Home() {
         key: buildExplorationSuggestionKey(branch),
         loading: true,
         error: null,
+        kind: "relation",
+        neededCount: 0,
         suggestions: current[branch.id]?.suggestions ?? [],
       },
     }));
@@ -1719,7 +1820,7 @@ export default function Home() {
         throw new Error("No exploration suggestion was returned.");
       }
       generatedSuggestion = toExplorationSuggestion(branch.id, firstSuggestion, 0);
-    } catch (error) {
+    } catch {
       const fallbackSuggestion = buildFallbackRelationSuggestion(activeNode.title, query);
       generatedSuggestion = toExplorationSuggestion(branch.id, fallbackSuggestion, 0);
       setExplorationSuggestionStates((current) => ({
@@ -1728,6 +1829,8 @@ export default function Home() {
           key: buildExplorationSuggestionKey(branch),
           loading: false,
           error: null,
+          kind: null,
+          neededCount: 0,
           suggestions: current[branch.id]?.suggestions ?? [],
         },
       }));
@@ -1762,6 +1865,8 @@ export default function Home() {
         key: buildExplorationSuggestionKey(nextBranch),
         loading: false,
         error: null,
+        kind: null,
+        neededCount: 0,
         suggestions: [],
       },
     }));
@@ -3975,6 +4080,7 @@ function createExplorationBranch(nodeId: string, document: CanvasDocument | null
     activeNodeId: nodeId,
     pathNodeIds: [nodeId],
     revealedNodeIds: [nodeId],
+    suggestionsByNodeId: {},
     transientNodes: [],
     transientEdges: [],
     relationQuery: "",
@@ -4010,6 +4116,11 @@ function normalizeExplorationBranch(
   const transientEdges = branch.transientEdges.filter(
     (edge) => validEdgeNodeIds.has(edge.source_node_id) && validEdgeNodeIds.has(edge.target_node_id),
   );
+  const suggestionsByNodeId = Object.fromEntries(
+    Object.entries(branch.suggestionsByNodeId ?? {})
+      .filter(([nodeId]) => knownNodeIds.has(nodeId))
+      .map(([nodeId, suggestions]) => [nodeId, dedupeExplorationSuggestions(suggestions)]),
+  );
 
   return {
     ...branch,
@@ -4017,6 +4128,7 @@ function normalizeExplorationBranch(
     activeNodeId,
     pathNodeIds,
     revealedNodeIds: uniqueNodeIds([rootNodeId, ...revealedNodeIds, ...pathNodeIds]),
+    suggestionsByNodeId,
     transientNodes,
     transientEdges,
   };
@@ -4052,6 +4164,7 @@ function buildExplorationPresentation(
   document: CanvasDocument | null,
   branch: ExplorationBranch | null,
   suggestions: ExplorationSuggestion[],
+  suggestionState: ExplorationSuggestionState | null,
 ): ExplorationPresentation {
   if (!document || !branch) {
     return {
@@ -4089,7 +4202,16 @@ function buildExplorationPresentation(
   const pathNodes = normalizedBranch.pathNodeIds
     .map((nodeId) => nodesById.get(nodeId) ?? null)
     .filter((node): node is CanvasNode => Boolean(node));
-  const suggestionArtifacts = buildExplorationSuggestionArtifacts(branchDocument, normalizedBranch, suggestions);
+  const loadingSuggestionCount =
+    suggestionState?.loading && suggestionState.kind === "suggestions"
+      ? Math.max(0, suggestionState.neededCount || Math.max(0, 3 - suggestions.length))
+      : 0;
+  const suggestionArtifacts = buildExplorationSuggestionArtifacts(
+    branchDocument,
+    normalizedBranch,
+    suggestions,
+    loadingSuggestionCount,
+  );
   const displayDocument = {
     ...branchDocument,
     nodes: [...branchDocument.nodes, ...suggestionArtifacts.nodes],
@@ -4130,9 +4252,10 @@ function buildExplorationSuggestionArtifacts(
   document: CanvasDocument,
   branch: ExplorationBranch,
   suggestions: ExplorationSuggestion[],
+  loadingSuggestionCount: number,
 ) {
   const activeNode = document.nodes.find((node) => node.id === (branch.activeNodeId ?? branch.rootNodeId)) ?? null;
-  if (!activeNode || suggestions.length === 0) {
+  if (!activeNode || (suggestions.length === 0 && loadingSuggestionCount === 0)) {
     return { nodes: [] as CanvasNode[], edges: [] as CanvasEdge[] };
   }
 
@@ -4142,7 +4265,7 @@ function buildExplorationSuggestionArtifacts(
     { x: 310, y: 186 },
   ];
 
-  const nodes = suggestions.map((suggestion, index) => {
+  const suggestionNodes = suggestions.map((suggestion, index) => {
     const offset = offsets[index] ?? offsets[offsets.length - 1];
     return {
       id: suggestion.displayNodeId,
@@ -4156,14 +4279,39 @@ function buildExplorationSuggestionArtifacts(
     } satisfies CanvasNode;
   });
 
-  const edges = suggestions.map((suggestion) => ({
+  const loadingNodes = Array.from({ length: loadingSuggestionCount }, (_, index) => {
+    const slotIndex = Math.min(suggestions.length + index, offsets.length - 1);
+    const offset = offsets[slotIndex] ?? offsets[offsets.length - 1];
+    return {
+      id: `suggestion-loading-node:${branch.id}:${activeNode.id}:${slotIndex}`,
+      title: "",
+      description: "",
+      linked_files: [],
+      linked_symbols: [],
+      tags: ["suggestion", "suggestion-loading"],
+      x: activeNode.x + offset.x,
+      y: activeNode.y + offset.y,
+    } satisfies CanvasNode;
+  });
+
+  const suggestionEdges = suggestions.map((suggestion) => ({
     id: `suggestion-edge:${branch.id}:${suggestion.id}`,
     source_node_id: activeNode.id,
     target_node_id: suggestion.displayNodeId,
     label: suggestion.edgeLabel,
   }) satisfies CanvasEdge);
 
-  return { nodes, edges };
+  const loadingEdges = loadingNodes.map((node) => ({
+    id: `suggestion-edge-loading:${branch.id}:${node.id}`,
+    source_node_id: activeNode.id,
+    target_node_id: node.id,
+    label: "",
+  }) satisfies CanvasEdge);
+
+  return {
+    nodes: [...suggestionNodes, ...loadingNodes],
+    edges: [...suggestionEdges, ...loadingEdges],
+  };
 }
 
 function suggestionNodeId(branchId: string, suggestionId: string) {
@@ -4241,6 +4389,53 @@ function buildFallbackRelationSuggestion(activeTitle: string, relationQuery: str
     summary: `Explore the ${query.toLowerCase()} angle around ${base.toLowerCase()}.`,
     edge_label: query.toLowerCase(),
   };
+}
+
+function getActiveExplorationSuggestions(branch: ExplorationBranch) {
+  const activeNodeId = branch.activeNodeId ?? branch.rootNodeId;
+  return branch.suggestionsByNodeId?.[activeNodeId] ?? [];
+}
+
+function dedupeExplorationSuggestions(suggestions: ExplorationSuggestion[]) {
+  const seenTitles = new Set<string>();
+  const deduped: ExplorationSuggestion[] = [];
+  for (const suggestion of suggestions) {
+    const normalizedTitle = suggestion.title.trim().toLowerCase();
+    if (!normalizedTitle || seenTitles.has(normalizedTitle)) {
+      continue;
+    }
+    seenTitles.add(normalizedTitle);
+    deduped.push(suggestion);
+  }
+  return deduped;
+}
+
+function mergeExplorationSuggestions(
+  existing: ExplorationSuggestion[],
+  incoming: ExplorationSuggestion[],
+  document: CanvasDocument,
+  branch: ExplorationBranch,
+) {
+  const takenTitles = new Set(
+    uniqueNodeIds([...branch.pathNodeIds, ...branch.revealedNodeIds])
+      .map((nodeId) => findCanvasNodeTitle(document, nodeId).trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const filtered: ExplorationSuggestion[] = [];
+  const seenTitles = new Set<string>();
+  for (const suggestion of [...existing, ...incoming]) {
+    const normalizedTitle = suggestion.title.trim().toLowerCase();
+    if (!normalizedTitle) {
+      continue;
+    }
+    if (takenTitles.has(normalizedTitle) || seenTitles.has(normalizedTitle)) {
+      continue;
+    }
+    seenTitles.add(normalizedTitle);
+    filtered.push(suggestion);
+  }
+  return filtered.slice(0, 3);
 }
 
 function uniqueNodeIds(nodeIds: string[]) {
@@ -4324,7 +4519,10 @@ function buildExplorationContextDocument(
 }
 
 function countExplorationConcepts(branch: ExplorationBranch) {
-  return uniqueNodeIds([...branch.revealedNodeIds, ...branch.transientNodes.map((node) => node.id)]).length;
+  return (
+    uniqueNodeIds([...branch.revealedNodeIds, ...branch.transientNodes.map((node) => node.id)]).length +
+    Object.values(branch.suggestionsByNodeId ?? {}).reduce((count, suggestions) => count + suggestions.length, 0)
+  );
 }
 
 function areStringArraysEqual(left: string[], right: string[]) {
@@ -4382,6 +4580,7 @@ function areExplorationBranchesEqual(left: ExplorationBranch | null, right: Expl
     left.summaryPosition.y === right.summaryPosition.y &&
     areStringArraysEqual(left.pathNodeIds, right.pathNodeIds) &&
     areStringArraysEqual(left.revealedNodeIds, right.revealedNodeIds) &&
+    areExplorationSuggestionMapsEqual(left.suggestionsByNodeId ?? {}, right.suggestionsByNodeId ?? {}) &&
     areCanvasNodesEqual(left.transientNodes, right.transientNodes) &&
     areCanvasEdgesEqual(left.transientEdges, right.transientEdges)
   );
@@ -4396,6 +4595,34 @@ function areExplorationBranchMapsEqual(
   return (
     areStringArraysEqual(leftKeys, rightKeys) &&
     leftKeys.every((key) => areExplorationBranchesEqual(left[key], right[key]))
+  );
+}
+
+function areExplorationSuggestionsEqual(left: ExplorationSuggestion[], right: ExplorationSuggestion[]) {
+  return (
+    left.length === right.length &&
+    left.every((suggestion, index) => {
+      const other = right[index];
+      return (
+        suggestion.id === other.id &&
+        suggestion.displayNodeId === other.displayNodeId &&
+        suggestion.title === other.title &&
+        suggestion.summary === other.summary &&
+        suggestion.edgeLabel === other.edgeLabel
+      );
+    })
+  );
+}
+
+function areExplorationSuggestionMapsEqual(
+  left: Record<string, ExplorationSuggestion[]>,
+  right: Record<string, ExplorationSuggestion[]>,
+) {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return (
+    areStringArraysEqual(leftKeys, rightKeys) &&
+    leftKeys.every((key) => areExplorationSuggestionsEqual(left[key] ?? [], right[key] ?? []))
   );
 }
 
@@ -4417,8 +4644,8 @@ function addTransientExplorationNode(
     linked_files: sourceNode?.linked_files.slice(0, 3) ?? [],
     linked_symbols: [],
     tags: uniqueNodeIds([...(sourceNode?.tags ?? []), "exploration"]),
-    x: (sourceNode?.x ?? branch.summaryPosition.x) + 260,
-    y: (sourceNode?.y ?? branch.summaryPosition.y) + nextIndex * 42,
+    x: (sourceNode?.x ?? branch.summaryPosition.x) + 340,
+    y: sourceNode?.y ?? branch.summaryPosition.y,
   };
   const transientEdge: CanvasEdge = {
     id: `explore-edge:${branch.id}:${nextIndex + 1}`,
