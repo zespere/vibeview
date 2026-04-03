@@ -3334,19 +3334,20 @@ export default function Home() {
             </div>
           ) : null}
 
-          <button
-            className={isDockExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}
-            onClick={() => setConsoleVisibility((current) => (current === "expanded" ? "collapsed" : "expanded"))}
-            type="button"
-          >
-            <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
-            <span className={styles.notesConsoleBarSummary}>
-              {isSlashCommandMode && selectedCommandResult ? selectedCommandResult.title : latestConsoleSummary}
-            </span>
+          <div className={isDockExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}>
+            <button
+              className={styles.notesConsoleBarMain}
+              onClick={() => setConsoleVisibility((current) => (current === "expanded" ? "collapsed" : "expanded"))}
+              type="button"
+            >
+              <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
+              <span className={styles.notesConsoleBarSummary}>
+                {isSlashCommandMode && selectedCommandResult ? selectedCommandResult.title : latestConsoleSummary}
+              </span>
+            </button>
             <button
               className={styles.notesConsoleBarActionButton}
-              onClick={(event) => {
-                event.stopPropagation();
+              onClick={() => {
                 setConsoleVisibility("collapsed");
                 setDockVisibility("hidden");
               }}
@@ -3354,7 +3355,7 @@ export default function Home() {
             >
               Hide
             </button>
-          </button>
+          </div>
 
           <label className={styles.consoleComposer}>
             <textarea

@@ -914,6 +914,21 @@
   pointer-events: auto;
 }
 
+.notesConsoleBarMain {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
 .notesConsoleBarExpanded {
   border-bottom: 1px solid rgba(228, 219, 208, 0.7);
 }
