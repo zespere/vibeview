@@ -633,7 +633,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
         tabIndex={0}
         onClick={handleCardClick}
         onKeyDown={(event) => {
-          if ((event.key === "Enter" || event.key === " ") && !isLoadingSuggestion) {
+          if (event.key === "Enter" && !isLoadingSuggestion) {
             event.preventDefault();
             onSelectNode(node.id);
           }

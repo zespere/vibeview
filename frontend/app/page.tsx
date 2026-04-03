@@ -1330,14 +1330,29 @@ export default function Home() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented) {
-        return;
-      }
       const target = event.target;
       const isTypingIntoField =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable);
+      const isLeaderSpace =
+        (event.code === "Space" || event.key === " ") &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !isTypingIntoField;
+
+      if (isLeaderSpace) {
+        event.preventDefault();
+        setLeaderScope("root");
+        setCommandSelectedIndex(0);
+        return;
+      }
+
+      if (event.defaultPrevented) {
+        return;
+      }
 
       if (leaderScope) {
         if (event.key === "Escape") {
@@ -1406,20 +1421,6 @@ export default function Home() {
             return;
           }
         }
-      }
-
-      if (
-        event.key === " " &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey &&
-        !isTypingIntoField
-      ) {
-        event.preventDefault();
-        setLeaderScope("root");
-        setCommandSelectedIndex(0);
-        return;
       }
 
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
