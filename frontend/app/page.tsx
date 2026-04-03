@@ -150,7 +150,6 @@ export default function Home() {
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isPlanning, setIsPlanning] = useState(false);
-  const [isAnswering, setIsAnswering] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
@@ -277,7 +276,7 @@ export default function Home() {
     workspaceStatus.has_project_files;
   const isSlashCommandMode = codexPrompt.trim().startsWith("/");
   const commandQuery = isSlashCommandMode ? codexPrompt.trim().slice(1).trim() : "";
-  const isComposerBusy = isBuilding || isPlanning || isAnswering || codexPending;
+  const isComposerBusy = isBuilding || isPlanning || codexPending;
   const activeConversationSummary = useMemo(
     () =>
       activeProjectTreeItem?.conversations.find(
@@ -292,9 +291,6 @@ export default function Home() {
     if (isBuilding) {
       return "Building the project and refreshing notes...";
     }
-    if (isAnswering) {
-      return "Working through the request...";
-    }
     if (composerStatus) {
       return composerStatus;
     }
@@ -302,7 +298,7 @@ export default function Home() {
       return activeConversationSummary.title;
     }
     return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
-  }, [activeConversationSummary, composerStatus, consoleMessages, isAnswering, isBuilding, isPlanning]);
+  }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding, isPlanning]);
   const availableComposerModels = useMemo(() => {
     const items = [status?.codex_model, composerModel, ...GPT_MODEL_OPTIONS];
     return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
@@ -1318,160 +1314,6 @@ export default function Home() {
       }
     } finally {
       setIsBuilding(false);
-    }
-  }
-
-  async function submitAutoPrompt(
-    promptValue = codexPrompt.trim(),
-    options?: { preserveActiveView?: boolean },
-  ) {
-    const prompt = promptValue.trim();
-    if (!prompt || !activeRepoPath) {
-      return;
-    }
-
-    const userMessage: ConversationMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: prompt,
-      created_at: new Date().toISOString(),
-    };
-    const pendingMessages = [...consoleMessages, userMessage];
-    setConsoleMessages(pendingMessages);
-    setIsAnswering(true);
-    if (promptValue === codexPrompt.trim()) {
-      setCodexPrompt("");
-    }
-    setPendingPlan(null);
-    let ensuredConversationId: string | null = null;
-
-    try {
-      setErrorMessage(null);
-      setComposerStatus("Understanding request...");
-      ensuredConversationId =
-        activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
-          ? activeConversationId
-          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
-      if (!ensuredConversationId) {
-        setIsAnswering(false);
-        return;
-      }
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
-      let assistantContent = "";
-      const assistantId = `assistant-auto-${Date.now()}`;
-      setConsoleMessages([
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant",
-          title: "Working...",
-          content: "",
-          created_at: new Date().toISOString(),
-        },
-      ]);
-
-      let finalSummary = "Done.";
-      let resolvedMode: ProjectRunStreamEvent["mode"] | null = null;
-      await streamProjectRun(
-        activeRepoPath,
-        "auto",
-        prompt,
-        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
-        buildConversationContext(pendingMessages),
-        composerModel,
-        composerReasoning,
-        (event) => {
-          handleProjectRunEvent(event, {
-            assistantId,
-            onChunk: (text) => {
-              assistantContent += text;
-              setConsoleMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? { ...message, content: assistantContent } : message,
-                ),
-              );
-            },
-            onCompleted: (completedEvent) => {
-              resolvedMode = completedEvent.mode ?? resolvedMode;
-              finalSummary = completedEvent.summary ?? finalSummary;
-              if (completedEvent.mode === "build") {
-                if (completedEvent.document) {
-                  setCanvasDocument(completedEvent.document);
-                }
-                setConsoleMessages((current) =>
-                  current.map((message) =>
-                    message.id === assistantId
-                      ? {
-                          ...message,
-                          title: finalSummary,
-                          content:
-                            assistantContent ||
-                            [
-                              completedEvent.code_summary,
-                              completedEvent.note_summary,
-                              completedEvent.note_changes_summary
-                                ? `Notes changes summary:\n${completedEvent.note_changes_summary}`
-                                : "",
-                            ]
-                              .filter(Boolean)
-                              .join("\n\n"),
-                        }
-                      : message,
-                  ),
-                );
-              } else {
-                setConsoleMessages((current) =>
-                  current.map((message) =>
-                    message.id === assistantId
-                      ? {
-                          ...message,
-                          title: finalSummary,
-                          content: completedEvent.answer_text ?? assistantContent,
-                        }
-                      : message,
-                  ),
-                );
-              }
-              setComposerStatus(finalSummary);
-            },
-          });
-        },
-      );
-
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant" as const,
-          title: finalSummary,
-          content: assistantContent,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      if (resolvedMode === "build") {
-        await refreshCommitStatus(activeRepoPath);
-      }
-    } catch (error) {
-      setComposerStatus("Request failed.");
-      setErrorMessage(getErrorMessage(error));
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: `assistant-auto-error-${Date.now()}`,
-          role: "assistant" as const,
-          title: "Request failed.",
-          content: getErrorMessage(error),
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      if (ensuredConversationId) {
-        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      }
-    } finally {
-      setIsAnswering(false);
     }
   }
 
@@ -3366,7 +3208,9 @@ export default function Home() {
                   }}
                   type="button"
                 >
-                  <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
+                  <span className={styles.notesConsoleBarLabel}>
+                    {isSlashCommandMode ? "Commands" : "Conversation"}
+                  </span>
                   <span className={styles.notesConsoleHiddenMeta}>Show</span>
                 </button>
               </div>
@@ -3473,7 +3317,9 @@ export default function Home() {
               onClick={() => setConsoleVisibility((current) => (current === "expanded" ? "collapsed" : "expanded"))}
               type="button"
             >
-              <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
+              <span className={styles.notesConsoleBarLabel}>
+                {isSlashCommandMode ? "Commands" : "Conversation"}
+              </span>
               <span className={styles.notesConsoleBarSummary}>
                 {isSlashCommandMode && selectedCommandResult ? selectedCommandResult.title : latestConsoleSummary}
               </span>
@@ -3575,11 +3421,6 @@ export default function Home() {
                     <>
                       <span aria-hidden="true" className={styles.buttonSpinner} />
                       <span>Building...</span>
-                    </>
-                  ) : isAnswering ? (
-                    <>
-                      <span aria-hidden="true" className={styles.buttonSpinner} />
-                      <span>Working...</span>
                     </>
                   ) : (
                     <span>

@@ -992,14 +992,11 @@
 
 .notesConsoleBar,
 .notesConsoleBarExpanded {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 12px;
   width: 100%;
   background: transparent;
   color: #241d17;
-  cursor: pointer;
   border: 0;
   border-radius: 0;
   padding: 11px 16px 9px;
@@ -1011,6 +1008,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
+  width: 100%;
   min-width: 0;
   border: 0;
   background: transparent;
