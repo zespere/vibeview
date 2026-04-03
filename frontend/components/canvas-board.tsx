@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type SyntheticEvent } from "react";
 
 import "@xyflow/react/dist/style.css";
 import {
@@ -41,8 +41,8 @@ interface CanvasBoardProps {
   onSelectNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   onOpenNode: (nodeId: string) => void;
-  onToggleExpandNode: (nodeId: string) => void;
-  onResetNodeSize: (nodeId: string) => void;
+  onRenameNode: (nodeId: string) => void;
+  onActivateNode: (nodeId: string) => void;
   onPaneClick?: () => void;
 }
 
@@ -58,8 +58,7 @@ interface NoteNodeData extends Record<string, unknown> {
   node: CanvasNode;
   onOpenNode: (nodeId: string) => void;
   onSelectNode: (nodeId: string) => void;
-  onToggleExpandNode: (nodeId: string) => void;
-  onResetNodeSize: (nodeId: string) => void;
+  onActivateNode: (nodeId: string) => void;
   detailLevel: "minimal" | "compact" | "full";
   isExpanded: boolean;
   explorationControls: CanvasBoardProps["explorationControls"];
@@ -86,14 +85,15 @@ export function CanvasBoard({
   onSelectNode,
   onSelectNodes,
   onOpenNode,
-  onToggleExpandNode,
-  onResetNodeSize,
+  onRenameNode,
+  onActivateNode,
   onPaneClick,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
   const isDraggingRef = useRef(false);
   const openNodeRef = useRef(onOpenNode);
   const selectNodeRef = useRef(onSelectNode);
+  const activateNodeRef = useRef(onActivateNode);
   const repoPath = document?.repo_path ?? "";
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [localNodes, setLocalNodes] = useState<Array<Node<NoteNodeData>>>([]);
@@ -106,7 +106,8 @@ export function CanvasBoard({
   useEffect(() => {
     openNodeRef.current = onOpenNode;
     selectNodeRef.current = onSelectNode;
-  }, [onOpenNode, onSelectNode]);
+    activateNodeRef.current = onActivateNode;
+  }, [onActivateNode, onOpenNode, onSelectNode]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -150,8 +151,7 @@ export function CanvasBoard({
         node,
         onOpenNode: (nodeId: string) => openNodeRef.current(nodeId),
         onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
-        onToggleExpandNode,
-        onResetNodeSize,
+        onActivateNode: (nodeId: string) => activateNodeRef.current(nodeId),
         detailLevel,
         isExpanded: expandedNodeId === node.id,
         explorationControls,
@@ -159,7 +159,7 @@ export function CanvasBoard({
       selected: selectedNodeIds.includes(node.id),
       draggable: true,
     }));
-  }, [detailLevel, document, expandedNodeId, explorationControls, onResetNodeSize, onToggleExpandNode, selectedNodeIds]);
+  }, [detailLevel, document, expandedNodeId, explorationControls, selectedNodeIds]);
 
   useEffect(() => {
     if (isDraggingRef.current) {
@@ -260,14 +260,6 @@ export function CanvasBoard({
         setPendingSelectionIds(nextNodeIds);
       }
     }
-  };
-
-  const handleNodeClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
-    onSelectNode(node.id);
-  };
-
-  const handleNodeDoubleClick: NodeMouseHandler<Node<NoteNodeData>> = (_event, node) => {
-    onOpenNode(node.id);
   };
 
   useEffect(() => {
@@ -391,8 +383,6 @@ export function CanvasBoard({
           });
         }}
         onNodesChange={handleNodesChange}
-        onNodeClick={handleNodeClick}
-        onNodeDoubleClick={handleNodeDoubleClick}
         onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onPaneClick={() => {
@@ -430,27 +420,55 @@ export function CanvasBoard({
           onPointerDown={(event) => event.stopPropagation()}
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          <button
-            className={styles.canvasContextItem}
-            onClick={() => {
-              onCreateNodeAt(contextMenu.canvasX, contextMenu.canvasY);
-              setContextMenu(null);
-            }}
-            type="button"
-          >
-            Create note
-          </button>
-          {contextMenu.nodeId ? (
+          {!contextMenu.nodeId ? (
             <button
-              className={styles.canvasContextItemDanger}
+              className={styles.canvasContextItem}
               onClick={() => {
-                onDeleteNode(contextMenu.nodeId as string);
+                onCreateNodeAt(contextMenu.canvasX, contextMenu.canvasY);
                 setContextMenu(null);
               }}
               type="button"
             >
-              Delete note
+              Create note
             </button>
+          ) : null}
+          {contextMenu.nodeId ? (
+            <>
+              {canOpenCanvasNodeInTab(document, contextMenu.nodeId) ? (
+                <button
+                  className={styles.canvasContextItem}
+                  onClick={() => {
+                    onOpenNode(contextMenu.nodeId as string);
+                    setContextMenu(null);
+                  }}
+                  type="button"
+                >
+                  Open in tab
+                </button>
+              ) : null}
+              {canRenameCanvasNode(document, contextMenu.nodeId) ? (
+                <button
+                  className={styles.canvasContextItem}
+                  onClick={() => {
+                    onRenameNode(contextMenu.nodeId as string);
+                    setContextMenu(null);
+                  }}
+                  type="button"
+                >
+                  Rename
+                </button>
+              ) : null}
+              <button
+                className={styles.canvasContextItemDanger}
+                onClick={() => {
+                  onDeleteNode(contextMenu.nodeId as string);
+                  setContextMenu(null);
+                }}
+                type="button"
+              >
+                Delete note
+              </button>
+            </>
           ) : null}
         </div>
       ) : null}
@@ -461,10 +479,9 @@ export function CanvasBoard({
 function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boolean }) {
   const {
     node,
+    onActivateNode,
     onOpenNode,
-    onResetNodeSize,
     onSelectNode,
-    onToggleExpandNode,
     detailLevel,
     explorationControls,
     isExpanded,
@@ -476,11 +493,32 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
   const isBranchSummary = node.id.startsWith("branch-summary:");
   const isTransientExploration = node.id.startsWith("explore-node:");
   const canOpenInTab = !isSuggestion && !isLoadingSuggestion && !isBranchSummary && !isTransientExploration;
-  const canExpand = !isSuggestion && !isLoadingSuggestion && !isBranchSummary;
   const isExplorationActive = explorationControls?.activeNodeId === node.id;
   const nodeClassName = selected
     ? `${styles.canvasNodeActive} ${isSuggestion ? styles.canvasNodeSuggestionActive : ""} ${isLoadingSuggestion ? styles.canvasNodeSuggestionLoading : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
     : `${styles.canvasNode} ${isSuggestion ? styles.canvasNodeSuggestion : ""} ${isLoadingSuggestion ? styles.canvasNodeSuggestionLoading : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim();
+
+  function handleCardClick(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isLoadingSuggestion) {
+      return;
+    }
+    if (event.metaKey || event.ctrlKey) {
+      if (canOpenInTab) {
+        event.preventDefault();
+        onOpenNode(node.id);
+      }
+      return;
+    }
+    onSelectNode(node.id);
+  }
+
+  function handleCardDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isLoadingSuggestion) {
+      return;
+    }
+    event.preventDefault();
+    onActivateNode(node.id);
+  }
 
   function stopInteraction(event: SyntheticEvent) {
     event.stopPropagation();
@@ -498,20 +536,12 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
       <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-left`} position={Position.Left} type="target" />
       <div
         className={nodeClassName}
-        onClick={() => {
-          if (!isLoadingSuggestion) {
-            onSelectNode(node.id);
-          }
-        }}
-        onDoubleClick={() => {
-          if (!isLoadingSuggestion) {
-            onOpenNode(node.id);
-          }
-        }}
+        onDoubleClick={handleCardDoubleClick}
         role="button"
         tabIndex={0}
+        onClick={handleCardClick}
         onKeyDown={(event) => {
-          if ((event.key === "Enter" || event.key === " ") && !isLoadingSuggestion) {
+          if (event.key === " " && !isLoadingSuggestion) {
             event.preventDefault();
             onSelectNode(node.id);
           }
@@ -532,54 +562,6 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
                   ))}
                 </>
               )}
-            </div>
-            <div className={`${styles.canvasNodeActions} nodrag nopan`}>
-              {canOpenInTab ? (
-                <button
-                  className={styles.canvasNodeAction}
-                  onDoubleClick={stopInteraction}
-                  onMouseDown={stopInteraction}
-                  onPointerDown={stopInteraction}
-                  onClick={(event) => {
-                    stopInteraction(event);
-                    onOpenNode(node.id);
-                  }}
-                  type="button"
-                >
-                  Open
-                </button>
-              ) : null}
-              {canExpand ? (
-                isExpanded ? (
-                  <button
-                    className={styles.canvasNodeAction}
-                    onDoubleClick={stopInteraction}
-                    onMouseDown={stopInteraction}
-                    onPointerDown={stopInteraction}
-                    onClick={(event) => {
-                      stopInteraction(event);
-                      onResetNodeSize(node.id);
-                    }}
-                    type="button"
-                  >
-                    Shrink
-                  </button>
-                ) : (
-                  <button
-                    className={styles.canvasNodeAction}
-                    onDoubleClick={stopInteraction}
-                    onMouseDown={stopInteraction}
-                    onPointerDown={stopInteraction}
-                    onClick={(event) => {
-                      stopInteraction(event);
-                      onToggleExpandNode(node.id);
-                    }}
-                    type="button"
-                  >
-                    Expand
-                  </button>
-                )
-              ) : null}
             </div>
           </div>
         ) : null}
@@ -690,6 +672,18 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
       </div>
     </div>
   );
+}
+
+function canOpenCanvasNodeInTab(document: CanvasDocument | null, nodeId: string) {
+  const node = document?.nodes.find((item) => item.id === nodeId);
+  if (!node) {
+    return false;
+  }
+  return !node.tags.includes("suggestion") && !node.tags.includes("suggestion-loading") && !node.id.startsWith("branch-summary:") && !node.id.startsWith("explore-node:");
+}
+
+function canRenameCanvasNode(document: CanvasDocument | null, nodeId: string) {
+  return canOpenCanvasNodeInTab(document, nodeId);
 }
 
 function compactDescription(value: string) {

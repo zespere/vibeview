@@ -215,8 +215,10 @@ export default function Home() {
   const [pinnedCanvasNodeIds, setPinnedCanvasNodeIds] = useState<string[]>([]);
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [requestedTitleFocusNodeId, setRequestedTitleFocusNodeId] = useState<string | null>(null);
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const noteTitleInputRef = useRef<HTMLInputElement | null>(null);
   const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const leaderResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const expectedRepoPathRef = useRef("");
@@ -239,6 +241,7 @@ export default function Home() {
   );
 
   const activeView = activeTab?.type === "view" ? activeTab.view : "notes";
+  const activeNoteTabId = activeTab?.type === "note" ? activeTab.nodeId : null;
   const activeExplorationSession =
     activeTab?.type === "exploration" ? explorationTabs[activeTab.explorationId] ?? null : null;
   const transientNotesExploration =
@@ -1215,6 +1218,9 @@ export default function Home() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) {
+        return;
+      }
       const target = event.target;
       const isTypingIntoField =
         target instanceof HTMLInputElement ||
@@ -1325,6 +1331,25 @@ export default function Home() {
         return;
       }
 
+      const canUseCanvasOpenShortcut =
+        !isTypingIntoField &&
+        !leaderScope &&
+        (activeTab?.type === "view" || activeTab?.type === "exploration") &&
+        !!selectedCanvasNodeId &&
+        !!canvasDocument?.nodes.find(
+          (node) =>
+            node.id === selectedCanvasNodeId &&
+            !node.tags.includes("suggestion") &&
+            !node.tags.includes("suggestion-loading") &&
+            !node.id.startsWith("branch-summary:") &&
+            !node.id.startsWith("explore-node:"),
+        );
+      if (canUseCanvasOpenShortcut && (event.key === "Enter" || event.key.toLowerCase() === "o")) {
+        event.preventDefault();
+        openCanvasNode(selectedCanvasNodeId as string);
+        return;
+      }
+
       if (
         event.key === "/" &&
         !event.metaKey &&
@@ -1400,6 +1425,7 @@ export default function Home() {
     leaderRootItems,
     leaderScope,
     notesExploration,
+    selectedCanvasNodeId,
   ]);
 
   useEffect(() => {
@@ -1409,6 +1435,18 @@ export default function Home() {
   useEffect(() => {
     setCommandSelectedIndex(0);
   }, [leaderScope]);
+
+  useEffect(() => {
+    if (!requestedTitleFocusNodeId || activeNoteTabId !== requestedTitleFocusNodeId) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      noteTitleInputRef.current?.focus();
+      noteTitleInputRef.current?.select();
+      setRequestedTitleFocusNodeId(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeNoteTabId, requestedTitleFocusNodeId]);
 
   useEffect(() => {
     if (isSlashCommandMode) {
@@ -2393,11 +2431,7 @@ export default function Home() {
     setComposerStatus("Cleared pinned context.");
   }
 
-  function openCanvasNode(nodeId: string) {
-    setSelectedCanvasNodeId((current) => (current === nodeId ? current : nodeId));
-    setSelectedCanvasNodeIds((current) =>
-      current.length === 1 && current[0] === nodeId ? current : [nodeId],
-    );
+  function openCanvasNode(nodeId: string, options?: { focusTitle?: boolean }) {
     setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
     setOpenTabs((current) =>
       current.some((tab) => tab.id === `note:${nodeId}`)
@@ -2405,14 +2439,52 @@ export default function Home() {
         : [...current, { id: `note:${nodeId}`, type: "note", nodeId }],
     );
     setActiveTabId(`note:${nodeId}`);
+    if (options?.focusTitle) {
+      setRequestedTitleFocusNodeId(nodeId);
+    }
+  }
+
+  function handleRenameCanvasNode(nodeId: string) {
+    openCanvasNode(nodeId, { focusTitle: true });
+  }
+
+  function handleActivateCanvasNode(nodeId: string) {
+    const branchId = parseBranchSummaryNodeId(nodeId);
+    if (branchId) {
+      const branch = explorationBranches[branchId];
+      if (branch) {
+        setNotesExploration(branch);
+        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+      }
+      return;
+    }
+
+    const suggestion = notesExploration ? findSuggestionForBranch(notesExploration, nodeId) : null;
+    if (suggestion && notesExploration) {
+      materializeExplorationSuggestion(notesExploration, suggestion);
+      return;
+    }
+
+    if (isTransientExplorationNodeId(nodeId)) {
+      if (activeTab?.type === "exploration" && activeExplorationSession) {
+        handleExplorationSelection(activeExplorationSession, [nodeId], { persistent: true });
+        return;
+      }
+      if (notesExploration) {
+        handleExplorationSelection(notesExploration, [nodeId]);
+      }
+      return;
+    }
+
+    setSelectedCanvasNodeId((current) => (current === nodeId ? current : nodeId));
+    setSelectedCanvasNodeIds((current) => (current.length === 1 && current[0] === nodeId ? current : [nodeId]));
+    setExpandedCanvasNodeId((current) => (current === nodeId ? null : nodeId));
   }
 
   function toggleCanvasNodeExpansion(nodeId: string) {
     setExpandedCanvasNodeId((current) => (current === nodeId ? null : nodeId));
-  }
-
-  function resetCanvasNodeSize(nodeId: string) {
-    setExpandedCanvasNodeId((current) => (current === nodeId ? null : current));
   }
 
   function collapseNotesExploration() {
@@ -3365,25 +3437,9 @@ export default function Home() {
                     void handlePersistCanvasNodePosition(nodeId, x, y);
                   });
                 }}
-                onOpenNode={(nodeId) => {
-                  const branchId = parseBranchSummaryNodeId(nodeId);
-                  if (branchId && !notesExploration) {
-                    const branch = explorationBranches[branchId];
-                    if (branch) {
-                      setNotesExploration(branch);
-                      setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-                      setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
-                      setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-                    }
-                    return;
-                  }
-                  const suggestion = notesExploration ? findSuggestionForBranch(notesExploration, nodeId) : null;
-                  if (suggestion && notesExploration) {
-                    materializeExplorationSuggestion(notesExploration, suggestion);
-                    return;
-                  }
-                  openCanvasNode(nodeId);
-                }}
+                onActivateNode={handleActivateCanvasNode}
+                onOpenNode={openCanvasNode}
+                onRenameNode={handleRenameCanvasNode}
                 onPaneClick={notesExploration ? collapseNotesExploration : undefined}
                 onSelectNode={(nodeId) =>
                   notesExploration
@@ -3395,8 +3451,6 @@ export default function Home() {
                     ? handleExplorationSelection(notesExploration, nodeIds)
                     : handleSelectCanvasNodes(nodeIds)
                 }
-                onToggleExpandNode={toggleCanvasNodeExpansion}
-                onResetNodeSize={resetCanvasNodeSize}
                 selectedNodeIds={notesExploration?.activeNodeId ? [notesExploration.activeNodeId] : selectedCanvasNodeIds}
               />
               {renderCanvasEditReview()}
@@ -3431,7 +3485,7 @@ export default function Home() {
                 void handlePersistCanvasNodePosition(nodeId, x, y);
               });
             }}
-            onOpenNode={(nodeId) => {
+            onActivateNode={(nodeId) => {
               const suggestion = findSuggestionForBranch(branch, nodeId, { persistent: true });
               if (suggestion) {
                 materializeExplorationSuggestion(branch, suggestion, { persistent: true });
@@ -3441,12 +3495,12 @@ export default function Home() {
                 handleExplorationSelection(branch, [nodeId], { persistent: true });
                 return;
               }
-              openCanvasNode(nodeId);
+              toggleCanvasNodeExpansion(nodeId);
             }}
+            onOpenNode={openCanvasNode}
+            onRenameNode={handleRenameCanvasNode}
             onSelectNode={(nodeId) => handleExplorationSelection(branch, [nodeId], { persistent: true })}
             onSelectNodes={(nodeIds) => handleExplorationSelection(branch, nodeIds, { persistent: true })}
-            onToggleExpandNode={toggleCanvasNodeExpansion}
-            onResetNodeSize={resetCanvasNodeSize}
             selectedNodeIds={branch.activeNodeId ? [branch.activeNodeId] : []}
           />
         </div>
@@ -3492,6 +3546,7 @@ export default function Home() {
                   className={styles.noteTitleInput}
                   onChange={(event) => setCanvasDraftTitle(event.target.value)}
                   placeholder="Untitled note"
+                  ref={noteTitleInputRef}
                   value={canvasDraftTitle}
                 />
 
