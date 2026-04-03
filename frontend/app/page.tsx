@@ -4801,8 +4801,21 @@ function resizeComposerInput(element: HTMLTextAreaElement | null) {
     return;
   }
 
+  const computedStyle = window.getComputedStyle(element);
+  const cssMinHeight = Number.parseFloat(computedStyle.minHeight) || 62;
+  const measuredHeight = element.getBoundingClientRect().height;
+  const storedBaseHeight = Number.parseFloat(element.dataset.baseHeight || "");
+  const baseHeight =
+    Number.isFinite(storedBaseHeight) && storedBaseHeight > 0
+      ? storedBaseHeight
+      : Math.max(cssMinHeight, measuredHeight || 0);
+
+  if (!element.dataset.baseHeight && baseHeight > 0) {
+    element.dataset.baseHeight = `${baseHeight}`;
+  }
+
   element.style.height = "0px";
-  const nextHeight = Math.min(Math.max(element.scrollHeight, 54), 148);
+  const nextHeight = Math.min(Math.max(element.scrollHeight, baseHeight), 148);
   element.style.height = `${nextHeight}px`;
 }
 
