@@ -222,6 +222,10 @@ export default function Home() {
   const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const leaderResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const expectedRepoPathRef = useRef("");
+  const openProjectConversationRef = useRef<((repoPathToOpen: string, conversation?: ConversationSummary) => Promise<void>) | null>(
+    null,
+  );
+  const urlIntentRef = useRef<{ repoPath: string | null; noteId: string | null; handledRepo: boolean; handledNote: boolean } | null>(null);
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
 
@@ -242,6 +246,11 @@ export default function Home() {
 
   const activeView = activeTab?.type === "view" ? activeTab.view : "notes";
   const activeNoteTabId = activeTab?.type === "note" ? activeTab.nodeId : null;
+  const activeNoteTabNode = useMemo(
+    () => (activeNoteTabId ? canvasDocument?.nodes.find((item) => item.id === activeNoteTabId) ?? null : null),
+    [activeNoteTabId, canvasDocument],
+  );
+  const editableCanvasNode = activeNoteTabNode ?? selectedCanvasNode;
   const activeExplorationSession =
     activeTab?.type === "exploration" ? explorationTabs[activeTab.explorationId] ?? null : null;
   const transientNotesExploration =
@@ -272,10 +281,6 @@ export default function Home() {
       .filter((item): item is NonNullable<typeof item> => item !== null);
   }, [canvasDocument, openCanvasNodeIds]);
 
-  const canvasOutgoingEdges =
-    canvasDocument?.edges.filter((edge) => edge.source_node_id === selectedCanvasNodeId) ?? [];
-  const canvasIncomingEdges =
-    canvasDocument?.edges.filter((edge) => edge.target_node_id === selectedCanvasNodeId) ?? [];
   const sampleRepos = Object.entries(status?.sample_repos ?? {});
   const currentRailWidth = isRailExpanded ? railWidth : 72;
   const activeRepoPath = (project?.repo_path || repoPath).trim();
@@ -757,6 +762,25 @@ export default function Home() {
   }, [activeRepoPath]);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const repoParam = params.get("repo")?.trim() || null;
+    const noteParam = params.get("note")?.trim() || null;
+    if (!repoParam && !noteParam) {
+      return;
+    }
+    urlIntentRef.current = {
+      repoPath: repoParam,
+      noteId: noteParam,
+      handledRepo: false,
+      handledNote: false,
+    };
+    if (repoParam) {
+      expectedRepoPathRef.current = repoParam;
+      setRepoPath(repoParam);
+    }
+  }, []);
+
+  useEffect(() => {
     startStatusTransition(() => {
       void (async () => {
         try {
@@ -941,6 +965,56 @@ export default function Home() {
       }
     })();
   }, [project?.repo_path]);
+
+  useEffect(() => {
+    const intent = urlIntentRef.current;
+    if (!intent || intent.handledRepo) {
+      return;
+    }
+    if (!intent.repoPath) {
+      intent.handledRepo = true;
+      return;
+    }
+    if ((project?.repo_path ?? "").trim() === intent.repoPath) {
+      intent.handledRepo = true;
+      return;
+    }
+    intent.handledRepo = true;
+    startProjectTransition(() => {
+      void openProjectConversationRef.current?.(intent.repoPath as string);
+    });
+  }, [project?.repo_path]);
+
+  useEffect(() => {
+    const intent = urlIntentRef.current;
+    if (!intent || intent.handledNote || !intent.noteId || !intent.repoPath) {
+      return;
+    }
+    if (activeRepoPath !== intent.repoPath || !canvasDocument) {
+      return;
+    }
+    if (!canvasDocument.nodes.some((node) => node.id === intent.noteId)) {
+      return;
+    }
+    intent.handledNote = true;
+    openCanvasNode(intent.noteId);
+  }, [activeRepoPath, canvasDocument]);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (activeRepoPath) {
+      params.set("repo", activeRepoPath);
+    }
+    if (activeTab?.type === "note") {
+      params.set("note", activeTab.nodeId);
+    }
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) {
+      window.history.replaceState(null, "", nextUrl);
+    }
+  }, [activeRepoPath, activeTab]);
 
   useEffect(() => {
     setExplorationBranches(readStoredExplorationBranches(activeRepoPath));
@@ -1135,7 +1209,7 @@ export default function Home() {
   }, [project?.repo_path]);
 
   useEffect(() => {
-    if (!selectedCanvasNode) {
+    if (!editableCanvasNode) {
       setCanvasDraftTitle("");
       setCanvasDraftDescription("");
       setCanvasDraftTags("");
@@ -1143,12 +1217,12 @@ export default function Home() {
       setCanvasDraftSymbols("");
       return;
     }
-    setCanvasDraftTitle(selectedCanvasNode.title);
-    setCanvasDraftDescription(selectedCanvasNode.description);
-    setCanvasDraftTags(selectedCanvasNode.tags.join(", "));
-    setCanvasDraftFiles(selectedCanvasNode.linked_files.join("\n"));
-    setCanvasDraftSymbols(selectedCanvasNode.linked_symbols.join("\n"));
-  }, [selectedCanvasNode]);
+    setCanvasDraftTitle(editableCanvasNode.title);
+    setCanvasDraftDescription(editableCanvasNode.description);
+    setCanvasDraftTags(editableCanvasNode.tags.join(", "));
+    setCanvasDraftFiles(editableCanvasNode.linked_files.join("\n"));
+    setCanvasDraftSymbols(editableCanvasNode.linked_symbols.join("\n"));
+  }, [editableCanvasNode]);
 
   useEffect(() => {
     const isAnyDockExpanded = dockVisibility === "visible" && consoleVisibility === "expanded";
@@ -2316,6 +2390,7 @@ export default function Home() {
       setErrorMessage(getErrorMessage(error));
     }
   }
+  openProjectConversationRef.current = openProjectConversation;
 
   async function handleSaveProject() {
     startProjectTransition(() => {
@@ -3355,18 +3430,18 @@ export default function Home() {
   }
 
   async function handleSaveCanvasNode() {
-    if (!selectedCanvasNode) {
+    if (!editableCanvasNode) {
       return;
     }
     startCanvasTransition(() => {
       void (async () => {
         try {
-          const response = await updateCanvasNode(selectedCanvasNode.id, {
+          const response = await updateCanvasNode(editableCanvasNode.id, {
             title: canvasDraftTitle.trim(),
             description: canvasDraftDescription,
             tags: parseTagList(canvasDraftTags),
-            x: selectedCanvasNode.x,
-            y: selectedCanvasNode.y,
+            x: editableCanvasNode.x,
+            y: editableCanvasNode.y,
             linked_files: parseLineList(canvasDraftFiles),
             linked_symbols: parseLineList(canvasDraftSymbols),
           });
@@ -3510,6 +3585,8 @@ export default function Home() {
 
   function renderNoteTabView(nodeId: string) {
     const node = canvasDocument?.nodes.find((item) => item.id === nodeId) ?? null;
+    const noteOutgoingEdges = canvasDocument?.edges.filter((edge) => edge.source_node_id === nodeId) ?? [];
+    const noteIncomingEdges = canvasDocument?.edges.filter((edge) => edge.target_node_id === nodeId) ?? [];
 
     if (!node) {
       return <EmptyState message="This note no longer exists." />;
@@ -3553,8 +3630,8 @@ export default function Home() {
                 <div className={styles.noteMetaBar}>
                   <span>{node.linked_files.length} linked files</span>
                   <span>{node.linked_symbols.length} linked symbols</span>
-                  <span>{canvasOutgoingEdges.length} outgoing</span>
-                  <span>{canvasIncomingEdges.length} incoming</span>
+                  <span>{noteOutgoingEdges.length} outgoing</span>
+                  <span>{noteIncomingEdges.length} incoming</span>
                 </div>
               </div>
 
@@ -3612,7 +3689,7 @@ export default function Home() {
                 <div className={styles.noteSidebarSection}>
                   <span className={styles.fieldLabel}>Connections</span>
                   <ul className={styles.noteRelationshipList}>
-                    {canvasOutgoingEdges.map((edge) => (
+                    {noteOutgoingEdges.map((edge) => (
                       <li className={styles.noteRelationshipItem} key={edge.id}>
                         <span className={styles.relationshipDirection}>{edge.label || "out"}</span>
                         <button
@@ -3624,7 +3701,7 @@ export default function Home() {
                         </button>
                       </li>
                     ))}
-                    {canvasIncomingEdges.map((edge) => (
+                    {noteIncomingEdges.map((edge) => (
                       <li className={styles.noteRelationshipItem} key={edge.id}>
                         <span className={styles.relationshipDirection}>{edge.label || "in"}</span>
                         <button
