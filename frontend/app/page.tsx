@@ -5914,41 +5914,42 @@ function renderConsoleMessageContent(
   document: CanvasDocument | null,
   onOpenNode: (nodeId: string) => void,
 ) {
-  if (!document || document.nodes.length === 0) {
-    return content;
-  }
-
   const titleToId = new Map(
-    document.nodes
+    (document?.nodes ?? [])
       .filter((node) => node.title.trim())
       .map((node) => [node.title.trim(), node.id] as const),
   );
   const titles = [...titleToId.keys()].sort((left, right) => right.length - left.length);
-  if (titles.length === 0) {
-    return content;
-  }
+  const notePattern = titles.length
+    ? new RegExp(`\\b(${titles.map(escapeRegExp).join("|")})\\b`, "g")
+    : null;
+  const markdownLinkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
 
-  const pattern = new RegExp(`\\b(${titles.map(escapeRegExp).join("|")})\\b`, "g");
-  const lines = content.split("\n");
+  function renderPlainText(text: string, lineIndex: number, segmentKey: string) {
+    if (!text) {
+      return [];
+    }
+    if (!notePattern || titles.length === 0) {
+      return [text];
+    }
 
-  return lines.map((line, lineIndex) => {
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
-    pattern.lastIndex = 0;
+    notePattern.lastIndex = 0;
 
-    while ((match = pattern.exec(line)) !== null) {
+    while ((match = notePattern.exec(text)) !== null) {
       const [matchedText] = match;
       const start = match.index;
       if (start > lastIndex) {
-        parts.push(line.slice(lastIndex, start));
+        parts.push(text.slice(lastIndex, start));
       }
       const nodeId = titleToId.get(matchedText.trim());
       if (nodeId) {
         parts.push(
           <button
             className={styles.consoleNoteLink}
-            key={`${lineIndex}-${start}-${matchedText}`}
+            key={`${lineIndex}-${segmentKey}-${start}-${matchedText}`}
             onClick={() => onOpenNode(nodeId)}
             type="button"
           >
@@ -5961,8 +5962,60 @@ function renderConsoleMessageContent(
       lastIndex = start + matchedText.length;
     }
 
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : [text];
+  }
+
+  const lines = content.split("\n");
+
+  return lines.map((line, lineIndex) => {
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    markdownLinkPattern.lastIndex = 0;
+
+    while ((match = markdownLinkPattern.exec(line)) !== null) {
+      const [fullMatch, label, href] = match;
+      const start = match.index;
+      if (start > lastIndex) {
+        parts.push(...renderPlainText(line.slice(lastIndex, start), lineIndex, `plain-${start}`));
+      }
+
+      if (/^https?:\/\//i.test(href)) {
+        parts.push(
+          <a
+            className={styles.consoleFileLink}
+            href={href}
+            key={`${lineIndex}-md-${start}-${label}`}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {label}
+          </a>,
+        );
+      } else {
+        parts.push(
+          <button
+            className={styles.consoleFileLink}
+            key={`${lineIndex}-md-${start}-${label}`}
+            onClick={() => {
+              void navigator.clipboard.writeText(href);
+            }}
+            title={href}
+            type="button"
+          >
+            {label}
+          </button>,
+        );
+      }
+      lastIndex = start + fullMatch.length;
+    }
+
     if (lastIndex < line.length) {
-      parts.push(line.slice(lastIndex));
+      parts.push(...renderPlainText(line.slice(lastIndex), lineIndex, `tail-${lastIndex}`));
     }
     if (parts.length === 0) {
       parts.push(line);

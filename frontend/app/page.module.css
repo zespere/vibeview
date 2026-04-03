@@ -1474,6 +1474,26 @@
   text-decoration-color: rgba(111, 69, 31, 0.5);
 }
 
+.consoleFileLink {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: #8b5c32;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(139, 92, 50, 0.3);
+  text-underline-offset: 2px;
+}
+
+.consoleFileLink:hover {
+  color: #6f451f;
+  text-decoration-color: rgba(111, 69, 31, 0.5);
+}
+
 .consoleMessageActions {
   display: flex;
   margin-top: 4px;
