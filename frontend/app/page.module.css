@@ -1741,57 +1741,79 @@
   min-height: 100%;
 }
 
-.projectPrimaryCard {
-  border: 1px solid #ddd5ca;
-  border-radius: 12px;
-  background: #fffdf9;
-  padding: 18px;
-}
-
-.projectTray {
-  margin-top: auto;
-}
-
-.projectTrayToggle,
-.projectTrayToggleOpen {
+.projectPanel {
   display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
+  max-width: 880px;
+  flex-direction: column;
+  gap: 18px;
   border: 1px solid #ddd5ca;
   border-radius: 12px;
   background: #fffdf9;
-  color: #34291f;
-  font: inherit;
-  padding: 12px 14px;
-  text-align: left;
-  cursor: pointer;
+  padding: 20px;
 }
 
-.projectTrayToggleOpen {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  border-bottom-color: #ebe2d6;
+.projectSection {
+  display: flex;
+  flex-direction: column;
 }
 
-.projectTrayToggleMeta {
-  color: #7f7263;
+.projectSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.projectSummaryCard {
+  display: flex;
+  min-height: 102px;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #e6ddd1;
+  border-radius: 10px;
+  background: #fcf8f2;
+  padding: 14px 15px;
+}
+
+.projectSummaryLabel,
+.projectGitMeta {
+  color: #7b6f61;
   font-size: 12px;
 }
 
-.projectTrayPanel {
-  border: 1px solid #ddd5ca;
-  border-top: 0;
-  border-bottom-left-radius: 12px;
-  border-bottom-right-radius: 12px;
-  background: #fffdf9;
-  padding: 14px;
+.projectSummaryValue,
+.projectGitTitle {
+  color: #2e241b;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
-.projectTrayGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-  gap: 14px;
+.projectSummaryMeta {
+  color: #5f5346;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.projectGitSection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid #ede4d8;
+  padding-top: 16px;
+}
+
+.projectGitHeader {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.projectGitActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .inspectPane {
@@ -2839,13 +2861,18 @@
 
   .detailGrid,
   .optionGrid,
-  .projectTrayGrid {
-    grid-template-columns: 1fr;
-  }
-
   .actionsRow {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .projectSummaryGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .projectGitSection {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .notesConsoleShell {

@@ -15,7 +15,6 @@ import {
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
 import {
-  API_BASE_URL,
   createCanvasNode,
   createProjectCommit,
   pushProjectCommits,
@@ -27,7 +26,6 @@ import {
   fetchProjectsTree,
   fetchProject,
   fetchProjectWorkspaceStatus,
-  fetchProjectAgents,
   fetchStatus,
   createProjectConversation,
   generateCanvasFromPrompt,
@@ -35,9 +33,7 @@ import {
   resetCanvas,
   updateProject,
   updateProjectConversation,
-  updateProjectAgents,
   updateCanvasNode,
-  type AgentsDocumentResponse,
   type CanvasDocument,
   type CanvasEdge,
   type CanvasNode,
@@ -168,8 +164,6 @@ export default function Home() {
   const [expandedProjectPaths, setExpandedProjectPaths] = useState<Set<string>>(new Set());
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversationRepoPath, setActiveConversationRepoPath] = useState<string | null>(null);
-  const [agentsDocument, setAgentsDocument] = useState<AgentsDocumentResponse | null>(null);
-  const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [codexPrompt, setCodexPrompt] = useState("");
   const [composerCaretIndex, setComposerCaretIndex] = useState(0);
@@ -188,7 +182,6 @@ export default function Home() {
   const [dockOffset, setDockOffset] = useState({ x: 0, y: 0 });
   const [isDockDragging, setIsDockDragging] = useState(false);
   const [leaderScope, setLeaderScope] = useState<LeaderScope | null>(null);
-  const [isProjectTrayExpanded, setIsProjectTrayExpanded] = useState(false);
   const [isNoteSidebarCollapsed, setIsNoteSidebarCollapsed] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
   const [pendingPlan, setPendingPlan] = useState<{
@@ -222,9 +215,8 @@ export default function Home() {
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
 
-  const [statusPending, startStatusTransition] = useTransition();
+  const [, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
-  const [agentsPending, startAgentsTransition] = useTransition();
   const [codexPending, startCodexTransition] = useTransition();
   const [, startCanvasTransition] = useTransition();
 
@@ -877,8 +869,6 @@ export default function Home() {
 
   useEffect(() => {
     if (!project?.repo_path) {
-      setAgentsDocument(null);
-      setAgentsContent("");
       setActiveConversationId(null);
       setActiveConversationRepoPath(null);
       setConsoleMessages([]);
@@ -890,21 +880,6 @@ export default function Home() {
       return;
     }
     const repoPathValue = project.repo_path;
-    startAgentsTransition(() => {
-      void (async () => {
-        try {
-          setErrorMessage(null);
-          const response = await fetchProjectAgents(repoPathValue || undefined);
-          if (repoPathValue && expectedRepoPathRef.current && expectedRepoPathRef.current !== repoPathValue) {
-            return;
-          }
-          setAgentsDocument(response);
-          setAgentsContent(response.content);
-        } catch (error) {
-          setErrorMessage(getErrorMessage(error));
-        }
-      })();
-    });
     startCanvasTransition(() => {
       void (async () => {
         try {
@@ -1184,35 +1159,6 @@ export default function Home() {
       setComposerModel((current) => (current === "gpt-5.4" ? status.codex_model! : current));
     }
   }, [status?.codex_model]);
-
-  useEffect(() => {
-    if (!activeRepoPath) {
-      return;
-    }
-    try {
-      const rawValue = window.localStorage.getItem(`konceptura:project-tray:${activeRepoPath}`);
-      if (rawValue === "1") {
-        setIsProjectTrayExpanded(true);
-        return;
-      }
-      if (rawValue === "0") {
-        setIsProjectTrayExpanded(false);
-      }
-    } catch {
-      // Ignore storage errors and keep default UI state.
-    }
-  }, [activeRepoPath]);
-
-  useEffect(() => {
-    if (!activeRepoPath) {
-      return;
-    }
-    try {
-      window.localStorage.setItem(`konceptura:project-tray:${activeRepoPath}`, isProjectTrayExpanded ? "1" : "0");
-    } catch {
-      // Ignore storage errors and keep the project page usable.
-    }
-  }, [activeRepoPath, isProjectTrayExpanded]);
 
   useEffect(() => {
     try {
@@ -2248,24 +2194,6 @@ export default function Home() {
           openViewTab("notes");
           if (response.project.repo_path) {
             expectedRepoPathRef.current = response.project.repo_path;
-          }
-        } catch (error) {
-          setErrorMessage(getErrorMessage(error));
-        }
-      })();
-    });
-  }
-
-  async function handleSaveAgentsDocument() {
-    startAgentsTransition(() => {
-      void (async () => {
-        try {
-          setErrorMessage(null);
-          const response = await updateProjectAgents(agentsContent, activeRepoPath || undefined);
-          setAgentsDocument(response);
-          if (!project?.repo_path && response.repo_path) {
-            const nextProject = await updateProject({ name: "", repo_path: response.repo_path, recent_projects: [] });
-            setProject(nextProject.project);
           }
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
@@ -3509,9 +3437,34 @@ export default function Home() {
   }
 
   function renderProjectView() {
+    const isGitReady = !!commitStatus?.is_git_repo;
+    const projectFileSummary = workspaceStatus
+      ? workspaceStatus.has_project_files
+        ? `${workspaceStatus.visible_file_count} visible file${workspaceStatus.visible_file_count === 1 ? "" : "s"}`
+        : "No visible project files yet"
+      : "Checking workspace…";
+    const canvasSummary = canvasDocument?.nodes.length
+      ? `${canvasDocument.nodes.length} canvas note${canvasDocument.nodes.length === 1 ? "" : "s"}`
+      : "Canvas not set up";
+    const branchSummary = isGitReady
+      ? commitStatus?.branch_name ?? "Detached HEAD"
+      : "Not a git repository";
+    const syncSummary = !isGitReady
+      ? "Git unavailable"
+      : !commitStatus?.upstream_name
+        ? "No upstream"
+        : commitStatus.ahead_count > 0 || commitStatus.behind_count > 0
+          ? `${commitStatus.ahead_count} ahead · ${commitStatus.behind_count} behind`
+          : "In sync";
+
     return (
-      <div className={styles.projectPage}>
-        <div className={styles.projectPrimaryCard}>
+      <div className={styles.setupShell}>
+        <div className={styles.setupPanel}>
+          <div className={styles.setupHeader}>
+            <strong className={styles.setupTitle}>Project</strong>
+          </div>
+          <div className={styles.projectPanel}>
+            <div className={styles.projectSection}>
           <label className={styles.field}>
             <span className={styles.fieldLabel}>Repository path</span>
             <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
@@ -3547,63 +3500,51 @@ export default function Home() {
               Reset canvas
             </button>
           </div>
-        </div>
-
-        <div className={styles.projectTray}>
-          <button
-            className={isProjectTrayExpanded ? styles.projectTrayToggleOpen : styles.projectTrayToggle}
-            onClick={() => setIsProjectTrayExpanded((current) => !current)}
-            type="button"
-          >
-            <span>{isProjectTrayExpanded ? "Hide project details" : "Show project details"}</span>
-            <span className={styles.projectTrayToggleMeta}>{isProjectTrayExpanded ? "Collapse" : "Expand"}</span>
-          </button>
-
-          {isProjectTrayExpanded ? (
-            <div className={styles.projectTrayPanel}>
-              <div className={styles.projectTrayGrid}>
-                <div className={styles.panelSurface}>
-                  <label className={styles.field}>
-                    <span className={styles.fieldLabel}>AGENTS.md</span>
-                    <textarea className={styles.textarea} onChange={(event) => setAgentsContent(event.target.value)} rows={18} value={agentsContent} />
-                  </label>
-
-                  <div className={styles.actionsRow}>
-                    <button className={styles.primaryButton} disabled={agentsPending || !activeRepoPath} onClick={handleSaveAgentsDocument} type="button">
-                      {agentsPending ? "Saving..." : "Save AGENTS.md"}
-                    </button>
-                    {agentsDocument?.path ? <span className={styles.helperText}>{agentsDocument.path}</span> : null}
-                  </div>
-                </div>
-
-                <div className={styles.panelSurface}>
-                  <dl className={styles.statusList}>
-                    <StatusRow label="API" tone={statusPending ? "muted" : "ok"} value={API_BASE_URL} />
-                    <StatusRow
-                      label="Memgraph"
-                      tone={status?.memgraph_ok ? "ok" : "error"}
-                      value={status?.memgraph_ok ? "connected" : "unreachable"}
-                    />
-                    <StatusRow
-                      label="Code graph"
-                      tone={status?.cgr_ok ? "ok" : "error"}
-                      value={status?.cgr_ok ? "ready" : "missing"}
-                    />
-                    <StatusRow
-                      label="Codex"
-                      tone={status?.codex_ok ? "ok" : "error"}
-                      value={status?.codex_ok ? "ready" : "missing"}
-                    />
-                    <StatusRow
-                      label="Index job"
-                      tone={statusTone(status?.index_job.status)}
-                      value={status?.index_job.status ?? "idle"}
-                    />
-                  </dl>
-                </div>
+            </div>
+            <div className={styles.projectSummaryGrid}>
+              <div className={styles.projectSummaryCard}>
+                <span className={styles.projectSummaryLabel}>Workspace</span>
+                <strong className={styles.projectSummaryValue}>{projectFileSummary}</strong>
+                <span className={styles.projectSummaryMeta}>{canvasSummary}</span>
+              </div>
+              <div className={styles.projectSummaryCard}>
+                <span className={styles.projectSummaryLabel}>Branch</span>
+                <strong className={styles.projectSummaryValue}>{branchSummary}</strong>
+                <span className={styles.projectSummaryMeta}>{syncSummary}</span>
               </div>
             </div>
-          ) : null}
+
+            <div className={styles.projectGitSection}>
+              <div className={styles.projectGitHeader}>
+                <strong className={styles.projectGitTitle}>Git</strong>
+                <span className={styles.projectGitMeta}>
+                  {!isGitReady
+                    ? "Unavailable"
+                    : commitStatus?.has_changes
+                      ? `${commitStatus.changed_files.length} changed file${commitStatus.changed_files.length === 1 ? "" : "s"}`
+                      : "Working tree clean"}
+                </span>
+              </div>
+              <div className={styles.projectGitActions}>
+                <button
+                  className={styles.commitButton}
+                  disabled={isCommitting || isPushing || !commitStatus?.has_changes}
+                  onClick={handleCommitClick}
+                  type="button"
+                >
+                  Commit
+                </button>
+                <button
+                  className={styles.commitButton}
+                  disabled={isPushing || isCommitting || !commitStatus?.can_push}
+                  onClick={handlePushClick}
+                  type="button"
+                >
+                  Push
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -4034,45 +3975,126 @@ export default function Home() {
   }
 
   function renderProjectSetup() {
+    const isGitReady = !!commitStatus?.is_git_repo;
+    const projectFileSummary = workspaceStatus
+      ? workspaceStatus.has_project_files
+        ? `${workspaceStatus.visible_file_count} visible file${workspaceStatus.visible_file_count === 1 ? "" : "s"}`
+        : "No visible project files yet"
+      : "Checking workspace…";
+    const canvasSummary = canvasDocument?.nodes.length
+      ? `${canvasDocument.nodes.length} canvas note${canvasDocument.nodes.length === 1 ? "" : "s"}`
+      : "Canvas not set up";
+    const branchSummary = isGitReady
+      ? commitStatus?.branch_name ?? "Detached HEAD"
+      : "Not a git repository";
+    const syncSummary = !isGitReady
+      ? "Git unavailable"
+      : !commitStatus?.upstream_name
+        ? "No upstream"
+        : commitStatus.ahead_count > 0 || commitStatus.behind_count > 0
+          ? `${commitStatus.ahead_count} ahead · ${commitStatus.behind_count} behind`
+          : "In sync";
+
     return (
       <div className={styles.setupShell}>
         <div className={styles.setupPanel}>
           <div className={styles.setupHeader}>
-            <strong className={styles.setupTitle}>Open your project</strong>
+            <strong className={styles.setupTitle}>Project</strong>
             <p className={styles.setupText}>
-              Start with the local folder for your app. You can fill in goals, stack, and design direction later inside the project.
+              Keep repository setup, canvas actions, and git state in one place.
             </p>
           </div>
-          <div className={styles.setupCard}>
-            <label className={styles.field}>
-              <span className={styles.fieldLabel}>Project folder</span>
-              <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
-            </label>
+          <div className={styles.projectPanel}>
+            <div className={styles.projectSection}>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Repository path</span>
+                <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
+              </label>
 
-            {project?.recent_projects.length ? (
-              <div className={styles.sampleRepoList}>
-                {project.recent_projects.map((path) => (
-                  <button className={styles.secondaryButton} key={path} onClick={() => setRepoPath(path)} type="button">
-                    {PathLabel(path)}
-                  </button>
-                ))}
+              {project?.recent_projects.length ? (
+                <div className={styles.sampleRepoList}>
+                  {project.recent_projects.map((path) => (
+                    <button className={styles.secondaryButton} key={path} onClick={() => setRepoPath(path)} type="button">
+                      {PathLabel(path)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {sampleRepos.length > 0 ? (
+                <div className={styles.sampleRepoList}>
+                  {sampleRepos.map(([name, path]) => (
+                    <button className={styles.secondaryButton} key={name} onClick={() => applySampleRepo(path)} type="button">
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className={styles.actionsRow}>
+                <button className={styles.primaryButton} disabled={projectPending || !repoPath.trim()} onClick={handleSaveProject} type="button">
+                  {projectPending ? "Opening..." : "Open project"}
+                </button>
+                <button
+                  className={styles.secondaryButton}
+                  disabled={!activeRepoPath || isGeneratingCanvas}
+                  onClick={handleGenerateCanvas}
+                  type="button"
+                >
+                  {isGeneratingCanvas
+                    ? "Generating..."
+                    : canvasDocument?.nodes.length
+                      ? "Regenerate canvas"
+                      : "Set up canvas"}
+                </button>
+                <button className={styles.secondaryButton} disabled={!activeRepoPath} onClick={handleResetCanvas} type="button">
+                  Reset canvas
+                </button>
               </div>
-            ) : null}
+            </div>
 
-            {sampleRepos.length > 0 ? (
-              <div className={styles.sampleRepoList}>
-                {sampleRepos.map(([name, path]) => (
-                  <button className={styles.secondaryButton} key={name} onClick={() => applySampleRepo(path)} type="button">
-                    {name}
-                  </button>
-                ))}
+            <div className={styles.projectSummaryGrid}>
+              <div className={styles.projectSummaryCard}>
+                <span className={styles.projectSummaryLabel}>Workspace</span>
+                <strong className={styles.projectSummaryValue}>{projectFileSummary}</strong>
+                <span className={styles.projectSummaryMeta}>{canvasSummary}</span>
               </div>
-            ) : null}
+              <div className={styles.projectSummaryCard}>
+                <span className={styles.projectSummaryLabel}>Branch</span>
+                <strong className={styles.projectSummaryValue}>{branchSummary}</strong>
+                <span className={styles.projectSummaryMeta}>{syncSummary}</span>
+              </div>
+            </div>
 
-            <div className={styles.actionsRow}>
-              <button className={styles.primaryButton} disabled={projectPending || !repoPath.trim()} onClick={handleSaveProject} type="button">
-                {projectPending ? "Opening..." : "Open project"}
-              </button>
+            <div className={styles.projectGitSection}>
+              <div className={styles.projectGitHeader}>
+                <strong className={styles.projectGitTitle}>Git</strong>
+                <span className={styles.projectGitMeta}>
+                  {!isGitReady
+                    ? "Unavailable"
+                    : commitStatus?.has_changes
+                      ? `${commitStatus.changed_files.length} changed file${commitStatus.changed_files.length === 1 ? "" : "s"}`
+                      : "Working tree clean"}
+                </span>
+              </div>
+              <div className={styles.projectGitActions}>
+                <button
+                  className={styles.commitButton}
+                  disabled={isCommitting || isPushing || !commitStatus?.has_changes}
+                  onClick={handleCommitClick}
+                  type="button"
+                >
+                  Commit
+                </button>
+                <button
+                  className={styles.commitButton}
+                  disabled={isPushing || isCommitting || !commitStatus?.can_push}
+                  onClick={handlePushClick}
+                  type="button"
+                >
+                  Push
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -4341,25 +4363,6 @@ export default function Home() {
           {activeTab?.type === "note" ? null : renderUnifiedDock()}
         </main>
       </div>
-    </div>
-  );
-}
-
-function StatusRow({
-  label,
-  tone,
-  value,
-}: {
-  label: string;
-  tone: "ok" | "error" | "muted";
-  value: string;
-}) {
-  return (
-    <div className={styles.statusRow}>
-      <dt className={styles.statusLabel}>{label}</dt>
-      <dd className={tone === "error" ? styles.statusValueError : tone === "ok" ? styles.statusValueOk : styles.statusValueMuted}>
-        {value}
-      </dd>
     </div>
   );
 }
@@ -5506,14 +5509,4 @@ function resizeComposerInput(element: HTMLTextAreaElement | null) {
   element.style.height = "0px";
   const nextHeight = Math.min(Math.max(element.scrollHeight, baseHeight), 148);
   element.style.height = `${nextHeight}px`;
-}
-
-function statusTone(status: StatusResponse["index_job"]["status"] | undefined): "ok" | "error" | "muted" {
-  if (status === "completed") {
-    return "ok";
-  }
-  if (status === "failed") {
-    return "error";
-  }
-  return "muted";
 }
