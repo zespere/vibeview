@@ -3305,8 +3305,8 @@ export default function Home() {
     if (isDockHidden) {
       return (
         <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell} style={floatingShellStyle}>
-          <div className={isEmbedded ? styles.notesConsoleHiddenRail : styles.notesConsoleHiddenRailFloating}>
-            {isEmbedded ? (
+          {isEmbedded ? (
+            <div className={styles.notesConsoleHiddenRail}>
               <div className={styles.notesConsoleHiddenHandle}>
                 <button
                   className={styles.notesConsoleHiddenShow}
@@ -3320,7 +3320,10 @@ export default function Home() {
                   <span className={styles.notesConsoleHiddenMeta}>Show</span>
                 </button>
               </div>
-            ) : (
+            </div>
+          ) : (
+            <div className={styles.notesConsoleFloatingWrapHidden}>
+              <div aria-hidden="true" className={styles.notesConsoleDockHiddenSpacer} />
               <div className={styles.notesConsoleExternalActions}>
                 <button
                   aria-label="Move console"
@@ -3342,8 +3345,8 @@ export default function Home() {
                   Show
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       );
     }
