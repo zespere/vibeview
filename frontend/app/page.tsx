@@ -4856,7 +4856,7 @@ function findActiveNoteMention(prompt: string, caretIndex: number, document: Can
   }
 
   const query = prompt.slice(start + 1, caretIndex);
-  if (!query || query.includes("\n") || query.includes("\r") || query.endsWith(" ")) {
+  if (query.includes("\n") || query.includes("\r") || query.endsWith(" ")) {
     return null;
   }
 
