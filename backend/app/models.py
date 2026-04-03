@@ -139,6 +139,11 @@ class CommitStatusResponse(BaseModel):
     repo_path: str
     is_git_repo: bool
     has_changes: bool
+    branch_name: str | None = None
+    upstream_name: str | None = None
+    ahead_count: int = 0
+    behind_count: int = 0
+    can_push: bool = False
     suggested_message: str | None = None
     changed_files: list[str] = Field(default_factory=list)
 
@@ -152,6 +157,17 @@ class CommitCreateResponse(BaseModel):
     repo_path: str
     commit_sha: str
     message: str
+    summary: str
+
+
+class PushCreateRequest(BaseModel):
+    repo_path: str
+
+
+class PushCreateResponse(BaseModel):
+    repo_path: str
+    branch_name: str | None = None
+    upstream_name: str | None = None
     summary: str
 
 

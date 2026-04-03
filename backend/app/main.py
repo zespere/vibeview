@@ -46,6 +46,8 @@ from .models import (
     ProjectTreeResponse,
     ProjectProfileUpdateRequest,
     ProjectWorkspaceStatusResponse,
+    PushCreateRequest,
+    PushCreateResponse,
     QueryRequest,
     QueryResponse,
     RelationshipsResponse,
@@ -249,6 +251,23 @@ def create_project_commit(request: CommitCreateRequest) -> CommitCreateResponse:
             )
         )
         return project_service.create_commit(resolved_repo_path, message)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/project/push", response_model=PushCreateResponse)
+def push_project_commits(request: PushCreateRequest) -> PushCreateResponse:
+    resolved_repo_path = str(Path(request.repo_path).resolve())
+    status = project_service.get_commit_status(resolved_repo_path)
+    if not status.is_git_repo:
+        raise HTTPException(status_code=400, detail="Repository is not a git repository.")
+    if not status.can_push:
+        if not status.upstream_name:
+            raise HTTPException(status_code=400, detail="Current branch has no upstream configured.")
+        raise HTTPException(status_code=400, detail="There is nothing to push.")
+
+    try:
+        return project_service.push_commits(resolved_repo_path)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 

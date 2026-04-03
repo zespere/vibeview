@@ -19,6 +19,7 @@ from .models import (
     ProjectProfileUpdateRequest,
     ProjectTreeItem,
     ProjectWorkspaceStatusResponse,
+    PushCreateResponse,
 )
 
 
@@ -166,6 +167,11 @@ class ProjectService:
                 repo_path=normalized_repo_path,
                 is_git_repo=False,
                 has_changes=False,
+                branch_name=None,
+                upstream_name=None,
+                ahead_count=0,
+                behind_count=0,
+                can_push=False,
                 suggested_message=None,
                 changed_files=[],
             )
@@ -173,10 +179,32 @@ class ProjectService:
         status_result = self._run_git(repo_root, ["status", "--porcelain"])
         changed_lines = [line for line in status_result.stdout.splitlines() if line.strip()]
         changed_files = [line[3:].strip() for line in changed_lines if len(line) >= 4]
+        branch_result = self._run_git(repo_root, ["status", "--porcelain=2", "--branch"])
+        branch_name: str | None = None
+        upstream_name: str | None = None
+        ahead_count = 0
+        behind_count = 0
+        for line in branch_result.stdout.splitlines():
+            if line.startswith("# branch.head "):
+                raw_branch_name = line.removeprefix("# branch.head ").strip()
+                branch_name = None if raw_branch_name == "(detached)" else raw_branch_name
+            elif line.startswith("# branch.upstream "):
+                upstream_name = line.removeprefix("# branch.upstream ").strip() or None
+            elif line.startswith("# branch.ab "):
+                for part in line.removeprefix("# branch.ab ").split():
+                    if part.startswith("+"):
+                        ahead_count = int(part[1:] or "0")
+                    elif part.startswith("-"):
+                        behind_count = int(part[1:] or "0")
         return CommitStatusResponse(
             repo_path=normalized_repo_path,
             is_git_repo=True,
             has_changes=bool(changed_files),
+            branch_name=branch_name,
+            upstream_name=upstream_name,
+            ahead_count=ahead_count,
+            behind_count=behind_count,
+            can_push=bool(upstream_name and ahead_count > 0),
             changed_files=changed_files,
         )
 
@@ -199,6 +227,29 @@ class ProjectService:
             repo_path=normalized_repo_path,
             commit_sha=commit_sha,
             message=message,
+            summary=summary,
+        )
+
+    def push_commits(self, repo_path: str) -> PushCreateResponse:
+        normalized_repo_path = self._normalize_repo_path(repo_path)
+        repo_root = self._resolve_git_root(normalized_repo_path)
+        if repo_root is None:
+            raise ValueError("Repository is not a git repository.")
+
+        status = self.get_commit_status(normalized_repo_path)
+        if not status.can_push:
+            if not status.upstream_name:
+                raise ValueError("Current branch has no upstream configured.")
+            raise ValueError("There is nothing to push.")
+
+        push_result = self._run_git(repo_root, ["push"])
+        summary = push_result.stderr.strip() or push_result.stdout.strip()
+        if not summary:
+            summary = f"Pushed {status.ahead_count} commit{'s' if status.ahead_count != 1 else ''} to {status.upstream_name}."
+        return PushCreateResponse(
+            repo_path=normalized_repo_path,
+            branch_name=status.branch_name,
+            upstream_name=status.upstream_name,
             summary=summary,
         )
 

@@ -97,6 +97,11 @@ export interface CommitStatusResponse {
   repo_path: string;
   is_git_repo: boolean;
   has_changes: boolean;
+  branch_name: string | null;
+  upstream_name: string | null;
+  ahead_count: number;
+  behind_count: number;
+  can_push: boolean;
   suggested_message: string | null;
   changed_files: string[];
 }
@@ -105,6 +110,13 @@ export interface CommitCreateResponse {
   repo_path: string;
   commit_sha: string;
   message: string;
+  summary: string;
+}
+
+export interface PushCreateResponse {
+  repo_path: string;
+  branch_name: string | null;
+  upstream_name: string | null;
   summary: string;
 }
 
@@ -330,6 +342,13 @@ export function createProjectCommit(repoPath: string, message?: string) {
   return apiRequest<CommitCreateResponse>("/project/commit", {
     method: "POST",
     body: JSON.stringify({ repo_path: repoPath, message }),
+  });
+}
+
+export function pushProjectCommits(repoPath: string) {
+  return apiRequest<PushCreateResponse>("/project/push", {
+    method: "POST",
+    body: JSON.stringify({ repo_path: repoPath }),
   });
 }
 

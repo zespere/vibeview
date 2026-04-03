@@ -18,6 +18,7 @@ import {
   API_BASE_URL,
   createCanvasNode,
   createProjectCommit,
+  pushProjectCommits,
   deleteCanvasNode,
   fetchExplorationSuggestions,
   fetchCanvas,
@@ -67,12 +68,23 @@ interface CommandResultItem {
   id: string;
   title: string;
   subtitle?: string;
+  key?: string;
+  disabled?: boolean;
   group: "navigate" | "action" | "ask" | "execute";
   searchText?: string;
   run: () => void;
 }
 
-type LeaderScope = "root" | "projects" | "notes" | "conversations" | "views" | "models" | "reasoning" | "actions";
+type LeaderScope =
+  | "root"
+  | "projects"
+  | "notes"
+  | "conversations"
+  | "views"
+  | "models"
+  | "reasoning"
+  | "actions"
+  | "git";
 
 interface LeaderGroupItem {
   id: string;
@@ -168,6 +180,7 @@ export default function Home() {
   const [isBuilding, setIsBuilding] = useState(false);
   const [isPlanning, setIsPlanning] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
   const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [dockVisibility, setDockVisibility] = useState<DockVisibilityState>("visible");
@@ -204,6 +217,7 @@ export default function Home() {
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const leaderResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const expectedRepoPathRef = useRef("");
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
@@ -299,7 +313,7 @@ export default function Home() {
     [canvasDocument, codexPrompt, composerCaretIndex],
   );
   const isNoteMentionMode = !isSlashCommandMode && activeNoteMention !== null;
-  const isComposerBusy = isBuilding || isPlanning || codexPending;
+  const isComposerBusy = isBuilding || isPlanning || isPushing || codexPending;
   const activeConversationSummary = useMemo(
     () =>
       activeProjectTreeItem?.conversations.find(
@@ -485,13 +499,49 @@ export default function Home() {
       {
         id: "action-commit",
         title: "Commit changes",
-        subtitle: commitStatus?.suggested_message ?? "Create a git commit for the current repo",
+        key: "c",
+        subtitle: !activeRepoPath
+          ? "Open a project first"
+          : !commitStatus?.is_git_repo
+            ? "Repository is not a git repository"
+            : !commitStatus?.has_changes
+              ? "Nothing to commit"
+              : commitStatus?.suggested_message ?? "Create a git commit for the current repo",
+        disabled: !activeRepoPath || !commitStatus?.is_git_repo || !commitStatus?.has_changes || isCommitting || isPushing,
         group: "action",
         searchText: "commit git save",
         run: () => {
+          if (!activeRepoPath || !commitStatus?.is_git_repo || !commitStatus?.has_changes || isCommitting || isPushing) {
+            return;
+          }
           setCodexPrompt("");
           setLeaderScope(null);
           handleCommitClick();
+        },
+      },
+      {
+        id: "action-push",
+        title: "Push commits",
+        key: "p",
+        subtitle: !activeRepoPath
+          ? "Open a project first"
+          : !commitStatus?.is_git_repo
+            ? "Repository is not a git repository"
+            : !commitStatus?.upstream_name
+              ? "Current branch has no upstream configured"
+              : !commitStatus?.can_push
+                ? "Nothing to push"
+                : `Push ${commitStatus.ahead_count} commit${commitStatus.ahead_count === 1 ? "" : "s"} to ${commitStatus.upstream_name}`,
+        disabled: !activeRepoPath || !commitStatus?.is_git_repo || !commitStatus?.can_push || isCommitting || isPushing,
+        group: "action",
+        searchText: "push git publish upstream remote",
+        run: () => {
+          if (!activeRepoPath || !commitStatus?.is_git_repo || !commitStatus?.can_push || isCommitting || isPushing) {
+            return;
+          }
+          setCodexPrompt("");
+          setLeaderScope(null);
+          handlePushClick();
         },
       },
       {
@@ -556,9 +606,6 @@ export default function Home() {
     }
 
     return items.filter((item) => {
-      if (item.id === "action-commit") {
-        return !!activeRepoPath && !!commitStatus?.has_changes;
-      }
       if (item.id === "action-new-conversation") {
         return !!activeRepoPath;
       }
@@ -575,6 +622,7 @@ export default function Home() {
       { id: "leader-conversations", key: "c", title: "Conversations", subtitle: "Open conversation", scope: "conversations" },
       { id: "leader-views", key: "v", title: "Views", subtitle: "Switch workspace view", scope: "views" },
       { id: "leader-actions", key: "a", title: "Actions", subtitle: "Run canvas and project actions", scope: "actions" },
+      { id: "leader-git", key: "g", title: "Git", subtitle: "Commit and push", scope: "git" },
       { id: "leader-models", key: "m", title: "Models", subtitle: "Switch model", scope: "models" },
       { id: "leader-reasoning", key: "r", title: "Reasoning", subtitle: "Switch reasoning level", scope: "reasoning" },
       {
@@ -618,6 +666,8 @@ export default function Home() {
         return reasoningCommandItems.slice(0, 10);
       case "actions":
         return actionCommandItems.slice(0, 10);
+      case "git":
+        return actionCommandItems.filter((item) => item.id === "action-commit" || item.id === "action-push").slice(0, 10);
       default:
         return [];
     }
@@ -1228,10 +1278,18 @@ export default function Home() {
             }
           }
         } else {
+          if (/^[a-z]$/i.test(event.key)) {
+            const keyedItem = leaderItems.find((item) => item.key === event.key.toLowerCase()) ?? null;
+            if (keyedItem) {
+              event.preventDefault();
+              runCommandItem(keyedItem);
+              return;
+            }
+          }
           const digitIndex = LEADER_DIGIT_KEYS.indexOf(event.key as (typeof LEADER_DIGIT_KEYS)[number]);
           if (digitIndex !== -1) {
             const selectedItem = leaderItems[digitIndex] ?? null;
-            if (selectedItem) {
+            if (selectedItem && !selectedItem.disabled) {
               event.preventDefault();
               selectedItem.run();
             }
@@ -1252,7 +1310,7 @@ export default function Home() {
           if (event.key === "Enter") {
             const selectedItem =
               leaderItems[Math.min(commandSelectedIndex, Math.max(leaderItems.length - 1, 0))] ?? leaderItems[0];
-            if (selectedItem) {
+            if (selectedItem && !selectedItem.disabled) {
               event.preventDefault();
               selectedItem.run();
             }
@@ -2048,7 +2106,7 @@ export default function Home() {
   }
 
   function handleCommitClick() {
-    if (!activeRepoPath || !commitStatus?.has_changes || isCommitting) {
+    if (!activeRepoPath || !commitStatus?.has_changes || isCommitting || isPushing) {
       return;
     }
     startCodexTransition(() => {
@@ -2075,6 +2133,39 @@ export default function Home() {
           setComposerStatus("Commit failed.");
         } finally {
           setIsCommitting(false);
+        }
+      })();
+    });
+  }
+
+  function handlePushClick() {
+    if (!activeRepoPath || !commitStatus?.can_push || isPushing || isCommitting) {
+      return;
+    }
+    startCodexTransition(() => {
+      void (async () => {
+        try {
+          setIsPushing(true);
+          setErrorMessage(null);
+          setComposerStatus("Pushing commits...");
+          const response = await pushProjectCommits(activeRepoPath);
+          setComposerStatus(response.summary);
+          await refreshCommitStatus(activeRepoPath);
+          setConsoleMessages((current) => [
+            ...current,
+            {
+              id: `assistant-push-${Date.now()}`,
+              role: "assistant",
+              title: response.upstream_name ? `Pushed to ${response.upstream_name}` : "Pushed commits",
+              content: response.summary,
+              created_at: new Date().toISOString(),
+            },
+          ]);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+          setComposerStatus("Push failed.");
+        } finally {
+          setIsPushing(false);
         }
       })();
     });
@@ -2700,6 +2791,14 @@ export default function Home() {
       });
     }
 
+    if (commandName === "commit") {
+      return actionCommandItems.filter((item) => item.id === "action-commit");
+    }
+
+    if (commandName === "push") {
+      return actionCommandItems.filter((item) => item.id === "action-push");
+    }
+
     if (buildPrompt) {
       return [
         {
@@ -2835,6 +2934,25 @@ export default function Home() {
     node?.scrollIntoView({ block: "nearest" });
   }, [commandSelectedIndex, composerResults, consoleVisibility, dockVisibility, isNoteMentionMode, isSlashCommandMode]);
 
+  useEffect(() => {
+    if (!leaderScope || leaderScope === "root" || leaderItems.length === 0) {
+      return;
+    }
+    const selectedLeaderItem =
+      leaderItems[Math.min(commandSelectedIndex, Math.max(leaderItems.length - 1, 0))] ?? null;
+    if (!selectedLeaderItem) {
+      return;
+    }
+    leaderResultRefs.current[selectedLeaderItem.id]?.scrollIntoView({ block: "nearest" });
+  }, [commandSelectedIndex, leaderItems, leaderScope]);
+
+  function runCommandItem(item: CommandResultItem | null | undefined) {
+    if (!item || item.disabled) {
+      return;
+    }
+    item.run();
+  }
+
   function handleSubmitOmnibox() {
     const value = codexPrompt.trim();
     if (!value) {
@@ -2847,9 +2965,7 @@ export default function Home() {
     if (isSlashCommandMode || (isNoteMentionMode && composerResults.length > 0)) {
       const selectedResult =
         composerResults[Math.min(commandSelectedIndex, Math.max(composerResults.length - 1, 0))] ?? composerResults[0];
-      if (selectedResult) {
-        selectedResult.run();
-      }
+      runCommandItem(selectedResult);
       return;
     }
 
@@ -3565,12 +3681,19 @@ export default function Home() {
                   ) : (
                     composerResults.map((item, index) => (
                       <button
-                        className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
+                        className={
+                          item.disabled
+                            ? styles.commandResultDisabled
+                            : index === commandSelectedIndex
+                              ? styles.commandResultActive
+                              : styles.commandResult
+                        }
+                        disabled={item.disabled}
                         key={item.id}
                         ref={(node) => {
                           commandResultRefs.current[item.id] = node;
                         }}
-                        onClick={item.run}
+                        onClick={() => runCommandItem(item)}
                         type="button"
                       >
                         <span className={styles.commandResultTitle}>{item.title}</span>
@@ -3586,12 +3709,19 @@ export default function Home() {
                   ) : (
                     composerResults.map((item, index) => (
                       <button
-                        className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
+                        className={
+                          item.disabled
+                            ? styles.commandResultDisabled
+                            : index === commandSelectedIndex
+                              ? styles.commandResultActive
+                              : styles.commandResult
+                        }
+                        disabled={item.disabled}
                         key={item.id}
                         ref={(node) => {
                           commandResultRefs.current[item.id] = node;
                         }}
-                        onClick={item.run}
+                        onClick={() => runCommandItem(item)}
                         type="button"
                       >
                         <span className={styles.commandResultTitle}>{item.title}</span>
@@ -3722,7 +3852,7 @@ export default function Home() {
               <div className={styles.consoleComposerRight}>
                 <button
                   className={styles.commitButton}
-                  disabled={isCommitting || !commitStatus?.has_changes}
+                  disabled={isCommitting || isPushing || !commitStatus?.has_changes}
                   onClick={handleCommitClick}
                   title={
                     !commitStatus?.is_git_repo
@@ -3734,6 +3864,23 @@ export default function Home() {
                   type="button"
                 >
                   Commit
+                </button>
+                <button
+                  className={styles.commitButton}
+                  disabled={isPushing || isCommitting || !commitStatus?.can_push}
+                  onClick={handlePushClick}
+                  title={
+                    !commitStatus?.is_git_repo
+                      ? "Repository is not a git repository"
+                      : !commitStatus?.upstream_name
+                        ? "Current branch has no upstream configured"
+                        : !commitStatus?.can_push
+                          ? "Nothing to push"
+                          : `Push ${commitStatus.ahead_count} commit${commitStatus.ahead_count === 1 ? "" : "s"} to ${commitStatus.upstream_name}`
+                  }
+                  type="button"
+                >
+                  Push
                 </button>
                 <button
                   className={styles.primaryButton}
@@ -3754,6 +3901,11 @@ export default function Home() {
                     <>
                       <span aria-hidden="true" className={styles.buttonSpinner} />
                       <span>Building...</span>
+                    </>
+                  ) : isPushing ? (
+                    <>
+                      <span aria-hidden="true" className={styles.buttonSpinner} />
+                      <span>Pushing...</span>
                     </>
                   ) : (
                     <span>
@@ -3852,12 +4004,22 @@ export default function Home() {
             ) : (
               leaderItems.map((item, index) => (
                 <button
-                  className={index === commandSelectedIndex ? styles.leaderResultActive : styles.leaderResult}
+                  className={
+                    item.disabled
+                      ? styles.leaderResultDisabled
+                      : index === commandSelectedIndex
+                        ? styles.leaderResultActive
+                        : styles.leaderResult
+                  }
+                  disabled={item.disabled}
                   key={item.id}
-                  onClick={item.run}
+                  onClick={() => runCommandItem(item)}
+                  ref={(node) => {
+                    leaderResultRefs.current[item.id] = node;
+                  }}
                   type="button"
                 >
-                  <span className={styles.leaderResultNumber}>{LEADER_DIGIT_KEYS[index] ?? "·"}</span>
+                  <span className={styles.leaderResultNumber}>{item.key?.toUpperCase() ?? LEADER_DIGIT_KEYS[index] ?? "·"}</span>
                   <span className={styles.leaderResultText}>
                     <span className={styles.leaderResultTitle}>{item.title}</span>
                     {item.subtitle ? <span className={styles.leaderResultMeta}>{item.subtitle}</span> : null}
