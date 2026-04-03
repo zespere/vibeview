@@ -40,7 +40,7 @@ interface CanvasBoardProps {
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
-  onOpenNode: (nodeId: string) => void;
+  onOpenNode: (nodeId: string, options?: { activate?: boolean }) => void;
   onRenameNode: (nodeId: string) => void;
   onActivateNode: (nodeId: string) => void;
   onExploreNode: (nodeId: string) => void;
@@ -57,7 +57,7 @@ interface ContextMenuState {
 
 interface NoteNodeData extends Record<string, unknown> {
   node: CanvasNode;
-  onOpenNode: (nodeId: string) => void;
+  onOpenNode: (nodeId: string, options?: { activate?: boolean }) => void;
   onSelectNode: (nodeId: string) => void;
   onActivateNode: (nodeId: string) => void;
   detailLevel: "minimal" | "compact" | "full";
@@ -151,7 +151,7 @@ export function CanvasBoard({
       position: { x: node.x, y: node.y },
       data: {
         node,
-        onOpenNode: (nodeId: string) => openNodeRef.current(nodeId),
+        onOpenNode: (nodeId: string, options?: { activate?: boolean }) => openNodeRef.current(nodeId, options),
         onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
         onActivateNode: (nodeId: string) => activateNodeRef.current(nodeId),
         detailLevel,
@@ -519,11 +519,20 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
     if (event.metaKey || event.ctrlKey) {
       if (canOpenInTab) {
         event.preventDefault();
-        onOpenNode(node.id);
+        onOpenNode(node.id, { activate: false });
       }
       return;
     }
     onSelectNode(node.id);
+  }
+
+  function handleCardMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isLoadingSuggestion) {
+      return;
+    }
+    if (event.metaKey || event.ctrlKey) {
+      event.stopPropagation();
+    }
   }
 
   function handleCardDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -555,6 +564,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
       <div
         className={nodeClassName}
         onDoubleClick={handleCardDoubleClick}
+        onMouseDown={handleCardMouseDown}
         role="button"
         tabIndex={0}
         onClick={handleCardClick}

@@ -2533,14 +2533,16 @@ export default function Home() {
     setComposerStatus("Cleared pinned context.");
   }
 
-  function openCanvasNode(nodeId: string, options?: { focusTitle?: boolean }) {
+  function openCanvasNode(nodeId: string, options?: { focusTitle?: boolean; activate?: boolean }) {
     setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
     setOpenTabs((current) =>
       current.some((tab) => tab.id === `note:${nodeId}`)
         ? current
         : [...current, { id: `note:${nodeId}`, type: "note", nodeId }],
     );
-    setActiveTabId(`note:${nodeId}`);
+    if (options?.activate !== false) {
+      setActiveTabId(`note:${nodeId}`);
+    }
     if (options?.focusTitle) {
       setRequestedTitleFocusNodeId(nodeId);
     }
