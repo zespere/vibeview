@@ -217,6 +217,7 @@ export default function Home() {
   const [commandSelectedIndex, setCommandSelectedIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [requestedTitleFocusNodeId, setRequestedTitleFocusNodeId] = useState<string | null>(null);
+  const [copiedConsoleLinkKey, setCopiedConsoleLinkKey] = useState<string | null>(null);
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const noteTitleInputRef = useRef<HTMLInputElement | null>(null);
@@ -230,6 +231,7 @@ export default function Home() {
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const exploreCanvasNodeRef = useRef<(nodeId: string) => void>(() => undefined);
+  const copiedConsoleLinkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
@@ -258,6 +260,25 @@ export default function Home() {
   const transientNotesExploration =
     activeTab?.type === "view" && activeTab.view === "notes" ? notesExploration : null;
   const currentExplorationSession = activeExplorationSession ?? transientNotesExploration;
+
+  useEffect(() => {
+    return () => {
+      if (copiedConsoleLinkTimeoutRef.current) {
+        clearTimeout(copiedConsoleLinkTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyConsoleFileLink = useCallback((linkKey: string, href: string) => {
+    void navigator.clipboard.writeText(href);
+    setCopiedConsoleLinkKey(linkKey);
+    if (copiedConsoleLinkTimeoutRef.current) {
+      clearTimeout(copiedConsoleLinkTimeoutRef.current);
+    }
+    copiedConsoleLinkTimeoutRef.current = setTimeout(() => {
+      setCopiedConsoleLinkKey((current) => (current === linkKey ? null : current));
+    }, 1400);
+  }, []);
 
   useEffect(() => {
     if (activeTab?.type === "note") {
@@ -4274,6 +4295,8 @@ export default function Home() {
                             message.content,
                             message.role === "assistant" ? activeContextDocument : null,
                             handleOpenContextNode,
+                            copiedConsoleLinkKey,
+                            handleCopyConsoleFileLink,
                           )}
                         </div>
                         {pendingPlan?.messageId === message.id ? (
@@ -5913,6 +5936,8 @@ function renderConsoleMessageContent(
   content: string,
   document: CanvasDocument | null,
   onOpenNode: (nodeId: string) => void,
+  copiedLinkKey: string | null,
+  onCopyLocalLink: (linkKey: string, href: string) => void,
 ) {
   const titleToId = new Map(
     (document?.nodes ?? [])
@@ -5997,18 +6022,23 @@ function renderConsoleMessageContent(
           </a>,
         );
       } else {
+        const linkKey = `${lineIndex}-md-${start}-${href}`;
         parts.push(
-          <button
-            className={styles.consoleFileLink}
-            key={`${lineIndex}-md-${start}-${label}`}
-            onClick={() => {
-              void navigator.clipboard.writeText(href);
-            }}
-            title={href}
-            type="button"
-          >
-            {label}
-          </button>,
+          <span className={styles.consoleFileLinkWrap} key={linkKey}>
+            <button
+              className={styles.consoleFileLink}
+              onClick={() => onCopyLocalLink(linkKey, href)}
+              title={href}
+              type="button"
+            >
+              {label}
+            </button>
+            {copiedLinkKey === linkKey ? (
+              <span className={styles.consoleFileLinkCopiedBubble} role="status">
+                Copied path
+              </span>
+            ) : null}
+          </span>,
         );
       }
       lastIndex = start + fullMatch.length;
