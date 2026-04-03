@@ -56,6 +56,10 @@ class ProjectProfileResponse(BaseModel):
     is_configured: bool
 
 
+class ProjectFolderPickResponse(BaseModel):
+    repo_path: str | None = None
+
+
 class ProjectWorkspaceStatusResponse(BaseModel):
     repo_path: str
     has_project_files: bool

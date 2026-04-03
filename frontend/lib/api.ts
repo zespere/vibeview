@@ -35,6 +35,10 @@ export interface ProjectProfileResponse {
   is_configured: boolean;
 }
 
+export interface ProjectFolderPickResponse {
+  repo_path: string | null;
+}
+
 export interface ProjectWorkspaceStatusResponse {
   repo_path: string;
   has_project_files: boolean;
@@ -350,6 +354,12 @@ export function updateProject(payload: ProjectProfile) {
   return apiRequest<ProjectProfileResponse>("/project", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function pickProjectFolder() {
+  return apiRequest<ProjectFolderPickResponse>("/project/pick-folder", {
+    method: "POST",
   });
 }
 

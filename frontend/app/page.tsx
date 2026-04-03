@@ -28,6 +28,7 @@ import {
   fetchProject,
   fetchProjectWorkspaceStatus,
   fetchStatus,
+  pickProjectFolder,
   previewCanvasEdits,
   createProjectConversation,
   generateCanvasFromPrompt,
@@ -2488,6 +2489,48 @@ export default function Home() {
     });
   }
 
+  async function handlePickProjectFolder() {
+    startProjectTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await pickProjectFolder();
+          const pickedRepoPath = response.repo_path?.trim() ?? "";
+          if (!pickedRepoPath) {
+            return;
+          }
+          setRepoPath(pickedRepoPath);
+          const projectResponse = await updateProject({
+            repo_path: pickedRepoPath,
+            name: "",
+            recent_projects: [],
+          });
+          setProject(projectResponse.project);
+          void refreshProjectsTree();
+          setWorkspaceStatus(null);
+          setCanvasDocument(null);
+          setSelectedCanvasNodeId(null);
+          setSelectedCanvasNodeIds([]);
+          setNotesExploration(null);
+          setExplorationTabs({});
+          setOpenCanvasNodeIds([]);
+          setCanvasEditPreview(null);
+          setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
+          setActiveTabId("view:notes");
+          setActiveConversationId(null);
+          setActiveConversationRepoPath(projectResponse.project.repo_path || null);
+          setConsoleMessages([]);
+          openViewTab("notes");
+          if (projectResponse.project.repo_path) {
+            expectedRepoPathRef.current = projectResponse.project.repo_path;
+          }
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
   async function handleResetCanvas() {
     startCanvasTransition(() => {
       void (async () => {
@@ -4018,6 +4061,14 @@ export default function Home() {
           <div className={styles.actionsRow}>
             <button className={styles.primaryButton} disabled={projectPending} onClick={handleSaveProject} type="button">
               {projectPending ? "Saving..." : "Open project"}
+            </button>
+            <button
+              className={styles.secondaryButton}
+              disabled={projectPending}
+              onClick={handlePickProjectFolder}
+              type="button"
+            >
+              Choose folder
             </button>
             <button
               className={styles.secondaryButton}

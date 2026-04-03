@@ -45,6 +45,30 @@ class ProjectService:
     def get_project(self) -> ProjectProfile:
         return self.store.load()
 
+    def pick_project_folder(self) -> str | None:
+        try:
+            import gi  # type: ignore
+
+            gi.require_version("Gtk", "3.0")
+            from gi.repository import Gtk  # type: ignore
+        except Exception as error:  # pragma: no cover - platform-specific fallback
+            raise ValueError("Native folder picker is not available on this system.") from error
+
+        dialog = Gtk.FileChooserNative.new(
+            "Choose project folder",
+            None,
+            Gtk.FileChooserAction.SELECT_FOLDER,
+            "_Open",
+            "_Cancel",
+        )
+        dialog.set_modal(True)
+        response = dialog.run()
+        filename = dialog.get_filename() if response == Gtk.ResponseType.ACCEPT else None
+        dialog.destroy()
+        if not filename:
+            return None
+        return str(Path(filename).resolve())
+
     def update_project(self, request: ProjectProfileUpdateRequest) -> ProjectProfile:
         repo_path = request.repo_path.strip()
         derived_name = Path(repo_path).name if repo_path else ""

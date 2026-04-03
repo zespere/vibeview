@@ -43,6 +43,7 @@ from .models import (
     ProjectBuildResponse,
     ProjectAskRequest,
     ProjectAskResponse,
+    ProjectFolderPickResponse,
     ProjectRunStreamRequest,
     ProjectPlanRequest,
     ProjectPlanResponse,
@@ -135,6 +136,15 @@ def get_status() -> StatusResponse:
 def get_project() -> ProjectProfileResponse:
     project = project_service.get_project()
     return ProjectProfileResponse(project=project, is_configured=project.is_configured)
+
+
+@app.post("/project/pick-folder", response_model=ProjectFolderPickResponse)
+def pick_project_folder() -> ProjectFolderPickResponse:
+    try:
+        repo_path = project_service.pick_project_folder()
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ProjectFolderPickResponse(repo_path=repo_path)
 
 
 @app.get("/project/workspace-status", response_model=ProjectWorkspaceStatusResponse)
