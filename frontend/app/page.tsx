@@ -68,7 +68,19 @@ interface CommandResultItem {
   title: string;
   subtitle?: string;
   group: "navigate" | "action" | "ask" | "execute";
+  searchText?: string;
   run: () => void;
+}
+
+type LeaderScope = "root" | "projects" | "notes" | "conversations" | "views" | "models" | "reasoning" | "actions";
+
+interface LeaderGroupItem {
+  id: string;
+  key: string;
+  title: string;
+  subtitle: string;
+  scope?: Exclude<LeaderScope, "root">;
+  run?: () => void;
 }
 
 interface ExplorationSuggestion {
@@ -124,6 +136,8 @@ const GPT_MODEL_OPTIONS = [
   "gpt-5.1-codex-mini",
 ];
 
+const LEADER_DIGIT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
+
 export default function Home() {
   const [isRailExpanded, setIsRailExpanded] = useState(true);
   const [railWidth, setRailWidth] = useState(292);
@@ -160,6 +174,7 @@ export default function Home() {
   const [consoleVisibility, setConsoleVisibility] = useState<ConsoleVisibilityState>("collapsed");
   const [dockOffset, setDockOffset] = useState({ x: 0, y: 0 });
   const [isDockDragging, setIsDockDragging] = useState(false);
+  const [leaderScope, setLeaderScope] = useState<LeaderScope | null>(null);
   const [isProjectTrayExpanded, setIsProjectTrayExpanded] = useState(false);
   const [isNoteSidebarCollapsed, setIsNoteSidebarCollapsed] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
@@ -311,6 +326,311 @@ export default function Home() {
     const items = [status?.codex_model, composerModel, ...GPT_MODEL_OPTIONS];
     return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
   }, [composerModel, status?.codex_model]);
+  const focusedContextNode = useMemo(
+    () => canvasDocument?.nodes.find((node) => node.id === focusedCanvasNodeId) ?? null,
+    [canvasDocument, focusedCanvasNodeId],
+  );
+  const modelCommandItems = useMemo(
+    () =>
+      availableComposerModels.map<CommandResultItem>((model) => ({
+        id: `set-model:${model}`,
+        title: model,
+        subtitle: model === composerModel ? "currently selected" : "switch model",
+        group: "action",
+        searchText: [model, "model"].join(" ").toLowerCase(),
+        run: () => {
+          setComposerModel(model);
+          setComposerStatus(`Composer model set to ${model}.`);
+          setCodexPrompt("");
+          setLeaderScope(null);
+        },
+      })),
+    [availableComposerModels, composerModel],
+  );
+  const reasoningCommandItems = useMemo(
+    () =>
+      ([
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High" },
+        { value: "xhigh", label: "Extra high" },
+      ] as const).map<CommandResultItem>((item) => ({
+        id: `set-reasoning:${item.value}`,
+        title: item.label,
+        subtitle: composerReasoning === item.value ? "currently selected" : "switch reasoning level",
+        group: "action",
+        searchText: [item.label, "reasoning"].join(" ").toLowerCase(),
+        run: () => {
+          setComposerReasoning(item.value);
+          setComposerStatus(`Reasoning set to ${item.label}.`);
+          setCodexPrompt("");
+          setLeaderScope(null);
+        },
+      })),
+    [composerReasoning],
+  );
+  const viewCommandItems = useMemo(
+    () =>
+      (["notes", "project"] as WorkspaceView[]).map<CommandResultItem>((view) => ({
+        id: `view:${view}`,
+        title: viewLabel(view),
+        subtitle: "workspace view",
+        group: "navigate",
+        searchText: [viewLabel(view), view, "view"].join(" ").toLowerCase(),
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          openViewTab(view);
+        },
+      })),
+    [],
+  );
+  const noteCommandItems = useMemo(
+    () =>
+      (canvasDocument?.nodes ?? []).slice(0, 200).map<CommandResultItem>((node) => ({
+        id: `note:${node.id}`,
+        title: node.title,
+        subtitle: node.tags.join(", ") || "note",
+        group: "navigate",
+        searchText: [node.title, node.description, node.tags.join(" "), "note"].join(" ").toLowerCase(),
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          openCanvasNode(node.id);
+        },
+      })),
+    [canvasDocument],
+  );
+  const projectCommandItems = projectsTree.slice(0, 200).map<CommandResultItem>((item) => ({
+        id: `project:${item.repo_path}`,
+        title: item.name,
+        subtitle: item.repo_path,
+        group: "navigate",
+        searchText: [item.name, item.repo_path, "project"].join(" ").toLowerCase(),
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          startProjectTransition(() => {
+            void openProjectConversation(item.repo_path);
+          });
+        },
+      }));
+  const conversationCommandItems = projectsTree
+    .flatMap((item) =>
+      item.conversations.map((conversation) => ({
+        projectName: item.name,
+        repoPath: item.repo_path,
+        conversation,
+      })),
+    )
+    .slice(0, 200)
+    .map<CommandResultItem>((item) => ({
+      id: `conversation:${item.repoPath}:${item.conversation.id}`,
+      title: item.conversation.title,
+      subtitle: `${item.projectName} · ${item.conversation.message_count} msg${item.conversation.message_count === 1 ? "" : "s"}`,
+      group: "navigate",
+      searchText: [item.conversation.title, item.projectName, item.repoPath, "conversation"].join(" ").toLowerCase(),
+      run: () => {
+        setCodexPrompt("");
+        setLeaderScope(null);
+        startProjectTransition(() => {
+          void openProjectConversation(item.repoPath, item.conversation);
+        });
+      },
+    }));
+  const actionCommandItems = (() => {
+    const items: CommandResultItem[] = [
+      {
+        id: "action-create-note",
+        title: "Create note",
+        subtitle: "Add a new note to the current canvas",
+        group: "action",
+        searchText: "create note new",
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          startCanvasTransition(() => {
+            void handleCreateCanvasNodeAt();
+          });
+        },
+      },
+      {
+        id: "action-setup-canvas",
+        title: canvasDocument?.nodes.length ? "Regenerate canvas" : "Set up canvas",
+        subtitle: "Map the current project into canvas notes",
+        group: "action",
+        searchText: "canvas map generate setup regenerate",
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          startCanvasTransition(() => {
+            void handleGenerateCanvas();
+          });
+        },
+      },
+      {
+        id: "action-reset-canvas",
+        title: "Reset canvas",
+        subtitle: "Clear all notes for the current project",
+        group: "action",
+        searchText: "canvas reset clear",
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          startCanvasTransition(() => {
+            void handleResetCanvas();
+          });
+        },
+      },
+      {
+        id: "action-commit",
+        title: "Commit changes",
+        subtitle: commitStatus?.suggested_message ?? "Create a git commit for the current repo",
+        group: "action",
+        searchText: "commit git save",
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          handleCommitClick();
+        },
+      },
+      {
+        id: "action-new-conversation",
+        title: "New conversation",
+        subtitle: "Start a new project conversation",
+        group: "action",
+        searchText: "conversation chat new",
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          startProjectTransition(() => {
+            void createConversationForProject(activeRepoPath, "New conversation", { preserveActiveView: true });
+          });
+        },
+      },
+    ];
+
+    if (focusedContextNode && !pinnedCanvasNodeIds.includes(focusedContextNode.id)) {
+      items.push({
+        id: "action-pin-current-note",
+        title: `Pin ${focusedContextNode.title}`,
+        subtitle: "Keep this note in working context while you explore",
+        group: "action",
+        searchText: ["pin current note", focusedContextNode.title].join(" ").toLowerCase(),
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          pinCanvasNode(focusedContextNode.id);
+        },
+      });
+    }
+
+    if (focusedContextNode && pinnedCanvasNodeIds.includes(focusedContextNode.id)) {
+      items.push({
+        id: "action-unpin-current-note",
+        title: `Unpin ${focusedContextNode.title}`,
+        subtitle: "Remove this note from persistent context",
+        group: "action",
+        searchText: ["unpin current note", focusedContextNode.title].join(" ").toLowerCase(),
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          unpinCanvasNode(focusedContextNode.id);
+        },
+      });
+    }
+
+    if (pinnedCanvasNodeIds.length > 0) {
+      items.push({
+        id: "action-clear-pinned",
+        title: "Clear pinned notes",
+        subtitle: `Remove ${pinnedCanvasNodeIds.length} pinned note${pinnedCanvasNodeIds.length === 1 ? "" : "s"}`,
+        group: "action",
+        searchText: "clear pinned context unpin",
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          clearPinnedCanvasNodes();
+        },
+      });
+    }
+
+    return items.filter((item) => {
+      if (item.id === "action-commit") {
+        return !!activeRepoPath && !!commitStatus?.has_changes;
+      }
+      if (item.id === "action-new-conversation") {
+        return !!activeRepoPath;
+      }
+      if (item.id === "action-create-note" || item.id === "action-setup-canvas" || item.id === "action-reset-canvas") {
+        return !!activeRepoPath;
+      }
+      return true;
+    });
+  })();
+  const leaderRootItems = useMemo<LeaderGroupItem[]>(
+    () => [
+      { id: "leader-projects", key: "p", title: "Projects", subtitle: "Switch project", scope: "projects" },
+      { id: "leader-notes", key: "n", title: "Notes", subtitle: "Open note", scope: "notes" },
+      { id: "leader-conversations", key: "c", title: "Conversations", subtitle: "Open conversation", scope: "conversations" },
+      { id: "leader-views", key: "v", title: "Views", subtitle: "Switch workspace view", scope: "views" },
+      { id: "leader-actions", key: "a", title: "Actions", subtitle: "Run canvas and project actions", scope: "actions" },
+      { id: "leader-models", key: "m", title: "Models", subtitle: "Switch model", scope: "models" },
+      { id: "leader-reasoning", key: "r", title: "Reasoning", subtitle: "Switch reasoning level", scope: "reasoning" },
+      {
+        id: "leader-build-mode",
+        key: "b",
+        title: "Build mode",
+        subtitle: "Set the composer to Build",
+        run: () => {
+          setComposerMode("build");
+          setComposerStatus("Composer set to Build mode.");
+          setLeaderScope(null);
+        },
+      },
+      {
+        id: "leader-plan-mode",
+        key: "l",
+        title: "Plan mode",
+        subtitle: "Set the composer to Plan",
+        run: () => {
+          setComposerMode("plan");
+          setComposerStatus("Composer set to Plan mode.");
+          setLeaderScope(null);
+        },
+      },
+    ],
+    [],
+  );
+  const leaderItems = useMemo(() => {
+    switch (leaderScope) {
+      case "projects":
+        return projectCommandItems.slice(0, 10);
+      case "notes":
+        return noteCommandItems.slice(0, 10);
+      case "conversations":
+        return conversationCommandItems.slice(0, 10);
+      case "views":
+        return viewCommandItems.slice(0, 10);
+      case "models":
+        return modelCommandItems.slice(0, 10);
+      case "reasoning":
+        return reasoningCommandItems.slice(0, 10);
+      case "actions":
+        return actionCommandItems.slice(0, 10);
+      default:
+        return [];
+    }
+  }, [
+    actionCommandItems,
+    conversationCommandItems,
+    leaderScope,
+    modelCommandItems,
+    noteCommandItems,
+    projectCommandItems,
+    reasoningCommandItems,
+    viewCommandItems,
+  ]);
   const notesExplorationPresentation = useMemo(
     () =>
       buildExplorationPresentation(
@@ -856,8 +1176,84 @@ export default function Home() {
         target instanceof HTMLTextAreaElement ||
         (target instanceof HTMLElement && target.isContentEditable);
 
+      if (leaderScope) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setLeaderScope(null);
+          return;
+        }
+
+        if (leaderScope === "root") {
+          if (/^[a-z]$/i.test(event.key)) {
+            const matchedItem = leaderRootItems.find((item) => item.key === event.key.toLowerCase()) ?? null;
+            if (matchedItem) {
+              event.preventDefault();
+              setCommandSelectedIndex(0);
+              if (matchedItem.scope) {
+                setLeaderScope(matchedItem.scope);
+              } else {
+                matchedItem.run?.();
+              }
+              return;
+            }
+          }
+        } else {
+          const digitIndex = LEADER_DIGIT_KEYS.indexOf(event.key as (typeof LEADER_DIGIT_KEYS)[number]);
+          if (digitIndex !== -1) {
+            const selectedItem = leaderItems[digitIndex] ?? null;
+            if (selectedItem) {
+              event.preventDefault();
+              selectedItem.run();
+            }
+            return;
+          }
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setCommandSelectedIndex((current) =>
+              leaderItems.length === 0 ? 0 : Math.min(current + 1, leaderItems.length - 1),
+            );
+            return;
+          }
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setCommandSelectedIndex((current) => Math.max(current - 1, 0));
+            return;
+          }
+          if (event.key === "Enter") {
+            const selectedItem =
+              leaderItems[Math.min(commandSelectedIndex, Math.max(leaderItems.length - 1, 0))] ?? leaderItems[0];
+            if (selectedItem) {
+              event.preventDefault();
+              selectedItem.run();
+            }
+            return;
+          }
+          if (event.key === "Backspace") {
+            event.preventDefault();
+            setCommandSelectedIndex(0);
+            setLeaderScope("root");
+            return;
+          }
+        }
+      }
+
+      if (
+        event.key === " " &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !isTypingIntoField
+      ) {
+        event.preventDefault();
+        setLeaderScope("root");
+        setCommandSelectedIndex(0);
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        setLeaderScope(null);
         setDockVisibility("visible");
         setConsoleVisibility("expanded");
         window.setTimeout(() => {
@@ -878,6 +1274,7 @@ export default function Home() {
         !isTypingIntoField
       ) {
         event.preventDefault();
+        setLeaderScope(null);
         setDockVisibility("visible");
         setConsoleVisibility("expanded");
         setCodexPrompt((current) => (current.trim() ? current : "/"));
@@ -934,11 +1331,25 @@ export default function Home() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTab, activeView, canvasDocument, codexPrompt, notesExploration]);
+  }, [
+    activeTab,
+    activeView,
+    canvasDocument,
+    codexPrompt,
+    commandSelectedIndex,
+    leaderItems,
+    leaderRootItems,
+    leaderScope,
+    notesExploration,
+  ]);
 
   useEffect(() => {
     setCommandSelectedIndex(0);
   }, [codexPrompt, composerCaretIndex]);
+
+  useEffect(() => {
+    setCommandSelectedIndex(0);
+  }, [leaderScope]);
 
   useEffect(() => {
     if (isSlashCommandMode) {
@@ -2213,53 +2624,44 @@ export default function Home() {
     const planPrompt = commandName === "plan" ? commandArgs : "";
 
     if (commandName === "build" && !buildPrompt) {
-      return [
-        {
-          id: "switch-build-mode",
-          title: "Switch to Build mode",
-          subtitle: "Use plain prompts to implement changes",
+      return leaderRootItems
+        .filter((item) => item.id === "leader-build-mode")
+        .map<CommandResultItem>((item) => ({
+          id: item.id,
+          title: item.title,
+          subtitle: item.subtitle,
           group: "action",
-          run: () => {
-            setComposerMode("build");
-            setComposerStatus("Composer set to Build mode.");
-            setCodexPrompt("");
-          },
-        },
-      ];
+          searchText: [item.title, item.subtitle].join(" ").toLowerCase(),
+          run: () => item.run?.(),
+        }));
     }
 
     if (commandName === "plan" && !planPrompt) {
-      return [
-        {
-          id: "switch-plan-mode",
-          title: "Switch to Plan mode",
-          subtitle: "Use plain prompts to draft implementation plans",
+      return leaderRootItems
+        .filter((item) => item.id === "leader-plan-mode")
+        .map<CommandResultItem>((item) => ({
+          id: item.id,
+          title: item.title,
+          subtitle: item.subtitle,
           group: "action",
-          run: () => {
-            setComposerMode("plan");
-            setComposerStatus("Composer set to Plan mode.");
-            setCodexPrompt("");
-          },
-        },
-      ];
+          searchText: [item.title, item.subtitle].join(" ").toLowerCase(),
+          run: () => item.run?.(),
+        }));
     }
 
     if (commandName === "model") {
       const modelQuery = commandArgs.toLowerCase();
-      return availableComposerModels
-        .filter((model) => !modelQuery || model.toLowerCase().includes(modelQuery))
-        .map<CommandResultItem>((model) => ({
-          id: `set-model:${model}`,
-          title: model,
-          subtitle: model === composerModel ? "currently selected" : "switch model",
-          group: "action",
-          run: () => {
-            setComposerModel(model);
-            setComposerStatus(`Composer model set to ${model}.`);
-            setCodexPrompt("");
-          },
-        }))
+      return modelCommandItems
+        .filter((item) => !modelQuery || item.title.toLowerCase().includes(modelQuery))
         .slice(0, 14);
+    }
+
+    if (commandName === "reasoning") {
+      const reasoningQuery = commandArgs.toLowerCase();
+      return reasoningCommandItems.filter((item) => {
+        const haystack = [item.title, item.subtitle ?? ""].join(" ").toLowerCase();
+        return !reasoningQuery || haystack.includes(reasoningQuery);
+      });
     }
 
     if (buildPrompt) {
@@ -2300,241 +2702,21 @@ export default function Home() {
       ];
     }
 
-    const currentNode = canvasDocument?.nodes.find((node) => node.id === focusedCanvasNodeId) ?? null;
-    const actionItems: Array<CommandResultItem & { keywords: string[]; enabled?: boolean }> = [
-      {
-        id: "action-create-note",
-        title: "Create note",
-        subtitle: "Add a new note to the current canvas",
-        group: "action",
-        keywords: ["create", "note", "new"],
-        enabled: !!activeRepoPath,
-        run: () => {
-          setCodexPrompt("");
-          startCanvasTransition(() => {
-            void handleCreateCanvasNodeAt();
-          });
-        },
-      },
-      {
-        id: "action-setup-canvas",
-        title: canvasDocument?.nodes.length ? "Regenerate canvas" : "Set up canvas",
-        subtitle: "Map the current project into canvas notes",
-        group: "action",
-        keywords: ["canvas", "map", "generate", "setup", "regenerate"],
-        enabled: !!activeRepoPath,
-        run: () => {
-          setCodexPrompt("");
-          startCanvasTransition(() => {
-            void handleGenerateCanvas();
-          });
-        },
-      },
-      {
-        id: "action-reset-canvas",
-        title: "Reset canvas",
-        subtitle: "Clear all notes for the current project",
-        group: "action",
-        keywords: ["canvas", "reset", "clear"],
-        enabled: !!activeRepoPath,
-        run: () => {
-          setCodexPrompt("");
-          startCanvasTransition(() => {
-            void handleResetCanvas();
-          });
-        },
-      },
-      {
-        id: "action-commit",
-        title: "Commit changes",
-        subtitle: commitStatus?.suggested_message ?? "Create a git commit for the current repo",
-        group: "action",
-        keywords: ["commit", "git", "save"],
-        enabled: !!activeRepoPath && !!commitStatus?.has_changes,
-        run: () => {
-          setCodexPrompt("");
-          handleCommitClick();
-        },
-      },
-      {
-        id: "action-new-conversation",
-        title: "New conversation",
-        subtitle: "Start a new project conversation",
-        group: "action",
-        keywords: ["conversation", "chat", "new"],
-        enabled: !!activeRepoPath,
-        run: () => {
-          setCodexPrompt("");
-          startProjectTransition(() => {
-            void createConversationForProject(activeRepoPath, "New conversation", { preserveActiveView: true });
-          });
-        },
-      },
-      {
-        id: "action-open-notes",
-        title: "Open Notes",
-        subtitle: "Switch to the Notes workspace",
-        group: "action",
-        keywords: ["open", "notes", "view"],
-        enabled: true,
-        run: () => {
-          setCodexPrompt("");
-          openViewTab("notes");
-        },
-      },
-      {
-        id: "action-open-project",
-        title: "Open Project",
-        subtitle: "Switch to the Project workspace",
-        group: "action",
-        keywords: ["open", "project", "view", "settings"],
-        enabled: true,
-        run: () => {
-          setCodexPrompt("");
-          openViewTab("project");
-        },
-      },
-    ];
-
-    if (currentNode && !pinnedCanvasNodeIds.includes(currentNode.id)) {
-      actionItems.push({
-        id: "action-pin-current-note",
-        title: `Pin ${currentNode.title}`,
-        subtitle: "Keep this note in working context while you explore",
-        group: "action",
-        keywords: ["pin", "current", "note", currentNode.title.toLowerCase()],
-        enabled: true,
-        run: () => {
-          setCodexPrompt("");
-          pinCanvasNode(currentNode.id);
-        },
-      });
-    }
-
-    if (currentNode && pinnedCanvasNodeIds.includes(currentNode.id)) {
-      actionItems.push({
-        id: "action-unpin-current-note",
-        title: `Unpin ${currentNode.title}`,
-        subtitle: "Remove this note from persistent context",
-        group: "action",
-        keywords: ["unpin", "current", "note", currentNode.title.toLowerCase()],
-        enabled: true,
-        run: () => {
-          setCodexPrompt("");
-          unpinCanvasNode(currentNode.id);
-        },
-      });
-    }
-
-    if (pinnedCanvasNodeIds.length > 0) {
-      actionItems.push({
-        id: "action-clear-pinned",
-        title: "Clear pinned notes",
-        subtitle: `Remove ${pinnedCanvasNodeIds.length} pinned note${pinnedCanvasNodeIds.length === 1 ? "" : "s"}`,
-        group: "action",
-        keywords: ["clear", "pinned", "context", "unpin"],
-        enabled: true,
-        run: () => {
-          setCodexPrompt("");
-          clearPinnedCanvasNodes();
-        },
-      });
-    }
-
-    const actionMatches = actionItems
-      .filter((item) => item.enabled !== false)
-      .filter((item) => {
-        if (!commandQuery) {
-          return true;
-        }
-        const haystack = [item.title, item.subtitle ?? "", ...item.keywords].join(" ").toLowerCase();
-        return haystack.includes(loweredCommand);
-      });
-
     const query = loweredCommand;
-    const noteItems = (canvasDocument?.nodes ?? [])
-      .filter((node) => {
-        if (!query) {
-          return true;
-        }
-        const haystack = [node.title, node.description, node.tags.join(" ")].join(" ").toLowerCase();
-        return haystack.includes(query);
-      })
-      .slice(0, 8)
-      .map<CommandResultItem>((node) => ({
-        id: `note:${node.id}`,
-        title: node.title,
-        subtitle: node.tags.join(", ") || "note",
-        group: "navigate",
-        run: () => {
-          setCodexPrompt("");
-          openCanvasNode(node.id);
-        },
-      }));
-
-    const projectItems = projectsTree
+    return [
+      ...actionCommandItems,
+      ...noteCommandItems,
+      ...projectCommandItems,
+      ...conversationCommandItems,
+      ...viewCommandItems,
+    ]
       .filter((item) => {
         if (!query) {
           return true;
         }
-        return [item.name, item.repo_path].join(" ").toLowerCase().includes(query);
+        return (item.searchText ?? [item.title, item.subtitle ?? ""].join(" ").toLowerCase()).includes(query);
       })
-      .slice(0, 6)
-      .map<CommandResultItem>((item) => ({
-        id: `project:${item.repo_path}`,
-        title: item.name,
-        subtitle: item.repo_path,
-        group: "navigate",
-        run: () => {
-          setCodexPrompt("");
-          startProjectTransition(() => {
-            void openProjectConversation(item.repo_path);
-          });
-        },
-      }));
-
-    const conversationItems = projectsTree
-      .flatMap((item) =>
-        item.conversations.map((conversation) => ({
-          projectName: item.name,
-          repoPath: item.repo_path,
-          conversation,
-        })),
-      )
-      .filter((item) => {
-        if (!query) {
-          return false;
-        }
-        return [item.conversation.title, item.projectName, item.repoPath].join(" ").toLowerCase().includes(query);
-      })
-      .slice(0, 8)
-      .map<CommandResultItem>((item) => ({
-        id: `conversation:${item.repoPath}:${item.conversation.id}`,
-        title: item.conversation.title,
-        subtitle: `${item.projectName} · ${item.conversation.message_count} msg${item.conversation.message_count === 1 ? "" : "s"}`,
-        group: "navigate",
-        run: () => {
-          setCodexPrompt("");
-          startProjectTransition(() => {
-            void openProjectConversation(item.repoPath, item.conversation);
-          });
-        },
-      }));
-
-    const viewItems = (["notes", "project"] as WorkspaceView[])
-      .filter((view) => !query || viewLabel(view).toLowerCase().includes(query))
-      .map<CommandResultItem>((view) => ({
-        id: `view:${view}`,
-        title: viewLabel(view),
-        subtitle: "workspace view",
-        group: "navigate",
-        run: () => {
-          setCodexPrompt("");
-          openViewTab(view);
-        },
-      }));
-
-    return [...actionMatches, ...noteItems, ...projectItems, ...conversationItems, ...viewItems].slice(0, 14);
+      .slice(0, 14);
   })();
 
   const insertComposerNoteMention = useCallback(
@@ -3579,6 +3761,80 @@ export default function Home() {
     );
   }
 
+  function renderLeaderOverlay() {
+    if (!leaderScope) {
+      return null;
+    }
+
+    if (leaderScope === "root") {
+      return (
+        <div className={styles.leaderOverlay}>
+          <div className={styles.leaderOverlayPanel}>
+            <div className={styles.leaderOverlayHeader}>
+              <span className={styles.leaderOverlayTitle}>Leader</span>
+              <span className={styles.leaderOverlayMeta}>Press a key</span>
+            </div>
+            <div className={styles.leaderRootGrid}>
+              {leaderRootItems.map((item) => (
+                <button
+                  className={styles.leaderRootItem}
+                  key={item.id}
+                  onClick={() => {
+                    if (item.scope) {
+                      setLeaderScope(item.scope);
+                    } else {
+                      item.run?.();
+                    }
+                  }}
+                  type="button"
+                >
+                  <span className={styles.leaderKeycap}>{item.key}</span>
+                  <span className={styles.leaderRootText}>
+                    <span className={styles.leaderRootTitle}>{item.title}</span>
+                    <span className={styles.leaderRootMeta}>{item.subtitle}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.leaderOverlay}>
+        <div className={styles.leaderOverlayPanel}>
+          <div className={styles.leaderOverlayHeader}>
+            <span className={styles.leaderOverlayTitle}>
+              {leaderRootItems.find((item) => item.scope === leaderScope)?.title ?? "Commands"}
+            </span>
+            <span className={styles.leaderOverlayMeta}>1-9 / 0 to open, Backspace to go back</span>
+          </div>
+          <div className={styles.leaderResults}>
+            {leaderItems.length === 0 ? (
+              <p className={styles.helperText}>Nothing available here right now.</p>
+            ) : (
+              leaderItems.map((item, index) => (
+                <button
+                  className={index === commandSelectedIndex ? styles.leaderResultActive : styles.leaderResult}
+                  key={item.id}
+                  onClick={item.run}
+                  type="button"
+                >
+                  <span className={styles.leaderResultNumber}>{LEADER_DIGIT_KEYS[index] ?? "·"}</span>
+                  <span className={styles.leaderResultText}>
+                    <span className={styles.leaderResultTitle}>{item.title}</span>
+                    {item.subtitle ? <span className={styles.leaderResultMeta}>{item.subtitle}</span> : null}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderProjectSetup() {
     return (
       <div className={styles.setupShell}>
@@ -3822,6 +4078,7 @@ export default function Home() {
         </aside>
 
         <main className={styles.workspace} style={{ marginLeft: currentRailWidth }}>
+          {renderLeaderOverlay()}
           <div className={styles.tabStrip}>
             {openTabs.map((tab) => (
               <div className={activeTabId === tab.id ? styles.documentTabActive : styles.documentTab} key={tab.id}>
