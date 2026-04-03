@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
@@ -148,6 +156,8 @@ export default function Home() {
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [dockVisibility, setDockVisibility] = useState<DockVisibilityState>("visible");
   const [consoleVisibility, setConsoleVisibility] = useState<ConsoleVisibilityState>("collapsed");
+  const [dockOffset, setDockOffset] = useState({ x: 0, y: 0 });
+  const [isDockDragging, setIsDockDragging] = useState(false);
   const [isProjectTrayExpanded, setIsProjectTrayExpanded] = useState(false);
   const [isNoteSidebarCollapsed, setIsNoteSidebarCollapsed] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
@@ -179,6 +189,7 @@ export default function Home() {
   const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const expectedRepoPathRef = useRef("");
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
+  const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
 
   const [statusPending, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
@@ -452,6 +463,36 @@ export default function Home() {
       window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isRailResizing, railResizeStartWidth, railResizeStartX]);
+
+  useEffect(() => {
+    if (!isDockDragging) {
+      return;
+    }
+
+    function handleMouseMove(event: MouseEvent) {
+      const dragStart = dockDragStartRef.current;
+      if (!dragStart) {
+        return;
+      }
+
+      setDockOffset({
+        x: dragStart.offsetX + (event.clientX - dragStart.x),
+        y: dragStart.offsetY + (event.clientY - dragStart.y),
+      });
+    }
+
+    function handleMouseUp() {
+      setIsDockDragging(false);
+      dockDragStartRef.current = null;
+    }
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDockDragging]);
 
   useEffect(() => {
     if (!project) {
@@ -2684,6 +2725,17 @@ export default function Home() {
     }
   }
 
+  function handleDockDragStart(event: ReactMouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    dockDragStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: dockOffset.x,
+      offsetY: dockOffset.y,
+    };
+    setIsDockDragging(true);
+  }
+
   function handleComposerChange(value: string) {
     setCodexPrompt(value);
     window.requestAnimationFrame(() => {
@@ -3248,11 +3300,12 @@ export default function Home() {
     const isEmbedded = mode === "embedded";
     const isDockHidden = dockVisibility === "hidden";
     const isDockExpanded = consoleVisibility === "expanded";
+    const floatingShellStyle = isEmbedded ? undefined : { transform: `translate(${dockOffset.x}px, ${dockOffset.y}px)` };
 
     if (isDockHidden) {
       return (
-        <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell}>
-          <div className={styles.notesConsoleHiddenRail}>
+        <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell} style={floatingShellStyle}>
+          <div className={isEmbedded ? styles.notesConsoleHiddenRail : styles.notesConsoleHiddenRailFloating}>
             <button
               className={styles.notesConsoleHiddenHandle}
               onClick={() => {
@@ -3270,8 +3323,9 @@ export default function Home() {
     }
 
     return (
-      <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell}>
-        <div className={isEmbedded ? styles.notesConsoleDockEmbedded : styles.notesConsoleDock}>
+      <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell} style={floatingShellStyle}>
+        <div className={isEmbedded ? styles.notesConsoleDockEmbedded : styles.notesConsoleFloatingWrap}>
+          <div className={isEmbedded ? styles.notesConsoleDockEmbedded : styles.notesConsoleDock}>
           {isDockExpanded ? (
             <div className={styles.notesConsolePanel}>
               {isSlashCommandMode ? (
@@ -3344,16 +3398,6 @@ export default function Home() {
               <span className={styles.notesConsoleBarSummary}>
                 {isSlashCommandMode && selectedCommandResult ? selectedCommandResult.title : latestConsoleSummary}
               </span>
-            </button>
-            <button
-              className={styles.notesConsoleBarActionButton}
-              onClick={() => {
-                setConsoleVisibility("collapsed");
-                setDockVisibility("hidden");
-              }}
-              type="button"
-            >
-              Hide
             </button>
           </div>
 
@@ -3473,6 +3517,30 @@ export default function Home() {
               </div>
             </div>
           </label>
+          </div>
+          {isEmbedded ? null : (
+            <div className={styles.notesConsoleExternalActions}>
+              <button
+                className={[styles.notesConsoleExternalButton, styles.notesConsoleDragHandle].join(" ")}
+                aria-label="Move console"
+                onMouseDown={handleDockDragStart}
+                title="Drag console"
+                type="button"
+              >
+                <span aria-hidden="true" className={styles.notesConsoleGripDots} />
+              </button>
+              <button
+                className={styles.notesConsoleExternalButton}
+                onClick={() => {
+                  setConsoleVisibility("collapsed");
+                  setDockVisibility("hidden");
+                }}
+                type="button"
+              >
+                Hide
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
