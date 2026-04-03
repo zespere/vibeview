@@ -3306,17 +3306,30 @@ export default function Home() {
       return (
         <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell} style={floatingShellStyle}>
           <div className={isEmbedded ? styles.notesConsoleHiddenRail : styles.notesConsoleHiddenRailFloating}>
-            <button
-              className={styles.notesConsoleHiddenHandle}
-              onClick={() => {
-                setDockVisibility("visible");
-                setConsoleVisibility("collapsed");
-              }}
-              type="button"
-            >
-              <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
-              <span className={styles.notesConsoleHiddenMeta}>Show</span>
-            </button>
+            <div className={styles.notesConsoleHiddenHandle}>
+              {!isEmbedded ? (
+                <button
+                  aria-label="Move console"
+                  className={[styles.notesConsoleExternalButton, styles.notesConsoleDragHandle].join(" ")}
+                  onMouseDown={handleDockDragStart}
+                  title="Drag console"
+                  type="button"
+                >
+                  <span aria-hidden="true" className={styles.notesConsoleGripDots} />
+                </button>
+              ) : null}
+              <button
+                className={styles.notesConsoleHiddenShow}
+                onClick={() => {
+                  setDockVisibility("visible");
+                  setConsoleVisibility("collapsed");
+                }}
+                type="button"
+              >
+                <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
+                <span className={styles.notesConsoleHiddenMeta}>Show</span>
+              </button>
+            </div>
           </div>
         </div>
       );

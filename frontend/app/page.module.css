@@ -639,6 +639,12 @@
 .notesConsoleHiddenHandle {
   display: inline-flex;
   align-items: center;
+  gap: 8px;
+}
+
+.notesConsoleHiddenShow {
+  display: inline-flex;
+  align-items: center;
   gap: 10px;
   min-height: 36px;
   border: 1px solid rgba(214, 204, 191, 0.76);
