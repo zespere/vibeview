@@ -1296,6 +1296,12 @@ export default function Home() {
         return;
       }
 
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        setIsRailExpanded((current) => !current);
+        return;
+      }
+
       if (
         event.key === "/" &&
         !event.metaKey &&
