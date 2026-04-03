@@ -3306,8 +3306,22 @@ export default function Home() {
       return (
         <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell} style={floatingShellStyle}>
           <div className={isEmbedded ? styles.notesConsoleHiddenRail : styles.notesConsoleHiddenRailFloating}>
-            <div className={styles.notesConsoleHiddenHandle}>
-              {!isEmbedded ? (
+            {isEmbedded ? (
+              <div className={styles.notesConsoleHiddenHandle}>
+                <button
+                  className={styles.notesConsoleHiddenShow}
+                  onClick={() => {
+                    setDockVisibility("visible");
+                    setConsoleVisibility("collapsed");
+                  }}
+                  type="button"
+                >
+                  <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
+                  <span className={styles.notesConsoleHiddenMeta}>Show</span>
+                </button>
+              </div>
+            ) : (
+              <div className={styles.notesConsoleExternalActions}>
                 <button
                   aria-label="Move console"
                   className={[styles.notesConsoleExternalButton, styles.notesConsoleDragHandle].join(" ")}
@@ -3317,19 +3331,18 @@ export default function Home() {
                 >
                   <span aria-hidden="true" className={styles.notesConsoleGripDots} />
                 </button>
-              ) : null}
-              <button
-                className={styles.notesConsoleHiddenShow}
-                onClick={() => {
-                  setDockVisibility("visible");
-                  setConsoleVisibility("collapsed");
-                }}
-                type="button"
-              >
-                <span className={styles.notesConsoleBarLabel}>{isSlashCommandMode ? "Commands" : "Console"}</span>
-                <span className={styles.notesConsoleHiddenMeta}>Show</span>
-              </button>
-            </div>
+                <button
+                  className={[styles.notesConsoleExternalButton, styles.notesConsoleShowButton].join(" ")}
+                  onClick={() => {
+                    setDockVisibility("visible");
+                    setConsoleVisibility("collapsed");
+                  }}
+                  type="button"
+                >
+                  Show
+                </button>
+              </div>
+            )}
           </div>
         </div>
       );
