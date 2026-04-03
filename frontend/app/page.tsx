@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -8,6 +9,7 @@ import {
   useTransition,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type SyntheticEvent,
 } from "react";
 
 import styles from "./page.module.css";
@@ -144,6 +146,7 @@ export default function Home() {
   const [agentsContent, setAgentsContent] = useState("");
   const [repoPath, setRepoPath] = useState("");
   const [codexPrompt, setCodexPrompt] = useState("");
+  const [composerCaretIndex, setComposerCaretIndex] = useState(0);
   const [composerModel, setComposerModel] = useState("gpt-5.4");
   const [composerReasoning, setComposerReasoning] = useState<ComposerReasoningEffort>("medium");
   const [composerMode, setComposerMode] = useState<ComposerRunMode>("build");
@@ -276,6 +279,11 @@ export default function Home() {
     workspaceStatus.has_project_files;
   const isSlashCommandMode = codexPrompt.trim().startsWith("/");
   const commandQuery = isSlashCommandMode ? codexPrompt.trim().slice(1).trim() : "";
+  const activeNoteMention = useMemo(
+    () => findActiveNoteMention(codexPrompt, composerCaretIndex, canvasDocument),
+    [canvasDocument, codexPrompt, composerCaretIndex],
+  );
+  const isNoteMentionMode = !isSlashCommandMode && activeNoteMention !== null;
   const isComposerBusy = isBuilding || isPlanning || codexPending;
   const activeConversationSummary = useMemo(
     () =>
@@ -930,7 +938,7 @@ export default function Home() {
 
   useEffect(() => {
     setCommandSelectedIndex(0);
-  }, [codexPrompt]);
+  }, [codexPrompt, composerCaretIndex]);
 
   useEffect(() => {
     if (isSlashCommandMode) {
@@ -938,6 +946,13 @@ export default function Home() {
       setConsoleVisibility("expanded");
     }
   }, [isSlashCommandMode]);
+
+  useEffect(() => {
+    if (isNoteMentionMode) {
+      setDockVisibility("visible");
+      setConsoleVisibility("expanded");
+    }
+  }, [isNoteMentionMode]);
 
   useEffect(() => {
     if (!canvasDocument) {
@@ -1191,6 +1206,7 @@ export default function Home() {
       return;
     }
 
+    const promptContextNodeIds = resolvePromptContextNodeIds(prompt, activeContextDocument, visibleContextNodeIds);
     const userMessage: ConversationMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -1235,7 +1251,7 @@ export default function Home() {
         activeRepoPath,
         "build",
         prompt,
-        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
+        buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
         buildConversationContext(pendingMessages),
         composerModel,
         composerReasoning,
@@ -1326,6 +1342,7 @@ export default function Home() {
       return;
     }
 
+    const promptContextNodeIds = resolvePromptContextNodeIds(prompt, activeContextDocument, visibleContextNodeIds);
     const userMessage: ConversationMessage = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -1374,7 +1391,7 @@ export default function Home() {
         activeRepoPath,
         "plan",
         prompt,
-        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
+        buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
         buildConversationContext(pendingMessages),
         composerModel,
         composerReasoning,
@@ -2520,21 +2537,85 @@ export default function Home() {
     return [...actionMatches, ...noteItems, ...projectItems, ...conversationItems, ...viewItems].slice(0, 14);
   })();
 
+  const insertComposerNoteMention = useCallback(
+    (node: CanvasNode) => {
+      const mention = findActiveNoteMention(codexPrompt, composerCaretIndex, canvasDocument);
+      const nextMentionText = `@${node.title} `;
+      const nextValue = mention
+        ? `${codexPrompt.slice(0, mention.start)}${nextMentionText}${codexPrompt.slice(mention.end)}`
+        : `${codexPrompt}${nextMentionText}`;
+      const nextCaretIndex = (mention ? mention.start : codexPrompt.length) + nextMentionText.length;
+
+      setCodexPrompt(nextValue);
+      setComposerCaretIndex(nextCaretIndex);
+      setCommandSelectedIndex(0);
+      window.requestAnimationFrame(() => {
+        const element = composerInputRef.current;
+        if (!element) {
+          return;
+        }
+        element.focus();
+        element.setSelectionRange(nextCaretIndex, nextCaretIndex);
+        resizeComposerInput(element);
+      });
+    },
+    [canvasDocument, codexPrompt, composerCaretIndex],
+  );
+
+  const mentionResults: CommandResultItem[] = useMemo(() => {
+    if (!activeNoteMention || !canvasDocument) {
+      return [];
+    }
+
+    const query = activeNoteMention.query.trim().toLowerCase();
+    return canvasDocument.nodes
+      .filter((node) => {
+        if (!query) {
+          return true;
+        }
+        const haystack = [node.title, node.tags.join(" "), node.description].join(" ").toLowerCase();
+        return haystack.includes(query);
+      })
+      .sort((left, right) => {
+        const leftStarts = left.title.toLowerCase().startsWith(query);
+        const rightStarts = right.title.toLowerCase().startsWith(query);
+        if (leftStarts !== rightStarts) {
+          return leftStarts ? -1 : 1;
+        }
+        return left.title.localeCompare(right.title);
+      })
+      .slice(0, 10)
+      .map<CommandResultItem>((node) => ({
+        id: `mention:${node.id}`,
+        title: node.title,
+        subtitle: node.tags.join(", ") || "note",
+        group: "navigate",
+        run: () => {
+          insertComposerNoteMention(node);
+        },
+      }));
+  }, [activeNoteMention, canvasDocument, insertComposerNoteMention]);
+
+  const composerResults = useMemo(
+    () => (isSlashCommandMode ? commandResults : isNoteMentionMode ? mentionResults : []),
+    [commandResults, isNoteMentionMode, isSlashCommandMode, mentionResults],
+  );
+
   useEffect(() => {
     const isAnyDockExpanded = dockVisibility === "visible" && consoleVisibility === "expanded";
-    if (!isSlashCommandMode || !isAnyDockExpanded || commandResults.length === 0) {
+    if ((!isSlashCommandMode && !isNoteMentionMode) || !isAnyDockExpanded || composerResults.length === 0) {
       return;
     }
 
     const selectedResult =
-      commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? null;
+      composerResults[Math.min(commandSelectedIndex, Math.max(composerResults.length - 1, 0))] ?? null;
     if (!selectedResult) {
       return;
     }
 
     const node = commandResultRefs.current[selectedResult.id];
     node?.scrollIntoView({ block: "nearest" });
-  }, [commandResults, commandSelectedIndex, consoleVisibility, dockVisibility, isSlashCommandMode]);
+  }, [commandSelectedIndex, composerResults, consoleVisibility, dockVisibility, isNoteMentionMode, isSlashCommandMode]);
 
   function handleSubmitOmnibox() {
     const value = codexPrompt.trim();
@@ -2545,9 +2626,9 @@ export default function Home() {
     setDockVisibility("visible");
     setConsoleVisibility("expanded");
 
-    if (isSlashCommandMode) {
+    if (isSlashCommandMode || (isNoteMentionMode && composerResults.length > 0)) {
       const selectedResult =
-        commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? commandResults[0];
+        composerResults[Math.min(commandSelectedIndex, Math.max(composerResults.length - 1, 0))] ?? composerResults[0];
       if (selectedResult) {
         selectedResult.run();
       }
@@ -2591,11 +2672,11 @@ export default function Home() {
       }
     }
 
-    if (isSlashCommandMode) {
+    if (isSlashCommandMode || (isNoteMentionMode && composerResults.length > 0)) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setCommandSelectedIndex((current) =>
-          commandResults.length === 0 ? 0 : Math.min(current + 1, commandResults.length - 1),
+          composerResults.length === 0 ? 0 : Math.min(current + 1, composerResults.length - 1),
         );
         return;
       }
@@ -2630,9 +2711,17 @@ export default function Home() {
 
   function handleComposerChange(value: string) {
     setCodexPrompt(value);
+    const element = composerInputRef.current;
+    if (element) {
+      setComposerCaretIndex(element.selectionStart ?? value.length);
+    }
     window.requestAnimationFrame(() => {
       resizeComposerInput(composerInputRef.current);
     });
+  }
+
+  function handleComposerSelectionChange(event: SyntheticEvent<HTMLTextAreaElement>) {
+    setComposerCaretIndex(event.currentTarget.selectionStart ?? 0);
   }
 
   function pinPreviewTab(tabId: OpenTab["id"]) {
@@ -3188,7 +3277,7 @@ export default function Home() {
 
   function renderUnifiedDock(mode: "floating" | "embedded" = "floating") {
     const selectedCommandResult =
-      commandResults[Math.min(commandSelectedIndex, Math.max(commandResults.length - 1, 0))] ?? null;
+      composerResults[Math.min(commandSelectedIndex, Math.max(composerResults.length - 1, 0))] ?? null;
     const isEmbedded = mode === "embedded";
     const isDockHidden = dockVisibility === "hidden";
     const isDockExpanded = consoleVisibility === "expanded";
@@ -3209,7 +3298,7 @@ export default function Home() {
                   type="button"
                 >
                   <span className={styles.notesConsoleBarLabel}>
-                    {isSlashCommandMode ? "Commands" : "Conversation"}
+                    {isSlashCommandMode ? "Commands" : isNoteMentionMode ? "Mention notes" : "Conversation"}
                   </span>
                   <span className={styles.notesConsoleHiddenMeta}>Show</span>
                 </button>
@@ -3253,10 +3342,31 @@ export default function Home() {
             <div className={styles.notesConsolePanel}>
               {isSlashCommandMode ? (
                 <div className={styles.commandResults}>
-                  {commandResults.length === 0 ? (
+                  {composerResults.length === 0 ? (
                     <p className={styles.helperText}>Type a slash command, or search notes, projects, conversations, and views with `/`.</p>
                   ) : (
-                    commandResults.map((item, index) => (
+                    composerResults.map((item, index) => (
+                      <button
+                        className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
+                        key={item.id}
+                        ref={(node) => {
+                          commandResultRefs.current[item.id] = node;
+                        }}
+                        onClick={item.run}
+                        type="button"
+                      >
+                        <span className={styles.commandResultTitle}>{item.title}</span>
+                        {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : isNoteMentionMode ? (
+                <div className={styles.commandResults}>
+                  {composerResults.length === 0 ? (
+                    <p className={styles.helperText}>No matching notes. Keep typing after `@` to refine the mention.</p>
+                  ) : (
+                    composerResults.map((item, index) => (
                       <button
                         className={index === commandSelectedIndex ? styles.commandResultActive : styles.commandResult}
                         key={item.id}
@@ -3318,10 +3428,12 @@ export default function Home() {
               type="button"
             >
               <span className={styles.notesConsoleBarLabel}>
-                {isSlashCommandMode ? "Commands" : "Conversation"}
+                {isSlashCommandMode ? "Commands" : isNoteMentionMode ? "Mention notes" : "Conversation"}
               </span>
               <span className={styles.notesConsoleBarSummary}>
-                {isSlashCommandMode && selectedCommandResult ? selectedCommandResult.title : latestConsoleSummary}
+                {(isSlashCommandMode || isNoteMentionMode) && selectedCommandResult
+                  ? selectedCommandResult.title
+                  : latestConsoleSummary}
               </span>
             </button>
           </div>
@@ -3331,7 +3443,10 @@ export default function Home() {
               className={styles.consoleComposerInput}
               disabled={isComposerBusy}
               onChange={(event) => handleComposerChange(event.target.value)}
+              onClick={handleComposerSelectionChange}
               onKeyDown={handleComposerKeyDown}
+              onKeyUp={handleComposerSelectionChange}
+              onSelect={handleComposerSelectionChange}
               placeholder="Ask about the project, describe a change, or type / for commands."
               ref={composerInputRef}
               rows={2}
@@ -3424,7 +3539,7 @@ export default function Home() {
                     </>
                   ) : (
                     <span>
-                      {isSlashCommandMode
+                      {isSlashCommandMode || isNoteMentionMode
                         ? "Run"
                         : composerMode === "build"
                           ? "Build"
@@ -4625,6 +4740,11 @@ function buildSelectedNoteContext(document: CanvasDocument | null, focusNodeIds:
   return [noteBlocks, "Relevant note relationships:", ...selectedRelationLines].join("\n\n");
 }
 
+function resolvePromptContextNodeIds(prompt: string, document: CanvasDocument | null, baseNodeIds: string[]) {
+  const explicitMentionIds = extractMentionedCanvasNodes(prompt, document).map((node) => node.id);
+  return uniqueNodeIds([...baseNodeIds, ...explicitMentionIds]);
+}
+
 function buildConversationContext(messages: ConversationMessage[]) {
   if (messages.length === 0) {
     return undefined;
@@ -4715,6 +4835,81 @@ function summarizeNote(value: string) {
   }
   const collapsed = trimmed.replace(/\s+/g, " ");
   return collapsed.length > 120 ? `${collapsed.slice(0, 117).trim()}...` : collapsed;
+}
+
+function findActiveNoteMention(prompt: string, caretIndex: number, document: CanvasDocument | null) {
+  if (!document || document.nodes.length === 0 || caretIndex < 0) {
+    return null;
+  }
+
+  const lineStart = Math.max(prompt.lastIndexOf("\n", Math.max(caretIndex - 1, 0)), prompt.lastIndexOf("\r", Math.max(caretIndex - 1, 0))) + 1;
+  const beforeCaret = prompt.slice(lineStart, caretIndex);
+  const atOffset = beforeCaret.lastIndexOf("@");
+  if (atOffset === -1) {
+    return null;
+  }
+
+  const start = lineStart + atOffset;
+  const previousChar = start > 0 ? prompt[start - 1] : "";
+  if (previousChar && !/\s|[(\[{'"`]/.test(previousChar)) {
+    return null;
+  }
+
+  const query = prompt.slice(start + 1, caretIndex);
+  if (!query || query.includes("\n") || query.includes("\r") || query.endsWith(" ")) {
+    return null;
+  }
+
+  const lowerQuery = query.toLowerCase();
+  const titleClosesMention = document.nodes.some((node) => {
+    const lowerTitle = node.title.trim().toLowerCase();
+    return lowerTitle && lowerQuery.startsWith(`${lowerTitle} `);
+  });
+  if (titleClosesMention) {
+    return null;
+  }
+
+  return { start, end: caretIndex, query };
+}
+
+function extractMentionedCanvasNodes(prompt: string, document: CanvasDocument | null) {
+  if (!document || document.nodes.length === 0 || !prompt.includes("@")) {
+    return [];
+  }
+
+  const nodes = [...document.nodes]
+    .filter((node) => node.title.trim())
+    .sort((left, right) => right.title.trim().length - left.title.trim().length);
+  const lowerPrompt = prompt.toLowerCase();
+  const matches = new Map<string, CanvasNode>();
+
+  for (let index = 0; index < prompt.length; index += 1) {
+    if (prompt[index] !== "@") {
+      continue;
+    }
+
+    const previousChar = index > 0 ? prompt[index - 1] : "";
+    if (previousChar && !/\s|[(\[{'"`]/.test(previousChar)) {
+      continue;
+    }
+
+    for (const node of nodes) {
+      const title = node.title.trim();
+      const lowerTitle = title.toLowerCase();
+      if (!lowerPrompt.startsWith(lowerTitle, index + 1)) {
+        continue;
+      }
+      const afterIndex = index + 1 + lowerTitle.length;
+      const afterChar = prompt[afterIndex] ?? "";
+      if (afterChar && !/\s|[.,!?;:)\]}]/.test(afterChar)) {
+        continue;
+      }
+      matches.set(node.id, node);
+      break;
+    }
+  }
+
+  return [...matches.values()];
 }
 
 function renderConsoleMessageContent(
