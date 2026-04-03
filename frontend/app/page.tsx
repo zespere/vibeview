@@ -228,6 +228,7 @@ export default function Home() {
   const urlIntentRef = useRef<{ repoPath: string | null; noteId: string | null; handledRepo: boolean; handledNote: boolean } | null>(null);
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const exploreCanvasNodeRef = useRef<(nodeId: string) => void>(() => undefined);
 
   const [, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
@@ -1424,6 +1425,32 @@ export default function Home() {
         return;
       }
 
+      if (canUseCanvasOpenShortcut && event.key.toLowerCase() === "x") {
+        event.preventDefault();
+        toggleCanvasNodeExpansion(selectedCanvasNodeId as string);
+        return;
+      }
+
+      const canUseCanvasExploreShortcut =
+        !isTypingIntoField &&
+        !leaderScope &&
+        activeTab?.type === "view" &&
+        activeTab.view === "notes" &&
+        !!selectedCanvasNodeId &&
+        !!canvasDocument?.nodes.find(
+          (node) =>
+            node.id === selectedCanvasNodeId &&
+            !node.tags.includes("suggestion") &&
+            !node.tags.includes("suggestion-loading") &&
+            !node.id.startsWith("branch-summary:") &&
+            !node.id.startsWith("explore-node:"),
+        );
+      if (canUseCanvasExploreShortcut && event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        exploreCanvasNodeRef.current(selectedCanvasNodeId as string);
+        return;
+      }
+
       if (
         event.key === "/" &&
         !event.metaKey &&
@@ -2558,6 +2585,47 @@ export default function Home() {
     setExpandedCanvasNodeId((current) => (current === nodeId ? null : nodeId));
   }
 
+  const handleExploreCanvasNode = useCallback((nodeId: string) => {
+    if (!canvasDocument) {
+      return;
+    }
+
+    const branchId = parseBranchSummaryNodeId(nodeId);
+    if (branchId) {
+      const branch = explorationBranches[branchId];
+      if (branch) {
+        setNotesExploration(branch);
+        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
+        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+      }
+      return;
+    }
+
+    const node = canvasDocument.nodes.find((item) => item.id === nodeId);
+    if (
+      !node ||
+      node.tags.includes("suggestion") ||
+      node.tags.includes("suggestion-loading") ||
+      node.id.startsWith("explore-node:")
+    ) {
+      return;
+    }
+
+    const nextBranch =
+      notesExploration && notesExploration.rootNodeId === nodeId
+        ? advanceExplorationBranch(notesExploration, nodeId)
+        : createExplorationBranch(nodeId, canvasDocument);
+    setNotesExploration(nextBranch);
+    setSelectedCanvasNodeId(nodeId);
+    setSelectedCanvasNodeIds([nodeId]);
+    setExpandedCanvasNodeId(nodeId);
+  }, [canvasDocument, explorationBranches, notesExploration]);
+
+  useEffect(() => {
+    exploreCanvasNodeRef.current = handleExploreCanvasNode;
+  }, [handleExploreCanvasNode]);
+
   function toggleCanvasNodeExpansion(nodeId: string) {
     setExpandedCanvasNodeId((current) => (current === nodeId ? null : nodeId));
   }
@@ -2881,20 +2949,6 @@ export default function Home() {
   }
 
   function handleSelectCanvasNodes(nodeIds: string[]) {
-    if (activeTab?.type === "view" && activeTab.view === "notes" && !notesExploration && nodeIds.length === 1) {
-      const branchId = parseBranchSummaryNodeId(nodeIds[0]);
-      if (branchId) {
-        const branch = explorationBranches[branchId];
-      if (branch) {
-        setNotesExploration(branch);
-        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
-        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-      }
-      return;
-    }
-    }
-
     const normalized = [...nodeIds].sort();
     setSelectedCanvasNodeIds((current) => {
       const currentNormalized = [...current].sort();
@@ -2910,20 +2964,6 @@ export default function Home() {
       const nextPrimary = nodeIds[0] ?? null;
       return current === nextPrimary ? current : nextPrimary;
     });
-
-    if (activeTab?.type === "view" && activeTab.view === "notes") {
-      if (nodeIds.length === 1 && canvasDocument?.nodes.some((node) => node.id === nodeIds[0])) {
-        setExpandedCanvasNodeId(nodeIds[0]);
-        setNotesExploration((current) => {
-          if (!current) {
-            return createExplorationBranch(nodeIds[0], canvasDocument);
-          }
-          return advanceExplorationBranch(current, nodeIds[0]);
-        });
-      } else if (nodeIds.length === 0) {
-        collapseNotesExploration();
-      }
-    }
   }
 
   const commandResults: CommandResultItem[] = (() => {
@@ -3513,6 +3553,7 @@ export default function Home() {
                   });
                 }}
                 onActivateNode={handleActivateCanvasNode}
+                onExploreNode={handleExploreCanvasNode}
                 onOpenNode={openCanvasNode}
                 onRenameNode={handleRenameCanvasNode}
                 onPaneClick={notesExploration ? collapseNotesExploration : undefined}
@@ -3571,6 +3612,14 @@ export default function Home() {
                 return;
               }
               toggleCanvasNodeExpansion(nodeId);
+            }}
+            onExploreNode={(nodeId) => {
+              const suggestion = findSuggestionForBranch(branch, nodeId, { persistent: true });
+              if (suggestion) {
+                materializeExplorationSuggestion(branch, suggestion, { persistent: true });
+                return;
+              }
+              handleExplorationSelection(branch, [nodeId], { persistent: true });
             }}
             onOpenNode={openCanvasNode}
             onRenameNode={handleRenameCanvasNode}

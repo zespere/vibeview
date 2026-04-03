@@ -43,6 +43,7 @@ interface CanvasBoardProps {
   onOpenNode: (nodeId: string) => void;
   onRenameNode: (nodeId: string) => void;
   onActivateNode: (nodeId: string) => void;
+  onExploreNode: (nodeId: string) => void;
   onPaneClick?: () => void;
 }
 
@@ -87,6 +88,7 @@ export function CanvasBoard({
   onOpenNode,
   onRenameNode,
   onActivateNode,
+  onExploreNode,
   onPaneClick,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
@@ -446,6 +448,18 @@ export function CanvasBoard({
                   Open in tab
                 </button>
               ) : null}
+              {canExploreCanvasNode(document, contextMenu.nodeId) ? (
+                <button
+                  className={styles.canvasContextItem}
+                  onClick={() => {
+                    onExploreNode(contextMenu.nodeId as string);
+                    setContextMenu(null);
+                  }}
+                  type="button"
+                >
+                  Explore
+                </button>
+              ) : null}
               {canRenameCanvasNode(document, contextMenu.nodeId) ? (
                 <button
                   className={styles.canvasContextItem}
@@ -517,6 +531,10 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
       return;
     }
     event.preventDefault();
+    if (canOpenInTab) {
+      onOpenNode(node.id);
+      return;
+    }
     onActivateNode(node.id);
   }
 
@@ -541,7 +559,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
         tabIndex={0}
         onClick={handleCardClick}
         onKeyDown={(event) => {
-          if (event.key === " " && !isLoadingSuggestion) {
+          if ((event.key === "Enter" || event.key === " ") && !isLoadingSuggestion) {
             event.preventDefault();
             onSelectNode(node.id);
           }
@@ -683,6 +701,10 @@ function canOpenCanvasNodeInTab(document: CanvasDocument | null, nodeId: string)
 }
 
 function canRenameCanvasNode(document: CanvasDocument | null, nodeId: string) {
+  return canOpenCanvasNodeInTab(document, nodeId);
+}
+
+function canExploreCanvasNode(document: CanvasDocument | null, nodeId: string) {
   return canOpenCanvasNodeInTab(document, nodeId);
 }
 
