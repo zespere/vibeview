@@ -107,7 +107,7 @@ interface ExplorationPresentation {
   visibleNodeIds: string[];
 }
 
-type ComposerRunMode = "auto" | "build" | "plan";
+type ComposerRunMode = "build" | "plan";
 type ComposerReasoningEffort = "low" | "medium" | "high" | "xhigh";
 type DockVisibilityState = "hidden" | "visible";
 type ConsoleVisibilityState = "collapsed" | "expanded";
@@ -146,7 +146,7 @@ export default function Home() {
   const [codexPrompt, setCodexPrompt] = useState("");
   const [composerModel, setComposerModel] = useState("gpt-5.4");
   const [composerReasoning, setComposerReasoning] = useState<ComposerReasoningEffort>("medium");
-  const [composerMode, setComposerMode] = useState<ComposerRunMode>("auto");
+  const [composerMode, setComposerMode] = useState<ComposerRunMode>("build");
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isPlanning, setIsPlanning] = useState(false);
@@ -2345,9 +2345,63 @@ export default function Home() {
       return [];
     }
 
-    const loweredCommand = commandQuery.toLowerCase();
-    const buildPrompt = loweredCommand.startsWith("build ") ? commandQuery.slice(6).trim() : "";
-    const planPrompt = loweredCommand.startsWith("plan ") ? commandQuery.slice(5).trim() : "";
+    const trimmedCommand = commandQuery.trim();
+    const loweredCommand = trimmedCommand.toLowerCase();
+    const [commandNameRaw = ""] = trimmedCommand.split(/\s+/, 1);
+    const commandName = commandNameRaw.toLowerCase();
+    const commandArgs = commandNameRaw ? trimmedCommand.slice(commandNameRaw.length).trim() : "";
+    const buildPrompt = commandName === "build" ? commandArgs : "";
+    const planPrompt = commandName === "plan" ? commandArgs : "";
+
+    if (commandName === "build" && !buildPrompt) {
+      return [
+        {
+          id: "switch-build-mode",
+          title: "Switch to Build mode",
+          subtitle: "Use plain prompts to implement changes",
+          group: "action",
+          run: () => {
+            setComposerMode("build");
+            setComposerStatus("Composer set to Build mode.");
+            setCodexPrompt("");
+          },
+        },
+      ];
+    }
+
+    if (commandName === "plan" && !planPrompt) {
+      return [
+        {
+          id: "switch-plan-mode",
+          title: "Switch to Plan mode",
+          subtitle: "Use plain prompts to draft implementation plans",
+          group: "action",
+          run: () => {
+            setComposerMode("plan");
+            setComposerStatus("Composer set to Plan mode.");
+            setCodexPrompt("");
+          },
+        },
+      ];
+    }
+
+    if (commandName === "model") {
+      const modelQuery = commandArgs.toLowerCase();
+      return availableComposerModels
+        .filter((model) => !modelQuery || model.toLowerCase().includes(modelQuery))
+        .map<CommandResultItem>((model) => ({
+          id: `set-model:${model}`,
+          title: model,
+          subtitle: model === composerModel ? "currently selected" : "switch model",
+          group: "action",
+          run: () => {
+            setComposerModel(model);
+            setComposerStatus(`Composer model set to ${model}.`);
+            setCodexPrompt("");
+          },
+        }))
+        .slice(0, 14);
+    }
 
     if (buildPrompt) {
       return [
@@ -2663,11 +2717,7 @@ export default function Home() {
         void submitBuildPrompt(value, { preserveActiveView: true });
         return;
       }
-      if (composerMode === "plan") {
-        void submitPlanPrompt(value, { preserveActiveView: true });
-        return;
-      }
-      void submitAutoPrompt(value, { preserveActiveView: true });
+      void submitPlanPrompt(value, { preserveActiveView: true });
     });
   }
 
@@ -3475,7 +3525,7 @@ export default function Home() {
                   </label>
                 </div>
                 <div aria-label="Run mode" className={styles.consoleModeSwitch} role="tablist">
-                  {(["auto", "build", "plan"] as const).map((mode) => (
+                  {(["build", "plan"] as const).map((mode) => (
                     <button
                       aria-selected={composerMode === mode}
                       className={composerMode === mode ? styles.consoleModeButtonActive : styles.consoleModeButton}
@@ -3485,7 +3535,7 @@ export default function Home() {
                       role="tab"
                       type="button"
                     >
-                      {mode === "auto" ? "Auto" : mode === "build" ? "Build" : "Plan"}
+                      {mode === "build" ? "Build" : "Plan"}
                     </button>
                   ))}
                 </div>
@@ -3537,9 +3587,7 @@ export default function Home() {
                         ? "Run"
                         : composerMode === "build"
                           ? "Build"
-                          : composerMode === "plan"
-                            ? "Plan"
-                            : "Send"}
+                          : "Plan"}
                     </span>
                   )}
                 </button>
