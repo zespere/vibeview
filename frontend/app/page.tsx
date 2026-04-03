@@ -1165,6 +1165,36 @@ export default function Home() {
   }, [activeRepoPath, isProjectTrayExpanded]);
 
   useEffect(() => {
+    try {
+      const storedExpanded = window.localStorage.getItem("konceptura:rail:expanded");
+      if (storedExpanded === "0") {
+        setIsRailExpanded(false);
+      } else if (storedExpanded === "1") {
+        setIsRailExpanded(true);
+      }
+
+      const storedWidth = window.localStorage.getItem("konceptura:rail:width");
+      if (storedWidth) {
+        const parsedWidth = Number.parseInt(storedWidth, 10);
+        if (Number.isFinite(parsedWidth)) {
+          setRailWidth(Math.min(420, Math.max(240, parsedWidth)));
+        }
+      }
+    } catch {
+      // Ignore localStorage failures and keep the rail usable.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("konceptura:rail:expanded", isRailExpanded ? "1" : "0");
+      window.localStorage.setItem("konceptura:rail:width", `${railWidth}`);
+    } catch {
+      // Ignore localStorage failures and keep the rail usable.
+    }
+  }, [isRailExpanded, railWidth]);
+
+  useEffect(() => {
     explorationSuggestionStatesRef.current = explorationSuggestionStates;
   }, [explorationSuggestionStates]);
 
@@ -3883,6 +3913,31 @@ export default function Home() {
   }
 
   function renderProjectsTree() {
+    if (!isRailExpanded) {
+      return (
+        <div className={styles.projectTreeSectionCompact}>
+          {projectsTree.map((item) => {
+            const isActiveProject = item.repo_path === (project?.repo_path ?? repoPath.trim());
+            return (
+              <button
+                className={isActiveProject ? styles.projectTreeCompactButtonActive : styles.projectTreeCompactButton}
+                key={item.repo_path}
+                onClick={() => {
+                  startProjectTransition(() => {
+                    void openProjectConversation(item.repo_path);
+                  });
+                }}
+                title={item.name}
+                type="button"
+              >
+                <span className={styles.projectTreeCompactLabel}>{compactProjectLabel(item.name)}</span>
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
     return (
       <div className={styles.projectTreeSection}>
         <button
@@ -4232,6 +4287,20 @@ function PathLabel(value: string) {
   const normalized = value.trim().replace(/\/+$/, "");
   const segments = normalized.split("/");
   return segments.at(-1) || normalized || value;
+}
+
+function compactProjectLabel(value: string) {
+  const cleaned = value.trim();
+  if (!cleaned) {
+    return "?";
+  }
+
+  const parts = cleaned.split(/[\s-_]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+  }
+
+  return cleaned.slice(0, 2).toUpperCase();
 }
 
 function deriveConversationTitle(prompt: string) {

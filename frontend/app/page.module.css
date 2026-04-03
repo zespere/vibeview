@@ -118,6 +118,55 @@
   gap: 5px;
 }
 
+.projectTreeSectionCompact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 0 4px;
+}
+
+.projectTreeCompactButton,
+.projectTreeCompactButtonActive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #5a4d40;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.projectTreeCompactButton:hover {
+  background: rgba(255, 251, 244, 0.72);
+}
+
+.projectTreeCompactButtonActive {
+  border-color: #cdbda9;
+  background: #f8f3eb;
+  color: #241d17;
+}
+
+.projectTreeCompactLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: rgba(255, 253, 249, 0.88);
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .projectTreeHeader {
   display: flex;
   align-items: center;
