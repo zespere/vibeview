@@ -282,7 +282,6 @@ export default function Home() {
       .filter((item): item is NonNullable<typeof item> => item !== null);
   }, [canvasDocument, openCanvasNodeIds]);
 
-  const sampleRepos = Object.entries(status?.sample_repos ?? {});
   const currentRailWidth = isRailExpanded ? railWidth : 72;
   const activeRepoPath = (project?.repo_path || repoPath).trim();
   const focusedCanvasNodeId =
@@ -811,6 +810,7 @@ export default function Home() {
             setCommitStatus(null);
           }
         } catch (error) {
+          setProject((current) => current ?? { name: "", repo_path: "", recent_projects: [] });
           setErrorMessage(getErrorMessage(error));
         }
       })();
@@ -902,6 +902,43 @@ export default function Home() {
     }
     setRepoPath((current) => current || project.repo_path || status?.active_repo_path || status?.default_repo_path || "");
   }, [project, status]);
+
+  useEffect(() => {
+    if (project?.repo_path || repoPath.trim()) {
+      return;
+    }
+
+    const fallbackRepoPath =
+      status?.active_repo_path?.trim() ||
+      projectsTree.find((item) => item.repo_path.trim())?.repo_path?.trim() ||
+      "";
+    if (!fallbackRepoPath) {
+      return;
+    }
+
+    setRepoPath(fallbackRepoPath);
+    setProject((current) => {
+      if (current?.repo_path) {
+        return current;
+      }
+
+      const recentProjects = [
+        ...new Set(
+          [
+            ...(current?.recent_projects ?? []),
+            ...projectsTree.map((item) => item.repo_path),
+            fallbackRepoPath,
+          ].filter((item) => item.trim()),
+        ),
+      ].slice(0, 8);
+
+      return {
+        name: current?.name || PathLabel(fallbackRepoPath),
+        repo_path: fallbackRepoPath,
+        recent_projects: recentProjects,
+      };
+    });
+  }, [project?.repo_path, projectsTree, repoPath, status?.active_repo_path]);
 
   useEffect(() => {
     if (!project?.repo_path) {
@@ -2366,11 +2403,6 @@ export default function Home() {
         impacted_count: nextChanges.filter((change) => change.scope === "impacted").length,
       };
     });
-  }
-
-  function applySampleRepo(nextPath: string) {
-    setRepoPath(nextPath);
-    setCodexPrompt("");
   }
 
   async function openProjectConversation(repoPathToOpen: string, conversation?: ConversationSummary) {
@@ -4476,134 +4508,6 @@ export default function Home() {
     );
   }
 
-  function renderProjectSetup() {
-    const isGitReady = !!commitStatus?.is_git_repo;
-    const projectFileSummary = workspaceStatus
-      ? workspaceStatus.has_project_files
-        ? `${workspaceStatus.visible_file_count} visible file${workspaceStatus.visible_file_count === 1 ? "" : "s"}`
-        : "No visible project files yet"
-      : "Checking workspace…";
-    const canvasSummary = canvasDocument?.nodes.length
-      ? `${canvasDocument.nodes.length} canvas note${canvasDocument.nodes.length === 1 ? "" : "s"}`
-      : "Canvas not set up";
-    const branchSummary = isGitReady
-      ? commitStatus?.branch_name ?? "Detached HEAD"
-      : "Not a git repository";
-    const syncSummary = !isGitReady
-      ? "Git unavailable"
-      : !commitStatus?.upstream_name
-        ? "No upstream"
-        : commitStatus.ahead_count > 0 || commitStatus.behind_count > 0
-          ? `${commitStatus.ahead_count} ahead · ${commitStatus.behind_count} behind`
-          : "In sync";
-
-    return (
-      <div className={styles.setupShell}>
-        <div className={styles.setupPanel}>
-          <div className={styles.setupHeader}>
-            <strong className={styles.setupTitle}>Project</strong>
-            <p className={styles.setupText}>
-              Keep repository setup, canvas actions, and git state in one place.
-            </p>
-          </div>
-          <div className={styles.projectPanel}>
-            <div className={styles.projectSection}>
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>Repository path</span>
-                <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
-              </label>
-
-              {project?.recent_projects.length ? (
-                <div className={styles.sampleRepoList}>
-                  {project.recent_projects.map((path) => (
-                    <button className={styles.secondaryButton} key={path} onClick={() => setRepoPath(path)} type="button">
-                      {PathLabel(path)}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {sampleRepos.length > 0 ? (
-                <div className={styles.sampleRepoList}>
-                  {sampleRepos.map(([name, path]) => (
-                    <button className={styles.secondaryButton} key={name} onClick={() => applySampleRepo(path)} type="button">
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              <div className={styles.actionsRow}>
-                <button className={styles.primaryButton} disabled={projectPending || !repoPath.trim()} onClick={handleSaveProject} type="button">
-                  {projectPending ? "Opening..." : "Open project"}
-                </button>
-                <button
-                  className={styles.secondaryButton}
-                  disabled={!activeRepoPath || isGeneratingCanvas}
-                  onClick={handleGenerateCanvas}
-                  type="button"
-                >
-                  {isGeneratingCanvas
-                    ? "Generating..."
-                    : canvasDocument?.nodes.length
-                      ? "Regenerate canvas"
-                      : "Set up canvas"}
-                </button>
-                <button className={styles.secondaryButton} disabled={!activeRepoPath} onClick={handleResetCanvas} type="button">
-                  Reset canvas
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.projectSummaryGrid}>
-              <div className={styles.projectSummaryCard}>
-                <span className={styles.projectSummaryLabel}>Workspace</span>
-                <strong className={styles.projectSummaryValue}>{projectFileSummary}</strong>
-                <span className={styles.projectSummaryMeta}>{canvasSummary}</span>
-              </div>
-              <div className={styles.projectSummaryCard}>
-                <span className={styles.projectSummaryLabel}>Branch</span>
-                <strong className={styles.projectSummaryValue}>{branchSummary}</strong>
-                <span className={styles.projectSummaryMeta}>{syncSummary}</span>
-              </div>
-            </div>
-
-            <div className={styles.projectGitSection}>
-              <div className={styles.projectGitHeader}>
-                <strong className={styles.projectGitTitle}>Git</strong>
-                <span className={styles.projectGitMeta}>
-                  {!isGitReady
-                    ? "Unavailable"
-                    : commitStatus?.has_changes
-                      ? `${commitStatus.changed_files.length} changed file${commitStatus.changed_files.length === 1 ? "" : "s"}`
-                      : "Working tree clean"}
-                </span>
-              </div>
-              <div className={styles.projectGitActions}>
-                <button
-                  className={styles.commitButton}
-                  disabled={isCommitting || isPushing || !commitStatus?.has_changes}
-                  onClick={handleCommitClick}
-                  type="button"
-                >
-                  Commit
-                </button>
-                <button
-                  className={styles.commitButton}
-                  disabled={isPushing || isCommitting || !commitStatus?.can_push}
-                  onClick={handlePushClick}
-                  type="button"
-                >
-                  Push
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function renderProjectsTree() {
     if (!isRailExpanded) {
       return (
@@ -4737,6 +4641,10 @@ export default function Home() {
   }
 
   function renderActiveView() {
+    if (!repoPath.trim()) {
+      return renderProjectView();
+    }
+
     if (activeTab?.type === "note") {
       return renderNoteTabView(activeTab.nodeId);
     }
@@ -4752,23 +4660,6 @@ export default function Home() {
       default:
         return null;
     }
-  }
-
-  if (!project) {
-    return (
-      <div className={styles.page}>
-        <div className={styles.loadingShell}>Loading project...</div>
-      </div>
-    );
-  }
-
-  if (!repoPath.trim()) {
-    return (
-      <div className={styles.page}>
-        {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
-        {renderProjectSetup()}
-      </div>
-    );
   }
 
   return (

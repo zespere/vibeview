@@ -283,13 +283,41 @@ export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  const timeoutMs =
+    typeof (init as RequestInit & { timeoutMs?: number } | undefined)?.timeoutMs === "number"
+      ? ((init as RequestInit & { timeoutMs?: number }).timeoutMs as number)
+      : null;
+  const controller = timeoutMs ? new AbortController() : null;
+  const timeoutId =
+    timeoutMs && controller
+      ? window.setTimeout(() => {
+          controller.abort();
+        }, timeoutMs)
+      : null;
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      signal: init?.signal ?? controller?.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Request timed out");
+    }
+    throw error;
+  }
+
+  if (timeoutId !== null) {
+    window.clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const detail = await response.text();
@@ -304,7 +332,7 @@ export function fetchStatus() {
 }
 
 export function fetchProject() {
-  return apiRequest<ProjectProfileResponse>("/project", { cache: "no-store" });
+  return apiRequest<ProjectProfileResponse>("/project", { cache: "no-store", timeoutMs: 5000 } as RequestInit & { timeoutMs: number });
 }
 
 export function fetchProjectWorkspaceStatus(repoPath: string) {

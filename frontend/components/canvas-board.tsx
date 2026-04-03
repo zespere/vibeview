@@ -58,6 +58,7 @@ interface ContextMenuState {
 interface NoteNodeData extends Record<string, unknown> {
   node: CanvasNode;
   onOpenNode: (nodeId: string, options?: { activate?: boolean }) => void;
+  onOpenNodeInBackground: (nodeId: string) => void;
   onSelectNode: (nodeId: string) => void;
   onActivateNode: (nodeId: string) => void;
   detailLevel: "minimal" | "compact" | "full";
@@ -93,6 +94,7 @@ export function CanvasBoard({
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
   const isDraggingRef = useRef(false);
+  const suppressSelectionUntilRef = useRef<number>(0);
   const openNodeRef = useRef(onOpenNode);
   const selectNodeRef = useRef(onSelectNode);
   const activateNodeRef = useRef(onActivateNode);
@@ -152,6 +154,10 @@ export function CanvasBoard({
       data: {
         node,
         onOpenNode: (nodeId: string, options?: { activate?: boolean }) => openNodeRef.current(nodeId, options),
+        onOpenNodeInBackground: (nodeId: string) => {
+          suppressSelectionUntilRef.current = Date.now() + 300;
+          openNodeRef.current(nodeId, { activate: false });
+        },
         onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
         onActivateNode: (nodeId: string) => activateNodeRef.current(nodeId),
         detailLevel,
@@ -245,6 +251,17 @@ export function CanvasBoard({
   };
 
   const handleNodesChange = (changes: NodeChange<Node<NoteNodeData>>[]) => {
+    const shouldSuppressSelection = Date.now() < suppressSelectionUntilRef.current;
+    if (shouldSuppressSelection && changes.some((change) => change.type === "select")) {
+      setLocalNodes((current) =>
+        current.map((node) => ({
+          ...node,
+          selected: selectedNodeIds.includes(node.id),
+        })),
+      );
+      return;
+    }
+
     const nextNodes = applyNodeChanges(changes, localNodes);
     setLocalNodes(nextNodes);
 
@@ -396,6 +413,10 @@ export function CanvasBoard({
         onNodeContextMenu={(event, node) => {
           event.preventDefault();
           event.stopPropagation();
+          if ((event.metaKey || event.ctrlKey) && canOpenCanvasNodeInTab(document, node.id)) {
+            onOpenNode(node.id, { activate: false });
+            return;
+          }
           const point = flowRef.current?.screenToFlowPosition({
             x: event.clientX,
             y: event.clientY,
@@ -495,6 +516,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
     node,
     onActivateNode,
     onOpenNode,
+    onOpenNodeInBackground,
     onSelectNode,
     detailLevel,
     explorationControls,
@@ -519,7 +541,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
     if (event.metaKey || event.ctrlKey) {
       if (canOpenInTab) {
         event.preventDefault();
-        onOpenNode(node.id, { activate: false });
+        onOpenNodeInBackground(node.id);
       }
       return;
     }
@@ -530,7 +552,46 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
     if (isLoadingSuggestion) {
       return;
     }
+    if ((event.metaKey || event.ctrlKey) && event.button === 2) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (canOpenInTab) {
+        onOpenNodeInBackground(node.id);
+      }
+      return;
+    }
     if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function handleCardMouseDownCapture(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isLoadingSuggestion) {
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.button === 2) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function handleCardContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isLoadingSuggestion) {
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && canOpenInTab) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function handleCardContextMenuCapture(event: ReactMouseEvent<HTMLDivElement>) {
+    if (isLoadingSuggestion) {
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && canOpenInTab) {
+      event.preventDefault();
       event.stopPropagation();
     }
   }
@@ -563,7 +624,10 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
       <Handle className={styles.canvasNodeHandle} id={`${node.id}-target-left`} position={Position.Left} type="target" />
       <div
         className={nodeClassName}
+        onContextMenuCapture={handleCardContextMenuCapture}
         onDoubleClick={handleCardDoubleClick}
+        onContextMenu={handleCardContextMenu}
+        onMouseDownCapture={handleCardMouseDownCapture}
         onMouseDown={handleCardMouseDown}
         role="button"
         tabIndex={0}
