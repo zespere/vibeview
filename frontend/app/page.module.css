@@ -646,6 +646,157 @@
   background: #fffdf9;
 }
 
+.canvasEditReview {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 9;
+  display: flex;
+  width: min(420px, calc(100% - 36px));
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid rgba(214, 204, 191, 0.82);
+  border-radius: 14px;
+  background: rgba(255, 252, 247, 0.97);
+  box-shadow: 0 12px 28px rgba(75, 59, 42, 0.08);
+  padding: 14px;
+}
+
+.canvasEditReviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.canvasEditReviewTitle {
+  color: #2f261e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.canvasEditReviewMeta {
+  margin-top: 3px;
+  color: #7b6f61;
+  font-size: 12px;
+}
+
+.canvasEditReviewSummary {
+  margin: 0;
+  color: #54483b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.canvasEditReviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #eadfce;
+  border-radius: 12px;
+  background: #fffaf3;
+  padding: 12px;
+}
+
+.canvasEditReviewBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.canvasEditBadgeDirect,
+.canvasEditBadgeImpacted,
+.canvasEditFieldChip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #dfd1bf;
+  border-radius: 999px;
+  background: #fffdf8;
+  color: #6b5e50;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+}
+
+.canvasEditBadgeDirect {
+  border-color: #ceb18f;
+  color: #805530;
+}
+
+.canvasEditBadgeImpacted {
+  border-color: #d9cbb8;
+  color: #726252;
+}
+
+.canvasEditNodeTitle {
+  color: #2b221a;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.canvasEditReason {
+  margin: 0;
+  color: #55483b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.canvasEditImpactList {
+  margin: 0;
+  padding-left: 18px;
+  color: #6d5f50;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.canvasEditDiffGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.canvasEditSnapshot {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid #eee3d5;
+  border-radius: 10px;
+  background: #fffdf9;
+  padding: 10px;
+}
+
+.canvasEditSnapshot strong {
+  color: #2f261e;
+  font-size: 13px;
+}
+
+.canvasEditSnapshot p {
+  margin: 0;
+  color: #625547;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.canvasEditSnapshotLabel {
+  color: #8b7b69;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.canvasEditReviewActions,
+.canvasEditReviewNav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvasEditReviewActions {
+  justify-content: space-between;
+}
+
 .notesConsoleShell {
   position: absolute;
   bottom: 16px;
@@ -2873,6 +3024,18 @@
   .projectGitSection {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .canvasEditReview {
+    width: calc(100% - 28px);
+    right: 14px;
+    left: 14px;
+  }
+
+  .canvasEditDiffGrid,
+  .canvasEditReviewActions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .notesConsoleShell {

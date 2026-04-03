@@ -176,6 +176,40 @@ export interface CanvasResponse {
   document: CanvasDocument;
 }
 
+export interface CanvasEditChangeRecord {
+  id: string;
+  kind: "update_node" | "create_node" | "delete_node" | "create_edge";
+  scope: "direct" | "impacted";
+  reason: string;
+  impact_basis: string[];
+  depends_on_change_ids: string[];
+  target_node_id?: string | null;
+  target_title?: string | null;
+  anchor_node_id?: string | null;
+  before_node?: CanvasNode | null;
+  after_node?: CanvasNode | null;
+  before_edge?: CanvasEdge | null;
+  after_edge?: CanvasEdge | null;
+}
+
+export interface CanvasEditPreviewResponse {
+  repo_path: string;
+  prompt: string;
+  summary: string;
+  direct_count: number;
+  impacted_count: number;
+  changes: CanvasEditChangeRecord[];
+}
+
+export interface CanvasEditApplyResponse {
+  repo_path: string;
+  summary: string;
+  note_changes_summary: string;
+  applied_change_ids: string[];
+  remaining_change_ids: string[];
+  document: CanvasDocument;
+}
+
 export interface CanvasGenerateResponse {
   document: CanvasDocument;
   summary: string;
@@ -593,5 +627,39 @@ export function generateCanvasFromPrompt(repoPath: string, prompt: string) {
   return apiRequest<CanvasGenerateResponse>("/canvas/generate", {
     method: "POST",
     body: JSON.stringify({ repo_path: repoPath, prompt }),
+  });
+}
+
+export function previewCanvasEdits(
+  repoPath: string,
+  prompt: string,
+  targetNoteIds: string[],
+  semanticContext?: string,
+  conversationContext?: string,
+) {
+  return apiRequest<CanvasEditPreviewResponse>("/canvas/edit-preview", {
+    method: "POST",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      prompt,
+      target_note_ids: targetNoteIds,
+      semantic_context: semanticContext,
+      conversation_context: conversationContext,
+    }),
+  });
+}
+
+export function applyCanvasEdits(
+  repoPath: string,
+  changes: CanvasEditChangeRecord[],
+  acceptedChangeIds: string[],
+) {
+  return apiRequest<CanvasEditApplyResponse>("/canvas/edit-apply", {
+    method: "POST",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      changes,
+      accepted_change_ids: acceptedChangeIds,
+    }),
   });
 }

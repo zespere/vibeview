@@ -15,6 +15,7 @@ import {
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
 import {
+  applyCanvasEdits,
   createCanvasNode,
   createProjectCommit,
   pushProjectCommits,
@@ -27,6 +28,7 @@ import {
   fetchProject,
   fetchProjectWorkspaceStatus,
   fetchStatus,
+  previewCanvasEdits,
   createProjectConversation,
   generateCanvasFromPrompt,
   streamProjectRun,
@@ -34,6 +36,8 @@ import {
   updateProject,
   updateProjectConversation,
   updateCanvasNode,
+  type CanvasEditChangeRecord,
+  type CanvasEditPreviewResponse,
   type CanvasDocument,
   type CanvasEdge,
   type CanvasNode,
@@ -175,6 +179,8 @@ export default function Home() {
   const [isPlanning, setIsPlanning] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
+  const [isPreviewingCanvasEdits, setIsPreviewingCanvasEdits] = useState(false);
+  const [isApplyingCanvasEdits, setIsApplyingCanvasEdits] = useState(false);
   const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [dockVisibility, setDockVisibility] = useState<DockVisibilityState>("visible");
@@ -198,6 +204,8 @@ export default function Home() {
   const [explorationBranches, setExplorationBranches] = useState<Record<string, ExplorationBranch>>({});
   const [explorationTabs, setExplorationTabs] = useState<Record<string, ExplorationBranch>>({});
   const [explorationSuggestionStates, setExplorationSuggestionStates] = useState<Record<string, ExplorationSuggestionState>>({});
+  const [canvasEditPreview, setCanvasEditPreview] = useState<CanvasEditPreviewResponse | null>(null);
+  const [canvasEditReviewIndex, setCanvasEditReviewIndex] = useState(0);
   const [openCanvasNodeIds, setOpenCanvasNodeIds] = useState<string[]>([]);
   const [canvasDraftTitle, setCanvasDraftTitle] = useState("");
   const [canvasDraftDescription, setCanvasDraftDescription] = useState("");
@@ -877,6 +885,7 @@ export default function Home() {
       setWorkspaceStatus(null);
       setExplorationBranches({});
       setExplorationSuggestionStates({});
+      setCanvasEditPreview(null);
       return;
     }
     const repoPathValue = project.repo_path;
@@ -1193,6 +1202,16 @@ export default function Home() {
   useEffect(() => {
     explorationSuggestionStatesRef.current = explorationSuggestionStates;
   }, [explorationSuggestionStates]);
+
+  useEffect(() => {
+    if (!canvasEditPreview) {
+      setCanvasEditReviewIndex(0);
+      return;
+    }
+    setCanvasEditReviewIndex((current) =>
+      Math.min(current, Math.max(canvasEditPreview.changes.length - 1, 0)),
+    );
+  }, [canvasEditPreview]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1615,6 +1634,7 @@ export default function Home() {
             buildCanvasSetupPrompt(targetRepoPath, workspaceStatus?.visible_file_count ?? 0),
           );
           setCanvasDocument(response.document);
+          setCanvasEditPreview(null);
           setComposerStatus(response.summary?.trim() ? response.summary : "Canvas ready.");
           await Promise.all([
             refreshCanvas(targetRepoPath),
@@ -2117,6 +2137,98 @@ export default function Home() {
     });
   }
 
+  async function previewCanvasEditPrompt(prompt: string) {
+    if (!activeRepoPath || !canvasDocument) {
+      return;
+    }
+
+    const promptContextNodeIds = resolvePromptContextNodeIds(prompt, activeContextDocument, visibleContextNodeIds);
+    if (promptContextNodeIds.length === 0) {
+      setComposerStatus("Select or mention at least one note first.");
+      setErrorMessage("Select or mention at least one note before drafting canvas changes.");
+      return;
+    }
+
+    try {
+      setIsPreviewingCanvasEdits(true);
+      setErrorMessage(null);
+      setComposerStatus("Drafting canvas note changes...");
+      openViewTab("notes");
+      const response = await previewCanvasEdits(
+        activeRepoPath,
+        prompt,
+        promptContextNodeIds,
+        buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
+        buildConversationContext(consoleMessages),
+      );
+      setCanvasEditPreview(response);
+      setCanvasEditReviewIndex(0);
+      setComposerStatus(response.summary);
+      setCodexPrompt("");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      setComposerStatus("Canvas edit preview failed.");
+    } finally {
+      setIsPreviewingCanvasEdits(false);
+    }
+  }
+
+  async function applyCanvasEditDraft(acceptedChangeIds: string[]) {
+    if (!activeRepoPath || !canvasEditPreview || acceptedChangeIds.length === 0) {
+      return;
+    }
+    try {
+      setIsApplyingCanvasEdits(true);
+      setErrorMessage(null);
+      setComposerStatus(
+        acceptedChangeIds.length === canvasEditPreview.changes.length
+          ? "Applying all canvas note changes..."
+          : "Applying canvas note change...",
+      );
+      const response = await applyCanvasEdits(activeRepoPath, canvasEditPreview.changes, acceptedChangeIds);
+      setCanvasDocument(response.document);
+      setComposerStatus(response.note_changes_summary || response.summary);
+      await refreshCommitStatus(activeRepoPath);
+      const remainingIds = new Set(response.remaining_change_ids);
+      const nextChanges = canvasEditPreview.changes.filter((change) => remainingIds.has(change.id));
+      if (nextChanges.length === 0) {
+        setCanvasEditPreview(null);
+        setCanvasEditReviewIndex(0);
+        return;
+      }
+      setCanvasEditPreview({
+        ...canvasEditPreview,
+        changes: nextChanges,
+        direct_count: nextChanges.filter((change) => change.scope === "direct").length,
+        impacted_count: nextChanges.filter((change) => change.scope === "impacted").length,
+      });
+      setCanvasEditReviewIndex(0);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      setComposerStatus("Applying canvas changes failed.");
+    } finally {
+      setIsApplyingCanvasEdits(false);
+    }
+  }
+
+  function dismissCanvasEditChange(changeId: string) {
+    setCanvasEditPreview((current) => {
+      if (!current) {
+        return current;
+      }
+      const nextChanges = current.changes.filter((change) => change.id !== changeId);
+      if (nextChanges.length === 0) {
+        return null;
+      }
+      return {
+        ...current,
+        changes: nextChanges,
+        direct_count: nextChanges.filter((change) => change.scope === "direct").length,
+        impacted_count: nextChanges.filter((change) => change.scope === "impacted").length,
+      };
+    });
+  }
+
   function applySampleRepo(nextPath: string) {
     setRepoPath(nextPath);
     setCodexPrompt("");
@@ -2186,6 +2298,7 @@ export default function Home() {
           setNotesExploration(null);
           setExplorationTabs({});
           setOpenCanvasNodeIds([]);
+          setCanvasEditPreview(null);
           setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
           setActiveTabId("view:notes");
           setActiveConversationId(null);
@@ -2218,6 +2331,7 @@ export default function Home() {
           setNotesExploration(null);
           setExplorationTabs({});
           setOpenCanvasNodeIds([]);
+          setCanvasEditPreview(null);
           setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
           setActiveTabId("view:notes");
           setComposerStatus("Canvas reset.");
@@ -2725,6 +2839,46 @@ export default function Home() {
 
     if (commandName === "push") {
       return actionCommandItems.filter((item) => item.id === "action-push");
+    }
+
+    if (commandName === "canvas") {
+      const targetNoteIds = resolvePromptContextNodeIds(commandArgs, activeContextDocument, visibleContextNodeIds);
+      if (!commandArgs) {
+        return [
+          {
+            id: "execute-canvas-help",
+            title: "Canvas edits",
+            subtitle: "Use /canvas <instruction> to draft note changes for selected or @mentioned notes",
+            group: "execute",
+            searchText: "canvas edit notes architecture",
+            run: () => undefined,
+          },
+        ];
+      }
+      return [
+        {
+          id: "execute-canvas-preview",
+          title: `Preview canvas changes: ${commandArgs}`,
+          subtitle:
+            !activeRepoPath || !canvasDocument
+              ? "Open a project canvas first"
+              : targetNoteIds.length === 0
+                ? "Select or mention at least one note"
+                : `${targetNoteIds.length} target note${targetNoteIds.length === 1 ? "" : "s"} selected for review`,
+          disabled: !activeRepoPath || !canvasDocument || targetNoteIds.length === 0,
+          group: "execute",
+          searchText: "canvas edit preview notes architecture",
+          run: () => {
+            if (!activeRepoPath || !canvasDocument || targetNoteIds.length === 0) {
+              return;
+            }
+            setLeaderScope(null);
+            startCodexTransition(() => {
+              void previewCanvasEditPrompt(commandArgs);
+            });
+          },
+        },
+      ];
     }
 
     if (buildPrompt) {
@@ -3245,6 +3399,7 @@ export default function Home() {
                 onResetNodeSize={resetCanvasNodeSize}
                 selectedNodeIds={notesExploration?.activeNodeId ? [notesExploration.activeNodeId] : selectedCanvasNodeIds}
               />
+              {renderCanvasEditReview()}
             </>
           )}
         </div>
@@ -3433,6 +3588,170 @@ export default function Home() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  function renderCanvasEditReview() {
+    if (isPreviewingCanvasEdits) {
+      return (
+        <aside className={styles.canvasEditReview}>
+          <div className={styles.canvasEditReviewHeader}>
+            <strong className={styles.canvasEditReviewTitle}>Review canvas changes</strong>
+            <span className={styles.canvasEditReviewMeta}>Drafting…</span>
+          </div>
+          <p className={styles.helperTextLoading}>Drafting direct and impacted note changes…</p>
+        </aside>
+      );
+    }
+
+    if (!canvasEditPreview || canvasEditPreview.changes.length === 0) {
+      return null;
+    }
+
+    const currentChange =
+      canvasEditPreview.changes[Math.min(canvasEditReviewIndex, Math.max(canvasEditPreview.changes.length - 1, 0))] ??
+      null;
+    if (!currentChange) {
+      return null;
+    }
+
+    const changedFields = getChangedCanvasFields(currentChange.before_node, currentChange.after_node);
+    const kindLabel = getCanvasChangeKindLabel(currentChange.kind);
+    const edgeSummary = currentChange.after_edge ? describeCanvasEdgeChange(currentChange.after_edge, canvasEditPreview) : null;
+
+    return (
+      <aside className={styles.canvasEditReview}>
+        <div className={styles.canvasEditReviewHeader}>
+          <div>
+            <strong className={styles.canvasEditReviewTitle}>Review canvas changes</strong>
+            <div className={styles.canvasEditReviewMeta}>
+              {canvasEditReviewIndex + 1}/{canvasEditPreview.changes.length} · {canvasEditPreview.direct_count} direct ·{" "}
+              {canvasEditPreview.impacted_count} impacted
+            </div>
+          </div>
+          <button className={styles.secondaryButton} onClick={() => setCanvasEditPreview(null)} type="button">
+            Close
+          </button>
+        </div>
+
+        <p className={styles.canvasEditReviewSummary}>{canvasEditPreview.summary}</p>
+
+        <div className={styles.canvasEditReviewCard}>
+          <div className={styles.canvasEditReviewBadges}>
+            <span className={styles.canvasEditFieldChip}>{kindLabel}</span>
+            <span className={currentChange.scope === "direct" ? styles.canvasEditBadgeDirect : styles.canvasEditBadgeImpacted}>
+              {currentChange.scope === "direct" ? "Direct" : "Impacted"}
+            </span>
+            {changedFields.map((field) => (
+              <span className={styles.canvasEditFieldChip} key={field}>
+                {field}
+              </span>
+            ))}
+          </div>
+
+          <strong className={styles.canvasEditNodeTitle}>
+            {currentChange.after_node?.title ??
+              currentChange.before_node?.title ??
+              currentChange.target_title ??
+              edgeSummary ??
+              "Canvas change"}
+          </strong>
+          <p className={styles.canvasEditReason}>{currentChange.reason}</p>
+          {currentChange.impact_basis.length > 0 ? (
+            <ul className={styles.canvasEditImpactList}>
+              {currentChange.impact_basis.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
+
+          {currentChange.kind === "create_edge" && edgeSummary ? (
+            <div className={styles.canvasEditSnapshot}>
+              <span className={styles.canvasEditSnapshotLabel}>Link</span>
+              <strong>{edgeSummary}</strong>
+              <p>This edge will be added to the current canvas if you accept it.</p>
+            </div>
+          ) : currentChange.kind === "delete_node" && currentChange.before_node ? (
+            <div className={styles.canvasEditSnapshot}>
+              <span className={styles.canvasEditSnapshotLabel}>Remove</span>
+              <strong>{currentChange.before_node.title}</strong>
+              <p>{summarizeNote(currentChange.before_node.description)}</p>
+            </div>
+          ) : currentChange.kind === "create_node" && currentChange.after_node ? (
+            <div className={styles.canvasEditSnapshot}>
+              <span className={styles.canvasEditSnapshotLabel}>Create</span>
+              <strong>{currentChange.after_node.title}</strong>
+              <p>{summarizeNote(currentChange.after_node.description)}</p>
+            </div>
+          ) : currentChange.before_node && currentChange.after_node ? (
+            <div className={styles.canvasEditDiffGrid}>
+              <div className={styles.canvasEditSnapshot}>
+                <span className={styles.canvasEditSnapshotLabel}>Before</span>
+                <strong>{currentChange.before_node.title}</strong>
+                <p>{summarizeNote(currentChange.before_node.description)}</p>
+              </div>
+              <div className={styles.canvasEditSnapshot}>
+                <span className={styles.canvasEditSnapshotLabel}>After</span>
+                <strong>{currentChange.after_node.title}</strong>
+                <p>{summarizeNote(currentChange.after_node.description)}</p>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className={styles.canvasEditReviewActions}>
+          <div className={styles.canvasEditReviewNav}>
+            <button
+              className={styles.secondaryButton}
+              disabled={canvasEditReviewIndex === 0}
+              onClick={() => setCanvasEditReviewIndex((current) => Math.max(current - 1, 0))}
+              type="button"
+            >
+              Previous
+            </button>
+            <button
+              className={styles.secondaryButton}
+              disabled={canvasEditReviewIndex >= canvasEditPreview.changes.length - 1}
+              onClick={() =>
+                setCanvasEditReviewIndex((current) => Math.min(current + 1, Math.max(canvasEditPreview.changes.length - 1, 0)))
+              }
+              type="button"
+            >
+              Next
+            </button>
+          </div>
+          <div className={styles.canvasEditReviewNav}>
+            <button
+              className={styles.secondaryButton}
+              disabled={isApplyingCanvasEdits}
+              onClick={() => dismissCanvasEditChange(currentChange.id)}
+              type="button"
+            >
+              Dismiss
+            </button>
+            <button
+              className={styles.secondaryButton}
+              disabled={isApplyingCanvasEdits}
+              onClick={() => {
+                void applyCanvasEditDraft([currentChange.id]);
+              }}
+              type="button"
+            >
+              Accept
+            </button>
+            <button
+              className={styles.primaryButton}
+              disabled={isApplyingCanvasEdits || canvasEditPreview.changes.length === 0}
+              onClick={() => {
+                void applyCanvasEditDraft(canvasEditPreview.changes.map((change) => change.id));
+              }}
+              type="button"
+            >
+              {isApplyingCanvasEdits ? "Applying..." : "Accept all"}
+            </button>
+          </div>
+        </div>
+      </aside>
     );
   }
 
@@ -5332,6 +5651,61 @@ function summarizeNote(value: string) {
   }
   const collapsed = trimmed.replace(/\s+/g, " ");
   return collapsed.length > 120 ? `${collapsed.slice(0, 117).trim()}...` : collapsed;
+}
+
+function getChangedCanvasFields(beforeNode: CanvasNode | null | undefined, afterNode: CanvasNode | null | undefined) {
+  if (!beforeNode || !afterNode) {
+    return [];
+  }
+  const fields: string[] = [];
+  if (beforeNode.title !== afterNode.title) {
+    fields.push("title");
+  }
+  if (beforeNode.description !== afterNode.description) {
+    fields.push("description");
+  }
+  if (beforeNode.tags.join("\n") !== afterNode.tags.join("\n")) {
+    fields.push("tags");
+  }
+  if (beforeNode.linked_files.join("\n") !== afterNode.linked_files.join("\n")) {
+    fields.push("files");
+  }
+  if (beforeNode.linked_symbols.join("\n") !== afterNode.linked_symbols.join("\n")) {
+    fields.push("symbols");
+  }
+  return fields;
+}
+
+function getCanvasChangeKindLabel(kind: CanvasEditChangeRecord["kind"]) {
+  switch (kind) {
+    case "create_node":
+      return "Create note";
+    case "delete_node":
+      return "Delete note";
+    case "create_edge":
+      return "Create link";
+    case "update_node":
+    default:
+      return "Update note";
+  }
+}
+
+function describeCanvasEdgeChange(
+  edge: NonNullable<CanvasEditChangeRecord["after_edge"]>,
+  preview: CanvasEditPreviewResponse,
+) {
+  const nodesById = new Map<string, string>();
+  for (const change of preview.changes) {
+    if (change.after_node?.id && change.after_node.title) {
+      nodesById.set(change.after_node.id, change.after_node.title);
+    }
+    if (change.before_node?.id && change.before_node.title) {
+      nodesById.set(change.before_node.id, change.before_node.title);
+    }
+  }
+  const sourceTitle = nodesById.get(edge.source_node_id) ?? edge.source_node_id;
+  const targetTitle = nodesById.get(edge.target_node_id) ?? edge.target_node_id;
+  return `${sourceTitle} ${edge.label || "links to"} ${targetTitle}`;
 }
 
 function findActiveNoteMention(prompt: string, caretIndex: number, document: CanvasDocument | null) {

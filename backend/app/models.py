@@ -561,4 +561,60 @@ class CanvasResponse(BaseModel):
     document: CanvasDocument
 
 
+class CanvasEditPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = None
+    tags: list[str] | None = None
+    linked_files: list[str] | None = None
+    linked_symbols: list[str] | None = None
+
+
+class CanvasEditChangeRecord(BaseModel):
+    id: str
+    kind: Literal["update_node", "create_node", "delete_node", "create_edge"]
+    scope: Literal["direct", "impacted"]
+    reason: str
+    impact_basis: list[str] = Field(default_factory=list)
+    depends_on_change_ids: list[str] = Field(default_factory=list)
+    target_node_id: str | None = None
+    target_title: str | None = None
+    anchor_node_id: str | None = None
+    before_node: CanvasNode | None = None
+    after_node: CanvasNode | None = None
+    before_edge: CanvasEdge | None = None
+    after_edge: CanvasEdge | None = None
+
+
+class CanvasEditPreviewRequest(BaseModel):
+    repo_path: str
+    prompt: str = Field(min_length=3, max_length=1200)
+    target_note_ids: list[str] = Field(default_factory=list)
+    semantic_context: str | None = None
+    conversation_context: str | None = None
+
+
+class CanvasEditPreviewResponse(BaseModel):
+    repo_path: str
+    prompt: str
+    summary: str
+    direct_count: int
+    impacted_count: int
+    changes: list[CanvasEditChangeRecord] = Field(default_factory=list)
+
+
+class CanvasEditApplyRequest(BaseModel):
+    repo_path: str
+    accepted_change_ids: list[str] = Field(default_factory=list)
+    changes: list[CanvasEditChangeRecord] = Field(default_factory=list)
+
+
+class CanvasEditApplyResponse(BaseModel):
+    repo_path: str
+    summary: str
+    note_changes_summary: str
+    applied_change_ids: list[str] = Field(default_factory=list)
+    remaining_change_ids: list[str] = Field(default_factory=list)
+    document: CanvasDocument
+
+
 StructureNode.model_rebuild()

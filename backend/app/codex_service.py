@@ -10,6 +10,10 @@ from typing import Any, Literal
 
 from .config import settings
 from .models import (
+    CanvasEdge,
+    CanvasEditChangeRecord,
+    CanvasEditPatch,
+    CanvasNode,
     ChangedFileRecord,
     CodexChangeResponse,
     CodexCommandRecord,
@@ -34,6 +38,18 @@ IGNORED_DIR_NAMES = {
 }
 MAX_SNAPSHOT_BYTES = 250_000
 EXPLORATION_SUGGESTION_TIMEOUT_SECONDS = 12
+
+
+def _append_unique_tags(existing: list[str], additions: list[str]) -> list[str]:
+    seen = {tag.strip().lower() for tag in existing if tag.strip()}
+    result = [tag.strip() for tag in existing if tag.strip()]
+    for value in additions:
+        tag = value.strip()
+        if not tag or tag.lower() in seen:
+            continue
+        seen.add(tag.lower())
+        result.append(tag)
+    return result
 
 
 @dataclass
@@ -464,6 +480,256 @@ class CodexService:
             summary = f"Created {len(node_items)} architecture notes from the prompt."
         return node_items, edge_items, summary
 
+    def draft_canvas_changes(
+        self,
+        repo_path: str,
+        prompt: str,
+        target_nodes: list[CanvasNode],
+        impacted_notes: list[tuple[CanvasNode, list[str]]],
+        semantic_context: str | None = None,
+        conversation_context: str | None = None,
+    ) -> tuple[list[CanvasEditChangeRecord], str]:
+        if not target_nodes:
+            return [], "No target notes were selected."
+
+        fallback = self._fallback_canvas_changes(prompt, target_nodes, impacted_notes)
+        if not self.is_available():
+            return fallback
+
+        repo_dir = Path(repo_path)
+        context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
+
+        def note_block(node: CanvasNode, basis: list[str] | None = None) -> str:
+            lines = [
+                f"id: {node.id}",
+                f"title: {node.title}",
+                f"description: {node.description or '(none)'}",
+                f"tags: {', '.join(node.tags) or '(none)'}",
+                f"linked_files: {', '.join(node.linked_files) or '(none)'}",
+                f"linked_symbols: {', '.join(node.linked_symbols) or '(none)'}",
+            ]
+            if basis:
+                lines.append(f"impact_basis: {'; '.join(basis)}")
+            return "\n".join(lines)
+
+        target_block = "\n\n".join(note_block(node) for node in target_nodes)
+        impacted_block = "\n\n".join(note_block(node, basis) for node, basis in impacted_notes) or "(none)"
+        draft_prompt = (
+            "You are drafting reviewable changes for architecture notes on a visual canvas.\n"
+            "You may update existing notes, create new notes, create edges between notes, or delete notes when merging.\n"
+            "Return JSON only in this shape:\n"
+            "{\n"
+            '  "summary": "short plain sentence",\n'
+            '  "changes": [\n'
+            "    {\n"
+            '      "id": "change_1",\n'
+            '      "kind": "update_node",\n'
+            '      "scope": "direct",\n'
+            '      "reason": "why this note should change",\n'
+            '      "depends_on_change_ids": ["change_0"],\n'
+            '      "impact_basis": ["shared file: frontend/app/page.tsx"],\n'
+            '      "target_node_id": "node_123",\n'
+            '      "patch": { "title": "optional", "description": "optional", "tags": ["optional"], "linked_files": ["optional"], "linked_symbols": ["optional"] },\n'
+            '      "anchor_node_id": "optional existing note id",\n'
+            '      "after_node": { "id": "draft_node_1", "title": "new note title", "description": "text", "tags": ["workflow"], "linked_files": ["frontend/app/page.tsx"], "linked_symbols": ["Home"] },\n'
+            '      "after_edge": { "source_node_id": "node_or_draft_id", "target_node_id": "node_or_draft_id", "label": "drives" }\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- kind must be one of: update_node, create_node, delete_node, create_edge.\n"
+            "- target_node_id must reference one of the provided note ids for update_node and delete_node.\n"
+            "- scope must be direct for targeted notes or new notes spawned from them, and impacted for secondary notes.\n"
+            "- Propose the smallest set of canvas changes needed.\n"
+            "- Impacted notes should only be updated if the prompt would make them inconsistent otherwise.\n"
+            "- Use create_node plus create_edge for split-style changes.\n"
+            "- Use update_node plus delete_node for merge-style changes.\n"
+            "- For create_node, provide after_node with a temporary id like draft_node_1 and use anchor_node_id when there is a clear parent note.\n"
+            "- For create_edge, after_edge may reference existing note ids or draft_node ids from create_node changes.\n"
+            "- Use depends_on_change_ids when an edge depends on a created note or when a delete depends on another change.\n"
+            "- Preserve linked files and symbols unless the prompt clearly implies they should change.\n"
+            "- Avoid empty patches or no-op changes.\n"
+            "- JSON only.\n\n"
+            f"User prompt:\n{prompt.strip()}\n\n"
+            f"Direct target notes:\n{target_block}\n\n"
+            f"Impacted note candidates:\n{impacted_block}\n"
+        )
+        final_prompt = f"{context_prefix}\n\nTask:\n{draft_prompt}" if context_prefix else draft_prompt
+        command = self._build_command(repo_dir, final_prompt, True, True)
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        events = self._parse_jsonl_output(result.stdout)
+        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        payload = self._extract_json_object(raw_text)
+        if result.returncode != 0 or payload is None:
+            return fallback
+
+        nodes_by_id = {node.id: node for node in [*target_nodes, *(node for node, _ in impacted_notes)]}
+        changes: list[CanvasEditChangeRecord] = []
+        for index, item in enumerate(payload.get("changes", [])):
+            if not isinstance(item, dict):
+                continue
+            change_id = str(item.get("id") or f"draft_change_{index}").strip() or f"draft_change_{index}"
+            kind = str(item.get("kind") or "update_node").strip().lower()
+            scope = str(item.get("scope") or "direct").strip().lower()
+            if scope not in {"direct", "impacted"} or kind not in {"update_node", "create_node", "delete_node", "create_edge"}:
+                continue
+            reason = str(item.get("reason") or "Update canvas").strip() or "Update canvas"
+            impact_basis = [
+                str(value).strip()
+                for value in item.get("impact_basis", [])
+                if isinstance(value, str) and value.strip()
+            ]
+            depends_on_change_ids = [
+                str(value).strip()
+                for value in item.get("depends_on_change_ids", [])
+                if isinstance(value, str) and str(value).strip()
+            ]
+            target_node_id = str(item.get("target_node_id") or "").strip()
+
+            if kind == "update_node":
+                before_node = nodes_by_id.get(target_node_id)
+                if before_node is None:
+                    continue
+                try:
+                    patch = CanvasEditPatch.model_validate(item.get("patch") or {})
+                except Exception:
+                    continue
+                if not any(
+                    value is not None and (value != [] if isinstance(value, list) else True)
+                    for value in [patch.title, patch.description, patch.tags, patch.linked_files, patch.linked_symbols]
+                ):
+                    continue
+                after_node = before_node.model_copy(deep=True)
+                if patch.title is not None:
+                    after_node.title = patch.title.strip()
+                if patch.description is not None:
+                    after_node.description = patch.description
+                if patch.tags is not None:
+                    after_node.tags = [tag.strip() for tag in patch.tags if tag.strip()]
+                if patch.linked_files is not None:
+                    after_node.linked_files = [path.strip() for path in patch.linked_files if path.strip()]
+                if patch.linked_symbols is not None:
+                    after_node.linked_symbols = [symbol.strip() for symbol in patch.linked_symbols if symbol.strip()]
+                if (
+                    after_node.title == before_node.title
+                    and after_node.description == before_node.description
+                    and after_node.tags == before_node.tags
+                    and after_node.linked_files == before_node.linked_files
+                    and after_node.linked_symbols == before_node.linked_symbols
+                ):
+                    continue
+                changes.append(
+                    CanvasEditChangeRecord(
+                        id=change_id,
+                        kind="update_node",
+                        scope=scope,  # type: ignore[arg-type]
+                        reason=reason,
+                        impact_basis=impact_basis,
+                        depends_on_change_ids=depends_on_change_ids,
+                        target_node_id=target_node_id,
+                        target_title=before_node.title,
+                        before_node=before_node,
+                        after_node=after_node,
+                    )
+                )
+                continue
+
+            if kind == "create_node":
+                after_payload = item.get("after_node")
+                if not isinstance(after_payload, dict):
+                    continue
+                draft_title = str(after_payload.get("title") or "").strip()
+                if not draft_title:
+                    continue
+                draft_id = str(after_payload.get("id") or f"draft_node_{index}").strip() or f"draft_node_{index}"
+                after_node = CanvasNode(
+                    id=draft_id,
+                    title=draft_title,
+                    description=str(after_payload.get("description") or ""),
+                    tags=[
+                        str(tag).strip()
+                        for tag in after_payload.get("tags", [])
+                        if str(tag).strip()
+                    ],
+                    x=0,
+                    y=0,
+                    linked_files=[
+                        str(path).strip()
+                        for path in after_payload.get("linked_files", [])
+                        if str(path).strip()
+                    ],
+                    linked_symbols=[
+                        str(symbol).strip()
+                        for symbol in after_payload.get("linked_symbols", [])
+                        if str(symbol).strip()
+                    ],
+                )
+                anchor_node_id = str(item.get("anchor_node_id") or "").strip() or None
+                changes.append(
+                    CanvasEditChangeRecord(
+                        id=change_id,
+                        kind="create_node",
+                        scope=scope,  # type: ignore[arg-type]
+                        reason=reason,
+                        impact_basis=impact_basis,
+                        depends_on_change_ids=depends_on_change_ids,
+                        target_title=after_node.title,
+                        anchor_node_id=anchor_node_id,
+                        after_node=after_node,
+                    )
+                )
+                continue
+
+            if kind == "delete_node":
+                before_node = nodes_by_id.get(target_node_id)
+                if before_node is None:
+                    continue
+                changes.append(
+                    CanvasEditChangeRecord(
+                        id=change_id,
+                        kind="delete_node",
+                        scope=scope,  # type: ignore[arg-type]
+                        reason=reason,
+                        impact_basis=impact_basis,
+                        depends_on_change_ids=depends_on_change_ids,
+                        target_node_id=target_node_id,
+                        target_title=before_node.title,
+                        before_node=before_node,
+                    )
+                )
+                continue
+
+            if kind == "create_edge":
+                edge_payload = item.get("after_edge")
+                if not isinstance(edge_payload, dict):
+                    edge_payload = item
+                source_node_id = str(edge_payload.get("source_node_id") or "").strip()
+                target_node_id = str(edge_payload.get("target_node_id") or "").strip()
+                if not source_node_id or not target_node_id or source_node_id == target_node_id:
+                    continue
+                after_edge = CanvasEdge(
+                    id=str(edge_payload.get("id") or f"draft_edge_{index}").strip() or f"draft_edge_{index}",
+                    source_node_id=source_node_id,
+                    target_node_id=target_node_id,
+                    label=str(edge_payload.get("label") or "").strip(),
+                )
+                changes.append(
+                    CanvasEditChangeRecord(
+                        id=change_id,
+                        kind="create_edge",
+                        scope=scope,  # type: ignore[arg-type]
+                        reason=reason,
+                        impact_basis=impact_basis,
+                        depends_on_change_ids=depends_on_change_ids,
+                        after_edge=after_edge,
+                    )
+                )
+
+        summary = str(payload.get("summary") or "").strip()
+        if not changes:
+            return fallback
+        return changes, summary or f"Drafted {len(changes)} note change{'s' if len(changes) != 1 else ''}."
+
     def suggest_commit_message(
         self,
         repo_path: str,
@@ -741,6 +1007,217 @@ class CodexService:
             ),
         ]
         return seeds[:suggestion_count]
+
+    def _fallback_canvas_changes(
+        self,
+        prompt: str,
+        target_nodes: list[CanvasNode],
+        impacted_notes: list[tuple[CanvasNode, list[str]]],
+    ) -> tuple[list[CanvasEditChangeRecord], str]:
+        first_prompt_sentence = prompt.strip().splitlines()[0].strip() if prompt.strip() else "Update this note."
+        normalized_prompt = prompt.strip().lower()
+        changes: list[CanvasEditChangeRecord] = []
+        handled_structural_change = False
+        primary_node = target_nodes[0] if target_nodes else None
+        secondary_node = target_nodes[1] if len(target_nodes) > 1 else None
+
+        if "split" in normalized_prompt and primary_node is not None:
+            handled_structural_change = True
+            created_change_id = f"fallback_create_split_{primary_node.id}"
+            created_node = CanvasNode(
+                id=f"draft_split_{primary_node.id}",
+                title=f"{primary_node.title} Breakdown",
+                description=f"Spin out the focused responsibility from {primary_node.title.lower()} so the concept can be explored independently.",
+                tags=_append_unique_tags(primary_node.tags, ["workflow"]),
+                x=0,
+                y=0,
+                linked_files=primary_node.linked_files,
+                linked_symbols=primary_node.linked_symbols,
+            )
+            updated_node = primary_node.model_copy(deep=True)
+            updated_node.description = (
+                f"{updated_node.description.strip()}\n\nRefined to focus on the parent responsibility after splitting related behavior."
+            ).strip()
+            changes.extend(
+                [
+                    CanvasEditChangeRecord(
+                        id=f"fallback_update_split_{primary_node.id}",
+                        kind="update_node",
+                        scope="direct",
+                        reason="Refocus the original note after splitting out a separate concept.",
+                        impact_basis=[],
+                        target_node_id=primary_node.id,
+                        target_title=primary_node.title,
+                        before_node=primary_node,
+                        after_node=updated_node,
+                    ),
+                    CanvasEditChangeRecord(
+                        id=created_change_id,
+                        kind="create_node",
+                        scope="direct",
+                        reason="Create the split-out concept as a new note.",
+                        impact_basis=[],
+                        target_title=created_node.title,
+                        anchor_node_id=primary_node.id,
+                        after_node=created_node,
+                    ),
+                    CanvasEditChangeRecord(
+                        id=f"fallback_edge_split_{primary_node.id}",
+                        kind="create_edge",
+                        scope="direct",
+                        reason="Link the new split concept back to its parent note.",
+                        impact_basis=[],
+                        depends_on_change_ids=[created_change_id],
+                        after_edge=CanvasEdge(
+                            id=f"draft_edge_split_{primary_node.id}",
+                            source_node_id=primary_node.id,
+                            target_node_id=created_node.id,
+                            label="splits into",
+                        ),
+                    ),
+                ]
+            )
+
+        elif "merge" in normalized_prompt and primary_node is not None and secondary_node is not None:
+            handled_structural_change = True
+            updated_node = primary_node.model_copy(deep=True)
+            updated_node.description = (
+                f"{updated_node.description.strip()}\n\nExpanded to absorb responsibilities previously represented by {secondary_node.title}."
+            ).strip()
+            changes.extend(
+                [
+                    CanvasEditChangeRecord(
+                        id=f"fallback_merge_update_{primary_node.id}",
+                        kind="update_node",
+                        scope="direct",
+                        reason="Expand the primary note to absorb the merged concept.",
+                        impact_basis=[],
+                        target_node_id=primary_node.id,
+                        target_title=primary_node.title,
+                        before_node=primary_node,
+                        after_node=updated_node,
+                    ),
+                    CanvasEditChangeRecord(
+                        id=f"fallback_merge_delete_{secondary_node.id}",
+                        kind="delete_node",
+                        scope="direct",
+                        reason="Remove the secondary note after merging it into the primary one.",
+                        impact_basis=[],
+                        depends_on_change_ids=[f"fallback_merge_update_{primary_node.id}"],
+                        target_node_id=secondary_node.id,
+                        target_title=secondary_node.title,
+                        before_node=secondary_node,
+                    ),
+                ]
+            )
+
+        elif any(keyword in normalized_prompt for keyword in ("connect", "link")) and primary_node is not None and secondary_node is not None:
+            handled_structural_change = True
+            changes.append(
+                CanvasEditChangeRecord(
+                    id=f"fallback_edge_connect_{primary_node.id}_{secondary_node.id}",
+                    kind="create_edge",
+                    scope="direct",
+                    reason="Connect the targeted notes on the canvas.",
+                    impact_basis=[],
+                    after_edge=CanvasEdge(
+                        id=f"draft_edge_connect_{primary_node.id}_{secondary_node.id}",
+                        source_node_id=primary_node.id,
+                        target_node_id=secondary_node.id,
+                        label="relates to",
+                    ),
+                )
+            )
+
+        elif any(keyword in normalized_prompt for keyword in ("create note", "create node", "add note", "add node", "new note", "new node")) and primary_node is not None:
+            handled_structural_change = True
+            created_node = CanvasNode(
+                id=f"draft_node_related_{primary_node.id}",
+                title=f"{primary_node.title} Follow-up",
+                description=f"Capture the new concept requested around {primary_node.title.lower()} and keep it linked to the source note.",
+                tags=_append_unique_tags(primary_node.tags, ["workflow"]),
+                x=0,
+                y=0,
+                linked_files=primary_node.linked_files,
+                linked_symbols=primary_node.linked_symbols,
+            )
+            create_change_id = f"fallback_create_node_{primary_node.id}"
+            changes.extend(
+                [
+                    CanvasEditChangeRecord(
+                        id=create_change_id,
+                        kind="create_node",
+                        scope="direct",
+                        reason="Add a new note requested by the prompt.",
+                        impact_basis=[],
+                        target_title=created_node.title,
+                        anchor_node_id=primary_node.id,
+                        after_node=created_node,
+                    ),
+                    CanvasEditChangeRecord(
+                        id=f"fallback_edge_create_{primary_node.id}",
+                        kind="create_edge",
+                        scope="direct",
+                        reason="Connect the new note back to the targeted note.",
+                        impact_basis=[],
+                        depends_on_change_ids=[create_change_id],
+                        after_edge=CanvasEdge(
+                            id=f"draft_edge_create_{primary_node.id}",
+                            source_node_id=primary_node.id,
+                            target_node_id=created_node.id,
+                            label="extends",
+                        ),
+                    ),
+                ]
+            )
+
+        if not handled_structural_change:
+            for index, node in enumerate(target_nodes[:2]):
+                after_node = node.model_copy(deep=True)
+                current_description = after_node.description.strip()
+                addition = first_prompt_sentence.rstrip(".")
+                if current_description:
+                    if addition.lower() not in current_description.lower():
+                        after_node.description = f"{current_description}\n\nReview note update: {addition}."
+                else:
+                    after_node.description = f"Review note update: {addition}."
+                changes.append(
+                    CanvasEditChangeRecord(
+                        id=f"fallback_direct_{index}_{node.id}",
+                        kind="update_node",
+                        scope="direct",
+                        reason="Reflect the requested architecture change in this note.",
+                        impact_basis=[],
+                        target_node_id=node.id,
+                        target_title=node.title,
+                        before_node=node,
+                        after_node=after_node,
+                    )
+                )
+
+        for index, (node, basis) in enumerate(impacted_notes[:2]):
+            after_node = node.model_copy(deep=True)
+            basis_text = basis[0] if basis else "related implementation evidence"
+            current_description = after_node.description.strip()
+            addition = f"Related note review: revisit this note because of {basis_text}."
+            after_node.description = f"{current_description}\n\n{addition}".strip()
+            changes.append(
+                CanvasEditChangeRecord(
+                    id=f"fallback_impacted_{index}_{node.id}",
+                    kind="update_node",
+                    scope="impacted",
+                    reason="Keep this related note aligned with the requested change.",
+                    impact_basis=basis,
+                    target_node_id=node.id,
+                    target_title=node.title,
+                    before_node=node,
+                    after_node=after_node,
+                )
+            )
+
+        if not changes:
+            return [], "No note changes were suggested."
+        return changes, f"Drafted {len(changes)} note change{'s' if len(changes) != 1 else ''} for review."
 
     def _fallback_prompt_mode(self, prompt: str) -> Literal["ask", "build"]:
         normalized = prompt.strip().lower()

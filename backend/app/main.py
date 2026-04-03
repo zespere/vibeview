@@ -18,6 +18,10 @@ from .models import (
     AssistImpactRequest,
     AssistImpactResponse,
     CanvasEdgeCreateRequest,
+    CanvasEditApplyRequest,
+    CanvasEditApplyResponse,
+    CanvasEditPreviewRequest,
+    CanvasEditPreviewResponse,
     CanvasGenerateRequest,
     CanvasGenerateResponse,
     CanvasResponse,
@@ -725,6 +729,82 @@ def generate_canvas_from_prompt(request: CanvasGenerateRequest) -> CanvasGenerat
         document=document,
         summary=f"{summary} {note_changes.summary}".strip(),
         created_count=created_count,
+    )
+
+
+@app.post("/canvas/edit-preview", response_model=CanvasEditPreviewResponse)
+def preview_canvas_edits(request: CanvasEditPreviewRequest) -> CanvasEditPreviewResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    canvas_service.set_repo_path(resolved_repo_path)
+    document = canvas_service.get_document_for_repo(resolved_repo_path)
+    target_note_ids = [node_id for node_id in request.target_note_ids if node_id.strip()]
+    if not target_note_ids:
+        raise HTTPException(status_code=400, detail="Select or mention at least one note to edit.")
+
+    target_nodes = [node for node in document.nodes if node.id in set(target_note_ids)]
+    if not target_nodes:
+        raise HTTPException(status_code=400, detail="No matching target notes were found on the current canvas.")
+
+    impacted_map = canvas_service.find_impacted_notes(document, [node.id for node in target_nodes])
+    impacted_notes = [(node, impacted_map[node.id]) for node in document.nodes if node.id in impacted_map]
+    try:
+        changes, summary = codex_service.draft_canvas_changes(
+            repo_path=resolved_repo_path,
+            prompt=request.prompt,
+            target_nodes=target_nodes,
+            impacted_notes=impacted_notes,
+            semantic_context=request.semantic_context,
+            conversation_context=request.conversation_context,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return CanvasEditPreviewResponse(
+        repo_path=resolved_repo_path,
+        prompt=request.prompt,
+        summary=summary,
+        direct_count=sum(1 for change in changes if change.scope == "direct"),
+        impacted_count=sum(1 for change in changes if change.scope == "impacted"),
+        changes=changes,
+    )
+
+
+@app.post("/canvas/edit-apply", response_model=CanvasEditApplyResponse)
+def apply_canvas_edits(request: CanvasEditApplyRequest) -> CanvasEditApplyResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    canvas_service.set_repo_path(resolved_repo_path)
+    try:
+        document, note_changes, applied_change_ids, remaining_change_ids = canvas_service.apply_canvas_edit_changes(
+            request.changes,
+            request.accepted_change_ids,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    summary = (
+        f"Applied {len(applied_change_ids)} note change{'s' if len(applied_change_ids) != 1 else ''}."
+        if applied_change_ids
+        else "No note changes were applied."
+    )
+    return CanvasEditApplyResponse(
+        repo_path=resolved_repo_path,
+        summary=summary,
+        note_changes_summary=note_changes.summary,
+        applied_change_ids=applied_change_ids,
+        remaining_change_ids=remaining_change_ids,
+        document=document,
     )
 
 
