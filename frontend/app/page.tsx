@@ -13,6 +13,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type SyntheticEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
@@ -187,6 +188,7 @@ export default function Home() {
   const [repoPath, setRepoPath] = useState("");
   const [codexPrompt, setCodexPrompt] = useState("");
   const [composerImageAttachments, setComposerImageAttachments] = useState<ComposerImageAttachment[]>([]);
+  const [inspectedComposerImageId, setInspectedComposerImageId] = useState<string | null>(null);
   const [composerCaretIndex, setComposerCaretIndex] = useState(0);
   const [composerModel, setComposerModel] = useState("gpt-5.4");
   const [composerReasoning, setComposerReasoning] = useState<ComposerReasoningEffort>("medium");
@@ -277,6 +279,10 @@ export default function Home() {
   const transientNotesExploration =
     activeTab?.type === "view" && activeTab.view === "notes" ? notesExploration : null;
   const currentExplorationSession = activeExplorationSession ?? transientNotesExploration;
+  const inspectedComposerImage = useMemo(
+    () => composerImageAttachments.find((item) => item.id === inspectedComposerImageId) ?? null,
+    [composerImageAttachments, inspectedComposerImageId],
+  );
 
   useEffect(() => {
     composerImageAttachmentsRef.current = composerImageAttachments;
@@ -298,6 +304,23 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!inspectedComposerImageId) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setInspectedComposerImageId(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [inspectedComposerImageId]);
+
   const handleCopyConsoleFileLink = useCallback((linkKey: string, href: string) => {
     void navigator.clipboard.writeText(href);
     setCopiedConsoleLinkKey(linkKey);
@@ -317,6 +340,7 @@ export default function Home() {
       }
       return current.filter((item) => item.id !== attachmentId);
     });
+    setInspectedComposerImageId((current) => (current === attachmentId ? null : current));
   }, []);
 
   const clearComposerImageAttachments = useCallback(() => {
@@ -4493,14 +4517,20 @@ export default function Home() {
               <div className={styles.consoleComposerAttachments}>
                 {composerImageAttachments.map((attachment) => (
                   <div className={styles.consoleComposerAttachment} key={attachment.id}>
-                    <Image
-                      alt={attachment.fileName}
-                      className={styles.consoleComposerAttachmentPreview}
-                      height={42}
-                      src={attachment.previewUrl}
-                      unoptimized
-                      width={42}
-                    />
+                    <button
+                      className={styles.consoleComposerAttachmentPreviewButton}
+                      onClick={() => setInspectedComposerImageId(attachment.id)}
+                      type="button"
+                    >
+                      <Image
+                        alt={attachment.fileName}
+                        className={styles.consoleComposerAttachmentPreview}
+                        height={42}
+                        src={attachment.previewUrl}
+                        unoptimized
+                        width={42}
+                      />
+                    </button>
                     <div className={styles.consoleComposerAttachmentMeta}>
                       <span className={styles.consoleComposerAttachmentName}>{attachment.fileName}</span>
                       <span className={styles.consoleComposerAttachmentStatus}>
@@ -4513,7 +4543,10 @@ export default function Home() {
                     </div>
                     <button
                       className={styles.consoleComposerAttachmentRemove}
-                      onClick={() => removeComposerImageAttachment(attachment.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeComposerImageAttachment(attachment.id);
+                      }}
                       type="button"
                     >
                       Remove
@@ -4644,6 +4677,46 @@ export default function Home() {
             </div>
           </label>
           </div>
+          {inspectedComposerImage && typeof document !== "undefined"
+            ? createPortal(
+                <div
+                  className={styles.consoleImagePreviewOverlay}
+                  onClick={() => setInspectedComposerImageId(null)}
+                  role="presentation"
+                >
+                <div
+                  className={styles.consoleImagePreviewDialog}
+                  onClick={(event) => event.stopPropagation()}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={inspectedComposerImage.fileName}
+                >
+                    <div className={styles.consoleImagePreviewHint}>Click outside to close</div>
+                    <div className={styles.consoleImagePreviewStage}>
+                      <div className={styles.consoleImagePreviewBody}>
+                        <Image
+                          alt={inspectedComposerImage.fileName}
+                          className={styles.consoleImagePreviewImage}
+                          height={960}
+                          src={inspectedComposerImage.previewUrl}
+                          unoptimized
+                          width={1440}
+                        />
+                      </div>
+                    </div>
+                    <div className={styles.consoleImagePreviewCaption}>
+                      <strong className={styles.consoleImagePreviewTitle}>{inspectedComposerImage.fileName}</strong>
+                      <span className={styles.consoleImagePreviewInfo}>
+                        {formatBytes(inspectedComposerImage.sizeBytes)}
+                        {" · "}
+                        {inspectedComposerImage.contentType}
+                      </span>
+                    </div>
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
           {isEmbedded ? null : (
             <div className={styles.notesConsoleExternalActions}>
               <button

@@ -1607,6 +1607,17 @@
   padding: 8px 10px;
 }
 
+.consoleComposerAttachmentPreviewButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
 .consoleComposerAttachmentPreview {
   width: 42px;
   height: 42px;
@@ -1654,6 +1665,111 @@
 
 .consoleComposerAttachmentRemove:hover {
   color: #5d4328;
+}
+
+.consoleImagePreviewOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 253, 249, 0.08), transparent 34%),
+    rgba(18, 14, 10, 0.72);
+  backdrop-filter: blur(12px);
+  padding: 20px;
+}
+
+.consoleImagePreviewDialog {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  gap: 12px;
+}
+
+.consoleImagePreviewTitle {
+  overflow: hidden;
+  color: #fffaf4;
+  font-size: 14px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consoleImagePreviewInfo {
+  color: rgba(255, 244, 231, 0.74);
+  font-size: 12px;
+}
+
+.consoleImagePreviewHint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 245, 231, 0.12);
+  border-radius: 999px;
+  background: rgba(19, 15, 11, 0.64);
+  color: rgba(255, 244, 231, 0.82);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 9px 14px;
+  backdrop-filter: blur(10px);
+}
+
+.consoleImagePreviewStage {
+  display: flex;
+  width: auto;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  justify-content: center;
+  align-items: center;
+}
+
+.consoleImagePreviewBody {
+  display: flex;
+  width: auto;
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+.consoleImagePreviewImage {
+  width: auto;
+  max-width: min(92vw, 1440px);
+  height: auto;
+  max-height: calc(100vh - 120px);
+  border-radius: 20px;
+  object-fit: contain;
+  box-shadow:
+    0 26px 80px rgba(10, 7, 4, 0.36),
+    0 8px 28px rgba(10, 7, 4, 0.22);
+}
+
+.consoleImagePreviewCaption {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  max-width: min(720px, calc(100vw - 96px));
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(255, 245, 231, 0.12);
+  border-radius: 999px;
+  background: rgba(19, 15, 11, 0.72);
+  padding: 10px 14px;
+  box-shadow: 0 16px 28px rgba(10, 7, 4, 0.22);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
 }
 
 .consoleComposerActions {
