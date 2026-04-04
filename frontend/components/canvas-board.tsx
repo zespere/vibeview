@@ -666,7 +666,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
           <>
             <strong className={styles.canvasNodeTitle}>{node.title}</strong>
             {isExpanded ? (
-              <div className={`${styles.canvasNodeExpandedBody} nodrag nopan nowheel`}>
+              <div className={`${styles.canvasNodeExpandedBody} nodrag`}>
                 {isExplorationActive && explorationControls?.pathTitles.length ? (
                   <div className={styles.canvasExplorationPath}>
                     {explorationControls.pathTitles.map((title) => (
