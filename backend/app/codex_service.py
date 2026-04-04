@@ -73,6 +73,7 @@ class CodexService:
         use_graph_context: bool,
         bypass_sandbox: bool | None,
         semantic_context: str | None,
+        image_paths: list[str] | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> CodexChangeResponse:
@@ -122,7 +123,7 @@ class CodexService:
             )
 
         bypass = settings.codex_bypass_sandbox_default if bypass_sandbox is None else bypass_sandbox
-        command = self._build_command(repo_dir, final_prompt, dry_run, bypass, model, reasoning_effort)
+        command = self._build_command(repo_dir, final_prompt, dry_run, bypass, model, reasoning_effort, image_paths)
         logger.info("Starting Codex change run for %s", repo_path)
         result = subprocess.run(
             command,
@@ -162,6 +163,7 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        image_paths: list[str] | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> CodexChangeResponse:
@@ -184,6 +186,7 @@ class CodexService:
                 semantic_context,
                 conversation_context,
             ),
+            image_paths=image_paths,
             model=model,
             reasoning_effort=reasoning_effort,
         )
@@ -194,6 +197,7 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        image_paths: list[str] | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> tuple[str, str]:
@@ -218,7 +222,7 @@ class CodexService:
         final_prompt = (
             f"{context_prefix}\n\nTask:\n{planning_prompt}" if context_prefix else planning_prompt
         )
-        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort)
+        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort, image_paths)
         try:
             result = subprocess.run(
                 command,
@@ -245,6 +249,7 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        image_paths: list[str] | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> Literal["ask", "build"]:
@@ -267,7 +272,7 @@ class CodexService:
         final_prompt = (
             f"{context_prefix}\n\nTask:\n{classifier_prompt}" if context_prefix else classifier_prompt
         )
-        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort)
+        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort, image_paths)
         try:
             result = subprocess.run(
                 command,
@@ -295,8 +300,9 @@ class CodexService:
         prompt: str,
         semantic_context: str | None,
         conversation_context: str | None = None,
+        image_paths: list[str] | None = None,
         model: str | None = None,
-        reasoning_effort: Literal["low", "medium", "high"] | None = None,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> tuple[str, str]:
         if not self.is_available():
             raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
@@ -313,7 +319,7 @@ class CodexService:
         final_prompt = (
             f"{context_prefix}\n\nTask:\n{question_prompt}" if context_prefix else question_prompt
         )
-        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort)
+        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort, image_paths)
         result = subprocess.run(command, capture_output=True, text=True, check=False)
         events = self._parse_jsonl_output(result.stdout)
         answer_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
@@ -403,6 +409,7 @@ class CodexService:
         self,
         repo_path: str,
         prompt: str,
+        image_paths: list[str] | None = None,
     ) -> tuple[list[GeneratedCanvasNode], list[GeneratedCanvasEdge], str]:
         if not self.is_available():
             nodes = self._fallback_architecture_notes(prompt)
@@ -451,7 +458,7 @@ class CodexService:
             "- JSON only. No markdown fences.\n\n"
             f"User prompt:\n{prompt.strip()}\n"
         )
-        command = self._build_command(repo_dir, generation_prompt, True, True)
+        command = self._build_command(repo_dir, generation_prompt, True, True, image_paths=image_paths)
         result = subprocess.run(command, capture_output=True, text=True, check=False)
         events = self._parse_jsonl_output(result.stdout)
         raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
@@ -798,6 +805,7 @@ class CodexService:
         bypass_sandbox: bool,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
+        image_paths: list[str] | None = None,
     ) -> list[str]:
         assert settings.codex_binary is not None
         command = [
@@ -813,6 +821,9 @@ class CodexService:
             command.extend(["-m", effective_model])
         if reasoning_effort:
             command.extend(["-c", f'reasoning_effort="{reasoning_effort}"'])
+        for image_path in image_paths or []:
+            if image_path:
+                command.extend(["-i", image_path])
         if bypass_sandbox:
             command.append("--dangerously-bypass-approvals-and-sandbox")
         else:

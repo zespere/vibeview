@@ -1588,6 +1588,74 @@
   outline: none;
 }
 
+.consoleComposerAttachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 16px 10px;
+}
+
+.consoleComposerAttachment {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 320px;
+  border: 1px solid rgba(222, 212, 200, 0.92);
+  border-radius: 12px;
+  background: rgba(255, 252, 247, 0.92);
+  padding: 8px 10px;
+}
+
+.consoleComposerAttachmentPreview {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.consoleComposerAttachmentMeta {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.consoleComposerAttachmentName {
+  overflow: hidden;
+  color: #342a22;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consoleComposerAttachmentStatus {
+  overflow: hidden;
+  color: #7a6d5d;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consoleComposerAttachmentRemove {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #7b5d3d;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
+.consoleComposerAttachmentRemove:hover {
+  color: #5d4328;
+}
+
 .consoleComposerActions {
   display: flex;
   align-items: center;

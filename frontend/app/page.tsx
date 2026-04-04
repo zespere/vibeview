@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   useCallback,
   useEffect,
@@ -7,6 +8,7 @@ import {
   useRef,
   useState,
   useTransition,
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type SyntheticEvent,
@@ -34,6 +36,7 @@ import {
   generateCanvasFromPrompt,
   streamProjectRun,
   resetCanvas,
+  uploadProjectImage,
   updateProject,
   updateProjectConversation,
   updateCanvasNode,
@@ -48,6 +51,7 @@ import {
   type ExplorationContextNode,
   type ExplorationSuggestionRecord,
   type ProjectProfile,
+  type ProjectImageUploadResponse,
   type ProjectTreeItem,
   type ProjectWorkspaceStatusResponse,
   type StatusResponse,
@@ -134,6 +138,17 @@ interface ExplorationPresentation {
   visibleNodeIds: string[];
 }
 
+interface ComposerImageAttachment {
+  id: string;
+  fileName: string;
+  previewUrl: string;
+  uploadedPath: string | null;
+  contentType: string;
+  sizeBytes: number;
+  status: "uploading" | "ready" | "error";
+  errorMessage: string | null;
+}
+
 type ComposerRunMode = "build" | "plan";
 type ComposerReasoningEffort = "low" | "medium" | "high" | "xhigh";
 type DockVisibilityState = "hidden" | "visible";
@@ -171,6 +186,7 @@ export default function Home() {
   const [activeConversationRepoPath, setActiveConversationRepoPath] = useState<string | null>(null);
   const [repoPath, setRepoPath] = useState("");
   const [codexPrompt, setCodexPrompt] = useState("");
+  const [composerImageAttachments, setComposerImageAttachments] = useState<ComposerImageAttachment[]>([]);
   const [composerCaretIndex, setComposerCaretIndex] = useState(0);
   const [composerModel, setComposerModel] = useState("gpt-5.4");
   const [composerReasoning, setComposerReasoning] = useState<ComposerReasoningEffort>("medium");
@@ -232,6 +248,7 @@ export default function Home() {
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const exploreCanvasNodeRef = useRef<(nodeId: string) => void>(() => undefined);
   const copiedConsoleLinkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const composerImageAttachmentsRef = useRef<ComposerImageAttachment[]>([]);
 
   const [, startStatusTransition] = useTransition();
   const [projectPending, startProjectTransition] = useTransition();
@@ -262,9 +279,21 @@ export default function Home() {
   const currentExplorationSession = activeExplorationSession ?? transientNotesExploration;
 
   useEffect(() => {
+    composerImageAttachmentsRef.current = composerImageAttachments;
+  }, [composerImageAttachments]);
+
+  useEffect(() => {
     return () => {
       if (copiedConsoleLinkTimeoutRef.current) {
         clearTimeout(copiedConsoleLinkTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      for (const attachment of composerImageAttachmentsRef.current) {
+        URL.revokeObjectURL(attachment.previewUrl);
       }
     };
   }, []);
@@ -278,6 +307,92 @@ export default function Home() {
     copiedConsoleLinkTimeoutRef.current = setTimeout(() => {
       setCopiedConsoleLinkKey((current) => (current === linkKey ? null : current));
     }, 1400);
+  }, []);
+
+  const removeComposerImageAttachment = useCallback((attachmentId: string) => {
+    setComposerImageAttachments((current) => {
+      const target = current.find((item) => item.id === attachmentId);
+      if (target) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return current.filter((item) => item.id !== attachmentId);
+    });
+  }, []);
+
+  const clearComposerImageAttachments = useCallback(() => {
+    setComposerImageAttachments((current) => {
+      for (const attachment of current) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+      return [];
+    });
+  }, []);
+
+  const handleComposerPaste = useCallback((event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const imageFiles = Array.from(event.clipboardData?.items ?? [])
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((item): item is File => item !== null);
+
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    for (const file of imageFiles) {
+      const attachmentId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const previewUrl = URL.createObjectURL(file);
+      setComposerImageAttachments((current) => [
+        ...current,
+        {
+          id: attachmentId,
+          fileName: file.name || "pasted-image.png",
+          previewUrl,
+          uploadedPath: null,
+          contentType: file.type || "image/png",
+          sizeBytes: file.size,
+          status: "uploading",
+          errorMessage: null,
+        },
+      ]);
+
+      void (async () => {
+        try {
+          const response: ProjectImageUploadResponse = await uploadProjectImage(file);
+          setComposerImageAttachments((current) =>
+            current.map((item) =>
+              item.id === attachmentId
+                ? {
+                    ...item,
+                    fileName: response.file_name,
+                    uploadedPath: response.file_path,
+                    contentType: response.content_type,
+                    sizeBytes: response.size_bytes,
+                    status: "ready",
+                    errorMessage: null,
+                  }
+                : item,
+            ),
+          );
+        } catch (error) {
+          setComposerImageAttachments((current) =>
+            current.map((item) =>
+              item.id === attachmentId
+                ? {
+                    ...item,
+                    status: "error",
+                    errorMessage: getErrorMessage(error),
+                  }
+                : item,
+            ),
+          );
+        }
+      })();
+    }
   }, []);
 
   useEffect(() => {
@@ -343,7 +458,12 @@ export default function Home() {
     [canvasDocument, codexPrompt, composerCaretIndex],
   );
   const isNoteMentionMode = !isSlashCommandMode && activeNoteMention !== null;
-  const isComposerBusy = isBuilding || isPlanning || isPushing || codexPending;
+  const hasUploadingComposerImages = composerImageAttachments.some((item) => item.status === "uploading");
+  const hasComposerImageErrors = composerImageAttachments.some((item) => item.status === "error");
+  const readyComposerImagePaths = composerImageAttachments
+    .filter((item) => item.status === "ready" && item.uploadedPath)
+    .map((item) => item.uploadedPath as string);
+  const isComposerBusy = isBuilding || isPlanning || isPushing || codexPending || hasUploadingComposerImages;
   const activeConversationSummary = useMemo(
     () =>
       activeProjectTreeItem?.conversations.find(
@@ -1877,10 +1997,16 @@ export default function Home() {
     }
 
     const promptContextNodeIds = resolvePromptContextNodeIds(prompt, activeContextDocument, visibleContextNodeIds);
+    const attachmentSummary = readyComposerImagePaths.length
+      ? `Attached images: ${composerImageAttachments
+          .filter((item) => item.status === "ready")
+          .map((item) => item.fileName)
+          .join(", ")}`
+      : null;
     const userMessage: ConversationMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: prompt,
+      content: attachmentSummary ? `${attachmentSummary}\n\n${prompt}` : prompt,
       created_at: new Date().toISOString(),
     };
     const pendingMessages = [...consoleMessages, userMessage];
@@ -1923,6 +2049,7 @@ export default function Home() {
         prompt,
         buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
         buildConversationContext(pendingMessages),
+        readyComposerImagePaths,
         composerModel,
         composerReasoning,
         (event) => {
@@ -1980,6 +2107,7 @@ export default function Home() {
       ];
       setConsoleMessages(nextMessages);
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      clearComposerImageAttachments();
       await refreshCommitStatus(activeRepoPath);
     } catch (error) {
       setComposerStatus("Build failed.");
@@ -2013,10 +2141,16 @@ export default function Home() {
     }
 
     const promptContextNodeIds = resolvePromptContextNodeIds(prompt, activeContextDocument, visibleContextNodeIds);
+    const attachmentSummary = readyComposerImagePaths.length
+      ? `Attached images: ${composerImageAttachments
+          .filter((item) => item.status === "ready")
+          .map((item) => item.fileName)
+          .join(", ")}`
+      : null;
     const userMessage: ConversationMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: prompt,
+      content: attachmentSummary ? `${attachmentSummary}\n\n${prompt}` : prompt,
       created_at: new Date().toISOString(),
     };
     const pendingMessages = [...consoleMessages, userMessage];
@@ -2063,6 +2197,7 @@ export default function Home() {
         prompt,
         buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
         buildConversationContext(pendingMessages),
+        readyComposerImagePaths,
         composerModel,
         composerReasoning,
         (event) => {
@@ -2108,6 +2243,7 @@ export default function Home() {
       ];
       setConsoleMessages(nextMessages);
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      clearComposerImageAttachments();
     } catch (error) {
       setComposerStatus("Plan failed.");
       setErrorMessage(getErrorMessage(error));
@@ -2191,6 +2327,7 @@ export default function Home() {
         ].join("\n\n"),
         buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
+        readyComposerImagePaths,
         composerModel,
         composerReasoning,
         (event) => {
@@ -2247,6 +2384,7 @@ export default function Home() {
       ];
       setConsoleMessages(nextMessages);
       await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
+      clearComposerImageAttachments();
       await refreshCommitStatus(activeRepoPath);
     } catch (error) {
       setComposerStatus("Build failed.");
@@ -4344,12 +4482,46 @@ export default function Home() {
               onClick={handleComposerSelectionChange}
               onKeyDown={handleComposerKeyDown}
               onKeyUp={handleComposerSelectionChange}
+              onPaste={handleComposerPaste}
               onSelect={handleComposerSelectionChange}
-              placeholder="Ask about the project, describe a change, or type / for commands."
+              placeholder="Ask about the project, describe a change, paste an image, or type / for commands."
               ref={composerInputRef}
               rows={2}
               value={codexPrompt}
             />
+            {composerImageAttachments.length > 0 ? (
+              <div className={styles.consoleComposerAttachments}>
+                {composerImageAttachments.map((attachment) => (
+                  <div className={styles.consoleComposerAttachment} key={attachment.id}>
+                    <Image
+                      alt={attachment.fileName}
+                      className={styles.consoleComposerAttachmentPreview}
+                      height={42}
+                      src={attachment.previewUrl}
+                      unoptimized
+                      width={42}
+                    />
+                    <div className={styles.consoleComposerAttachmentMeta}>
+                      <span className={styles.consoleComposerAttachmentName}>{attachment.fileName}</span>
+                      <span className={styles.consoleComposerAttachmentStatus}>
+                        {attachment.status === "uploading"
+                          ? "Uploading image..."
+                          : attachment.status === "error"
+                            ? attachment.errorMessage || "Upload failed"
+                            : `Attached image · ${formatBytes(attachment.sizeBytes)}`}
+                      </span>
+                    </div>
+                    <button
+                      className={styles.consoleComposerAttachmentRemove}
+                      onClick={() => removeComposerImageAttachment(attachment.id)}
+                      type="button"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className={styles.consoleComposerActions}>
               <div className={styles.consoleComposerLeft}>
                 <div className={styles.consoleControlCluster}>
@@ -4436,6 +4608,7 @@ export default function Home() {
                   className={styles.primaryButton}
                   disabled={
                     isComposerBusy ||
+                    hasComposerImageErrors ||
                     !codexPrompt.trim() ||
                     (!isSlashCommandMode && !activeRepoPath)
                   }
@@ -6062,6 +6235,21 @@ function renderConsoleMessageContent(
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const kb = value / 1024;
+  if (kb < 1024) {
+    return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
+  }
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
 }
 
 function getErrorMessage(error: unknown) {

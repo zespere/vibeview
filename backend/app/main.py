@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -44,6 +46,7 @@ from .models import (
     ProjectAskRequest,
     ProjectAskResponse,
     ProjectFolderPickResponse,
+    ProjectImageUploadResponse,
     ProjectRunStreamRequest,
     ProjectPlanRequest,
     ProjectPlanResponse,
@@ -145,6 +148,35 @@ def pick_project_folder() -> ProjectFolderPickResponse:
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return ProjectFolderPickResponse(repo_path=repo_path)
+
+
+@app.post("/project/attachments/image", response_model=ProjectImageUploadResponse)
+async def upload_project_image(file: UploadFile = File(...)) -> ProjectImageUploadResponse:
+    content_type = (file.content_type or "").strip().lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty.")
+    if len(image_bytes) > 15 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Uploaded image is too large.")
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if not suffix:
+        suffix = mimetypes.guess_extension(content_type) or ".png"
+
+    upload_dir = settings.state_path.parent / "uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target_path = upload_dir / f"{uuid4().hex}{suffix}"
+    target_path.write_bytes(image_bytes)
+
+    return ProjectImageUploadResponse(
+        file_path=str(target_path),
+        file_name=file.filename or target_path.name,
+        content_type=content_type,
+        size_bytes=len(image_bytes),
+    )
 
 
 @app.get("/project/workspace-status", response_model=ProjectWorkspaceStatusResponse)
@@ -548,6 +580,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     request.prompt,
                     request.semantic_context,
                     conversation_context=request.conversation_context,
+                    image_paths=request.image_paths,
                     model=request.model,
                     reasoning_effort=request.reasoning_effort,
                 )
@@ -559,6 +592,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     request.prompt,
                     request.semantic_context,
                     conversation_context=request.conversation_context,
+                    image_paths=request.image_paths,
                     model=request.model,
                     reasoning_effort=request.reasoning_effort,
                 )
@@ -581,6 +615,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     prompt=request.prompt,
                     semantic_context=request.semantic_context,
                     conversation_context=request.conversation_context,
+                    image_paths=request.image_paths,
                     model=request.model,
                     reasoning_effort=request.reasoning_effort,
                 )
@@ -602,6 +637,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                 prompt=request.prompt,
                 semantic_context=request.semantic_context,
                 conversation_context=request.conversation_context,
+                image_paths=request.image_paths,
                 model=request.model,
                 reasoning_effort=request.reasoning_effort,
             )
@@ -609,6 +645,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
             generated_nodes, generated_edges, note_summary = codex_service.generate_architecture_notes(
                 repo_path=resolved_repo_path,
                 prompt=request.prompt,
+                image_paths=request.image_paths,
             )
             document, notes_created, note_changes = canvas_service.append_generated_map(generated_nodes, generated_edges)
 

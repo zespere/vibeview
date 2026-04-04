@@ -39,6 +39,13 @@ export interface ProjectFolderPickResponse {
   repo_path: string | null;
 }
 
+export interface ProjectImageUploadResponse {
+  file_path: string;
+  file_name: string;
+  content_type: string;
+  size_bytes: number;
+}
+
 export interface ProjectWorkspaceStatusResponse {
   repo_path: string;
   has_project_files: boolean;
@@ -299,15 +306,18 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
         }, timeoutMs)
       : null;
 
+  const isFormDataBody = typeof FormData !== "undefined" && init?.body instanceof FormData;
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       signal: init?.signal ?? controller?.signal,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
+      headers: isFormDataBody
+        ? init?.headers
+        : {
+            "Content-Type": "application/json",
+            ...(init?.headers ?? {}),
+          },
     });
   } catch (error) {
     if (timeoutId !== null) {
@@ -544,6 +554,7 @@ export async function streamProjectRun(
   prompt: string,
   semanticContext: string | undefined,
   conversationContext: string | undefined,
+  imagePaths: string[] | undefined,
   model: string | undefined,
   reasoningEffort: "low" | "medium" | "high" | "xhigh" | undefined,
   onEvent: (event: ProjectRunStreamEvent) => void,
@@ -557,6 +568,7 @@ export async function streamProjectRun(
       prompt,
       semantic_context: semanticContext,
       conversation_context: conversationContext,
+      image_paths: imagePaths,
       model,
       reasoning_effort: reasoningEffort,
     }),
@@ -592,6 +604,15 @@ export async function streamProjectRun(
   if (trailing) {
     onEvent(JSON.parse(trailing) as ProjectRunStreamEvent);
   }
+}
+
+export async function uploadProjectImage(file: File) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiRequest<ProjectImageUploadResponse>("/project/attachments/image", {
+    method: "POST",
+    body: formData,
+  });
 }
 
 export function fetchCanvas(repoPath?: string) {

@@ -60,6 +60,13 @@ class ProjectFolderPickResponse(BaseModel):
     repo_path: str | None = None
 
 
+class ProjectImageUploadResponse(BaseModel):
+    file_path: str
+    file_name: str
+    content_type: str
+    size_bytes: int
+
+
 class ProjectWorkspaceStatusResponse(BaseModel):
     repo_path: str
     has_project_files: bool
@@ -390,6 +397,7 @@ class ProjectRunStreamRequest(BaseModel):
     mode: Literal["ask", "plan", "build", "auto"]
     semantic_context: str | None = None
     conversation_context: str | None = None
+    image_paths: list[str] = Field(default_factory=list)
     model: str | None = None
     reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
 
