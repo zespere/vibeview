@@ -2454,13 +2454,6 @@
   word-break: break-word;
 }
 
-.sampleRepoList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
-}
-
 .statusList,
 .metaList,
 .resultList,

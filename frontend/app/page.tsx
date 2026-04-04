@@ -4226,49 +4226,58 @@ export default function Home() {
           </div>
           <div className={styles.projectPanel}>
             <div className={styles.projectSection}>
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>Repository path</span>
-            <input className={styles.input} onChange={(event) => setRepoPath(event.target.value)} value={repoPath} />
-          </label>
+              <label className={styles.field}>
+                <span className={styles.fieldLabel}>Repository path</span>
+                <select
+                  className={styles.input}
+                  onChange={(event) => setRepoPath(event.target.value)}
+                  value={repoPath}
+                >
+                  {repoPath ? (
+                    <option value={repoPath}>
+                      {PathLabel(repoPath)}
+                    </option>
+                  ) : (
+                    <option value="">Select a project</option>
+                  )}
+                  {[...(project?.recent_projects ?? [])]
+                    .filter((path) => path && path !== repoPath)
+                    .map((path) => (
+                      <option key={path} value={path}>
+                        {PathLabel(path)}
+                      </option>
+                    ))}
+                </select>
+              </label>
 
-          {project?.recent_projects.length ? (
-            <div className={styles.sampleRepoList}>
-              {project.recent_projects.map((path) => (
-                <button className={styles.secondaryButton} key={path} onClick={() => setRepoPath(path)} type="button">
-                  {PathLabel(path)}
+              <div className={styles.actionsRow}>
+                <button className={styles.primaryButton} disabled={projectPending || !repoPath} onClick={handleSaveProject} type="button">
+                  {projectPending ? "Saving..." : "Open project"}
                 </button>
-              ))}
-            </div>
-          ) : null}
-
-          <div className={styles.actionsRow}>
-            <button className={styles.primaryButton} disabled={projectPending} onClick={handleSaveProject} type="button">
-              {projectPending ? "Saving..." : "Open project"}
-            </button>
-            <button
-              className={styles.secondaryButton}
-              disabled={projectPending}
-              onClick={handlePickProjectFolder}
-              type="button"
-            >
-              Choose folder
-            </button>
-            <button
-              className={styles.secondaryButton}
-              disabled={!activeRepoPath || isGeneratingCanvas}
-              onClick={handleGenerateCanvas}
-              type="button"
-            >
-              {isGeneratingCanvas
-                ? "Generating..."
-                : canvasDocument?.nodes.length
-                  ? "Regenerate canvas"
-                  : "Set up canvas"}
-            </button>
-            <button className={styles.secondaryButton} disabled={!activeRepoPath} onClick={handleResetCanvas} type="button">
-              Reset canvas
-            </button>
-          </div>
+                <button
+                  className={styles.secondaryButton}
+                  disabled={projectPending}
+                  onClick={handlePickProjectFolder}
+                  type="button"
+                >
+                  Choose folder
+                </button>
+                <button
+                  className={styles.secondaryButton}
+                  disabled={!activeRepoPath || isGeneratingCanvas}
+                  onClick={handleGenerateCanvas}
+                  type="button"
+                >
+                  {isGeneratingCanvas
+                    ? "Generating..."
+                    : canvasDocument?.nodes.length
+                      ? "Regenerate canvas"
+                      : "Set up canvas"}
+                </button>
+                <button className={styles.secondaryButton} disabled={!activeRepoPath} onClick={handleResetCanvas} type="button">
+                  Reset canvas
+                </button>
+              </div>
             </div>
             <div className={styles.projectSummaryGrid}>
               <div className={styles.projectSummaryCard}>
