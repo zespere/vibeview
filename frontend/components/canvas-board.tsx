@@ -26,7 +26,9 @@ interface CanvasBoardProps {
   selectedNodeIds: string[];
   edgeNodeIds?: string[];
   expandedNodeId?: string | null;
+  canCreateCanvasFromSelection?: boolean;
   onCreateNodeAt: (x: number, y: number) => void;
+  onCreateCanvasFromSelection?: () => void;
   onDeleteNode: (nodeId: string) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
@@ -67,7 +69,9 @@ export function CanvasBoard({
   selectedNodeIds,
   edgeNodeIds,
   expandedNodeId,
+  canCreateCanvasFromSelection = false,
   onCreateNodeAt,
+  onCreateCanvasFromSelection,
   onDeleteNode,
   onMoveNodeEnd,
   onSelectNode,
@@ -433,6 +437,18 @@ export function CanvasBoard({
               type="button"
             >
               Create note
+            </button>
+          ) : null}
+          {canCreateCanvasFromSelection ? (
+            <button
+              className={styles.canvasContextItem}
+              onClick={() => {
+                onCreateCanvasFromSelection?.();
+                setContextMenu(null);
+              }}
+              type="button"
+            >
+              Create canvas from selection
             </button>
           ) : null}
           {contextMenu.nodeId ? (

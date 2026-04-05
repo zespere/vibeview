@@ -556,6 +556,17 @@ export default function Home() {
     const items = [status?.codex_model, composerModel, ...GPT_MODEL_OPTIONS];
     return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
   }, [composerModel, status?.codex_model]);
+  const seedNewCanvasPrompt = useCallback(() => {
+    setLeaderScope(null);
+    setDockVisibility("visible");
+    setConsoleVisibility("expanded");
+    setCodexPrompt("/new-canvas ");
+    window.setTimeout(() => {
+      composerInputRef.current?.focus();
+      const value = composerInputRef.current?.value ?? "/new-canvas ";
+      composerInputRef.current?.setSelectionRange(value.length, value.length);
+    }, 0);
+  }, []);
   const focusedContextNode = useMemo(
     () => canvasDocument?.nodes.find((node) => node.id === focusedCanvasNodeId) ?? null,
     [canvasDocument, focusedCanvasNodeId],
@@ -727,17 +738,7 @@ export default function Home() {
         subtitle: "Insert an explicit /new-canvas command into the composer",
         group: "action",
         searchText: "create canvas from prompt generate explicit",
-        run: () => {
-          setLeaderScope(null);
-          setDockVisibility("visible");
-          setConsoleVisibility("expanded");
-          setCodexPrompt("/new-canvas ");
-          window.setTimeout(() => {
-            composerInputRef.current?.focus();
-            const value = composerInputRef.current?.value ?? "/new-canvas ";
-            composerInputRef.current?.setSelectionRange(value.length, value.length);
-          }, 0);
-        },
+        run: seedNewCanvasPrompt,
       },
       {
         id: "action-setup-canvas",
@@ -896,6 +897,13 @@ export default function Home() {
     () => [
       { id: "leader-projects", key: "p", title: "Projects", subtitle: "Switch project", scope: "projects" },
       { id: "leader-canvases", key: "v", title: "Canvases", subtitle: "Open canvas", scope: "canvases" },
+      {
+        id: "leader-new-canvas",
+        key: "f",
+        title: "New canvas",
+        subtitle: "Seed /new-canvas in the composer",
+        run: seedNewCanvasPrompt,
+      },
       { id: "leader-notes", key: "n", title: "Notes", subtitle: "Open note on current canvas", scope: "notes" },
       { id: "leader-conversations", key: "c", title: "Conversations", subtitle: "Open conversation", scope: "conversations" },
       { id: "leader-actions", key: "a", title: "Actions", subtitle: "Run canvas and project actions", scope: "actions" },
@@ -925,7 +933,7 @@ export default function Home() {
         },
       },
     ],
-    [],
+    [seedNewCanvasPrompt],
   );
   const leaderItems = useMemo(() => {
     switch (leaderScope) {
@@ -3563,12 +3571,18 @@ export default function Home() {
           ) : (
             <>
               <CanvasBoard
+                canCreateCanvasFromSelection={currentCanvasSelectionIds.length > 0}
                 onDeleteNode={handleDeleteCanvasNode}
                 document={notesCanvasDocument}
                 expandedNodeId={expandedCanvasNodeId}
                 onCreateNodeAt={(x, y) => {
                   startCanvasTransition(() => {
                     void handleCreateCanvasNodeAt(x, y);
+                  });
+                }}
+                onCreateCanvasFromSelection={() => {
+                  startCanvasTransition(() => {
+                    void handleCreateCanvasFromSelection();
                   });
                 }}
                 onMoveNodeEnd={(nodeId, x, y) => {
