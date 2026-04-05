@@ -20,6 +20,8 @@ import { CanvasBoard } from "@/components/canvas-board";
 import {
   applyCanvasEdits,
   createProjectCanvas,
+  createProjectCanvasFromPrompt,
+  createProjectCanvasFromSnapshot,
   deleteProjectCanvas,
   duplicateProjectCanvas,
   createCanvasNode,
@@ -121,6 +123,7 @@ interface ExplorationSuggestionState {
 interface ExplorationBranch {
   id: string;
   canvasId: string;
+  draftCanvasId?: string | null;
   rootNodeId: string;
   activeNodeId: string | null;
   pathNodeIds: string[];
@@ -266,6 +269,9 @@ export default function Home() {
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const exploreCanvasNodeRef = useRef<(nodeId: string) => void>(() => undefined);
+  const openDraftCanvasForExplorationRef = useRef<
+    ((branch: ExplorationBranch, options?: { activate?: boolean }) => Promise<void>) | null
+  >(null);
   const copiedConsoleLinkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composerImageAttachmentsRef = useRef<ComposerImageAttachment[]>([]);
 
@@ -294,6 +300,17 @@ export default function Home() {
     activeTab?.type === "exploration" ? explorationTabs[activeTab.explorationId] ?? null : null;
   const transientNotesExploration = activeTab?.type === "canvas" ? notesExploration : null;
   const currentExplorationSession = activeExplorationSession ?? transientNotesExploration;
+  const currentCanvasSelectionIds = useMemo(
+    () =>
+      deriveCurrentCanvasSelectionIds(
+        canvasDocument,
+        currentExplorationSession,
+        selectedCanvasNodeIds,
+        activeTab,
+        activeCanvasId,
+      ),
+    [activeCanvasId, activeTab, canvasDocument, currentExplorationSession, selectedCanvasNodeIds],
+  );
   const inspectedComposerImage = useMemo(
     () => composerImageAttachments.find((item) => item.id === inspectedComposerImageId) ?? null,
     [composerImageAttachments, inspectedComposerImageId],
@@ -709,6 +726,45 @@ export default function Home() {
         },
       },
       {
+        id: "action-create-canvas-from-selection",
+        title: "Create canvas from selection",
+        subtitle:
+          currentCanvasSelectionIds.length === 0
+            ? "Select one or more notes first"
+            : `${currentCanvasSelectionIds.length} selected note${currentCanvasSelectionIds.length === 1 ? "" : "s"} will seed a focused canvas`,
+        disabled: !activeRepoPath || currentCanvasSelectionIds.length === 0,
+        group: "action",
+        searchText: "create canvas from selection focused notes",
+        run: () => {
+          if (!activeRepoPath || currentCanvasSelectionIds.length === 0) {
+            return;
+          }
+          setCodexPrompt("");
+          setLeaderScope(null);
+          startCanvasTransition(() => {
+            void handleCreateCanvasFromSelection();
+          });
+        },
+      },
+      {
+        id: "action-create-canvas-from-prompt",
+        title: "Create canvas from prompt",
+        subtitle: "Insert an explicit /new-canvas command into the composer",
+        group: "action",
+        searchText: "create canvas from prompt generate explicit",
+        run: () => {
+          setLeaderScope(null);
+          setDockVisibility("visible");
+          setConsoleVisibility("expanded");
+          setCodexPrompt("/new-canvas ");
+          window.setTimeout(() => {
+            composerInputRef.current?.focus();
+            const value = composerInputRef.current?.value ?? "/new-canvas ";
+            composerInputRef.current?.setSelectionRange(value.length, value.length);
+          }, 0);
+        },
+      },
+      {
         id: "action-setup-canvas",
         title: canvasDocument?.nodes.length ? "Regenerate canvas" : "Set up canvas",
         subtitle: "Map the current project into canvas notes",
@@ -849,7 +905,13 @@ export default function Home() {
       if (item.id === "action-new-conversation") {
         return !!activeRepoPath;
       }
-      if (item.id === "action-create-note" || item.id === "action-setup-canvas" || item.id === "action-reset-canvas") {
+      if (
+        item.id === "action-create-note" ||
+        item.id === "action-setup-canvas" ||
+        item.id === "action-reset-canvas" ||
+        item.id === "action-create-canvas-from-selection" ||
+        item.id === "action-create-canvas-from-prompt"
+      ) {
         return !!activeRepoPath;
       }
       return true;
@@ -1879,7 +1941,7 @@ export default function Home() {
         event.preventDefault();
         const promotedBranch = {
           ...notesExploration,
-          id: `saved-${Date.now()}`,
+          id: notesExploration.id.startsWith("saved-") ? notesExploration.id : `saved-${Date.now()}`,
           pathNodeIds: [...notesExploration.pathNodeIds],
           revealedNodeIds: [...notesExploration.revealedNodeIds],
           suggestionsByNodeId: Object.fromEntries(
@@ -1895,18 +1957,8 @@ export default function Home() {
           ...current,
           [promotedBranch.id]: promotedBranch,
         }));
-        setExplorationTabs((current) => ({
-          ...current,
-          [promotedBranch.id]: promotedBranch,
-        }));
-        const explorationTabId = `explore:${promotedBranch.canvasId}:${promotedBranch.id}` as const;
-        setOpenTabs((current) =>
-          current.some((tab) => tab.id === explorationTabId)
-            ? current
-            : [...current, { id: explorationTabId, type: "exploration", explorationId: promotedBranch.id, canvasId: promotedBranch.canvasId }],
-        );
-        setActiveTabId(explorationTabId);
-        setComposerStatus(`Opened an exploration tab for ${findCanvasNodeTitle(canvasDocument, promotedBranch.rootNodeId)}.`);
+        setNotesExploration(promotedBranch);
+        void openDraftCanvasForExplorationRef.current?.(promotedBranch);
         return;
       }
 
@@ -2175,6 +2227,73 @@ export default function Home() {
     });
   }
 
+  async function handleCreateCanvasFromSelection() {
+    if (!activeRepoPath || !activeContextDocument || currentCanvasSelectionIds.length === 0) {
+      return;
+    }
+
+    const snapshot = buildCanvasSnapshotFromSelection(activeContextDocument, currentCanvasSelectionIds);
+    if (snapshot.nodes.length === 0) {
+      setComposerStatus("Select at least one real note first.");
+      return;
+    }
+
+    const suggestedTitle = buildCanvasTitleFromSelection(activeContextDocument, currentCanvasSelectionIds);
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await createProjectCanvasFromSnapshot(
+            activeRepoPath,
+            suggestedTitle,
+            snapshot.nodes,
+            snapshot.edges,
+          );
+          setCanvasDocument(response.document);
+          setActiveCanvasId(response.document.id);
+          setCanvasEditPreview(null);
+          await refreshProjectsTree();
+          if (response.document.id) {
+            openCanvasTab(response.document.id);
+          }
+          setComposerStatus(`Created ${response.document.title} from the current selection.`);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
+  async function handleCreateCanvasFromPrompt(promptValue: string) {
+    const prompt = promptValue.trim();
+    if (!activeRepoPath || !prompt) {
+      return;
+    }
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          setComposerStatus("Creating a focused canvas from your prompt...");
+          const response = await createProjectCanvasFromPrompt(activeRepoPath, prompt, deriveCanvasTitleFromPrompt(prompt));
+          setCanvasDocument(response.document);
+          setActiveCanvasId(response.document.id);
+          setCanvasEditPreview(null);
+          setCodexPrompt("");
+          await refreshProjectsTree();
+          if (response.document.id) {
+            openCanvasTab(response.document.id);
+          }
+          setComposerStatus(response.summary?.trim() ? response.summary : `Created ${response.document.title}.`);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+          setComposerStatus("Canvas creation failed.");
+        }
+      })();
+    });
+  }
+
   function beginCanvasRename(canvas: CanvasSummary) {
     setCanvasRailMenu(null);
     setRenamingCanvasId(canvas.id);
@@ -2279,10 +2398,24 @@ export default function Home() {
           setSelectedCanvasNodeIds([]);
           setNotesExploration((current) => (current?.canvasId === canvas.id ? null : current));
           setExplorationTabs((current) =>
-            Object.fromEntries(Object.entries(current).filter(([, branch]) => branch.canvasId !== canvas.id)),
+            Object.fromEntries(
+              Object.entries(current)
+                .filter(([, branch]) => branch.canvasId !== canvas.id)
+                .map(([branchId, branch]) => [
+                  branchId,
+                  branch.draftCanvasId === canvas.id ? { ...branch, draftCanvasId: null } : branch,
+                ]),
+            ),
           );
           setExplorationBranches((current) =>
-            Object.fromEntries(Object.entries(current).filter(([, branch]) => branch.canvasId !== canvas.id)),
+            Object.fromEntries(
+              Object.entries(current)
+                .filter(([, branch]) => branch.canvasId !== canvas.id)
+                .map(([branchId, branch]) => [
+                  branchId,
+                  branch.draftCanvasId === canvas.id ? { ...branch, draftCanvasId: null } : branch,
+                ]),
+            ),
           );
           if (activeCanvasId === canvas.id) {
             const nextCanvasId = nextCanvases[0]?.id ?? null;
@@ -3138,10 +3271,7 @@ export default function Home() {
     if (branchId) {
       const branch = explorationBranches[branchId];
       if (branch) {
-        setNotesExploration(branch);
-        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
-        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+        void openDraftCanvasForExplorationRef.current?.(branch);
       }
       return;
     }
@@ -3177,10 +3307,7 @@ export default function Home() {
     if (branchId) {
       const branch = explorationBranches[branchId];
       if (branch) {
-        setNotesExploration(branch);
-        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
-        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+        void openDraftCanvasForExplorationRef.current?.(branch);
       }
       return;
     }
@@ -3234,6 +3361,102 @@ export default function Home() {
     setSelectedCanvasNodeIds([]);
     setExpandedCanvasNodeId(null);
   }
+
+  const openDraftCanvasForExploration = useCallback(async (
+    branch: ExplorationBranch,
+    options?: { activate?: boolean },
+  ) => {
+    if (!activeRepoPath || !canvasDocument) {
+      return;
+    }
+
+    const knownCanvasId = branch.draftCanvasId;
+    if (knownCanvasId) {
+      const tabId = `canvas:${knownCanvasId}` as const;
+      setOpenTabs((current) =>
+        current.some((tab) => tab.id === tabId) ? current : [...current, { id: tabId, type: "canvas", canvasId: knownCanvasId }],
+      );
+      if (options?.activate !== false) {
+        setActiveTabId(tabId);
+      }
+      if (options?.activate !== false) {
+        setComposerStatus(`Opened ${buildExplorationDraftTitle(canvasDocument, branch)}.`);
+      }
+      return;
+    }
+
+    const snapshot = buildExplorationDraftSnapshot(canvasDocument, branch);
+    if (snapshot.nodes.length === 0) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      const response = await createProjectCanvasFromSnapshot(
+        activeRepoPath,
+        buildExplorationDraftTitle(canvasDocument, branch),
+        snapshot.nodes,
+        snapshot.edges,
+      );
+      const nextCanvasId = response.document.id;
+      if (!nextCanvasId) {
+        return;
+      }
+
+      setProjectCanvases((current) => [
+        ...current.filter((canvas) => canvas.id !== nextCanvasId),
+        {
+          id: nextCanvasId,
+          title: response.document.title,
+          node_count: response.document.nodes.length,
+        },
+      ]);
+      setExplorationBranches((current) => {
+        const currentBranch = current[branch.id];
+        if (!currentBranch) {
+          return current;
+        }
+        return {
+          ...current,
+          [branch.id]: {
+            ...currentBranch,
+            draftCanvasId: nextCanvasId,
+          },
+        };
+      });
+      setNotesExploration((current) =>
+        current?.id === branch.id ? { ...current, draftCanvasId: nextCanvasId } : current,
+      );
+      setExplorationTabs((current) =>
+        current[branch.id]
+          ? {
+              ...current,
+              [branch.id]: {
+                ...current[branch.id],
+                draftCanvasId: nextCanvasId,
+              },
+            }
+          : current,
+      );
+      await refreshProjectsTree();
+      const tabId = `canvas:${nextCanvasId}` as const;
+      setOpenTabs((current) =>
+        current.some((tab) => tab.id === tabId) ? current : [...current, { id: tabId, type: "canvas", canvasId: nextCanvasId }],
+      );
+      if (options?.activate !== false) {
+        setActiveTabId(tabId);
+      }
+      if (options?.activate !== false) {
+        setComposerStatus(`Created ${response.document.title} from the exploration.`);
+      }
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    }
+  }, [activeRepoPath, canvasDocument]);
+
+  useEffect(() => {
+    openDraftCanvasForExplorationRef.current = openDraftCanvasForExploration;
+  }, [openDraftCanvasForExploration]);
 
   function materializeExplorationSuggestion(
     branch: ExplorationBranch,
@@ -3462,10 +3685,7 @@ export default function Home() {
     if (branchId) {
       const branch = explorationBranches[branchId];
       if (branch) {
-        setNotesExploration(branch);
-        setSelectedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
-        setSelectedCanvasNodeIds(branch.activeNodeId ? [branch.activeNodeId] : []);
-        setExpandedCanvasNodeId(branch.activeNodeId ?? branch.rootNodeId);
+        void openDraftCanvasForExplorationRef.current?.(branch);
       }
       return;
     }
@@ -3592,6 +3812,42 @@ export default function Home() {
 
     if (commandName === "push") {
       return actionCommandItems.filter((item) => item.id === "action-push");
+    }
+
+    if (commandName === "new-canvas") {
+      if (!commandArgs) {
+        return [
+          {
+            id: "execute-new-canvas-help",
+            title: "Create a new canvas from prompt",
+            subtitle: "Use /new-canvas <instruction> to generate a separate focused canvas explicitly",
+            group: "execute",
+            searchText: "new canvas generate prompt explicit",
+            run: () => undefined,
+          },
+        ];
+      }
+      return [
+        {
+          id: "execute-new-canvas",
+          title: `Create canvas: ${commandArgs}`,
+          subtitle: !activeRepoPath
+            ? "Open a project first"
+            : "Generate a new focused canvas without editing the current one",
+          disabled: !activeRepoPath,
+          group: "execute",
+          searchText: "new canvas generate prompt explicit",
+          run: () => {
+            if (!activeRepoPath) {
+              return;
+            }
+            setLeaderScope(null);
+            startCanvasTransition(() => {
+              void handleCreateCanvasFromPrompt(commandArgs);
+            });
+          },
+        },
+      ];
     }
 
     if (commandName === "canvas") {
@@ -5543,6 +5799,7 @@ function createExplorationBranch(nodeId: string, document: CanvasDocument | null
   return {
     id: `explore-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     canvasId,
+    draftCanvasId: null,
     rootNodeId: nodeId,
     activeNodeId: nodeId,
     pathNodeIds: [nodeId],
@@ -5591,6 +5848,7 @@ function normalizeExplorationBranch(
 
   return {
     ...branch,
+    draftCanvasId: branch.draftCanvasId ?? null,
     rootNodeId,
     activeNodeId,
     pathNodeIds,
@@ -6047,6 +6305,106 @@ function buildExplorationContextDocument(
   };
 }
 
+function buildCanvasSnapshotFromSelection(
+  document: CanvasDocument | null,
+  nodeIds: string[],
+) {
+  if (!document || nodeIds.length === 0) {
+    return { nodes: [] as CanvasNode[], edges: [] as CanvasEdge[] };
+  }
+
+  const selectedIdSet = new Set(uniqueNodeIds(nodeIds));
+  const nodes = document.nodes
+    .filter((node) => selectedIdSet.has(node.id))
+    .map((node) => ({ ...node }));
+  const edges = document.edges
+    .filter((edge) => selectedIdSet.has(edge.source_node_id) && selectedIdSet.has(edge.target_node_id))
+    .map((edge) => ({ ...edge }));
+  return { nodes, edges };
+}
+
+function deriveCurrentCanvasSelectionIds(
+  document: CanvasDocument | null,
+  explorationBranch: ExplorationBranch | null,
+  selectedNodeIds: string[],
+  activeTab: OpenTab | null,
+  activeCanvasId: string | null,
+) {
+  const contextDocument = buildExplorationContextDocument(document, explorationBranch);
+  const ids = selectedNodeIds.filter((nodeId) => {
+    if (nodeId.startsWith("branch-summary:")) {
+      return false;
+    }
+    const node = contextDocument?.nodes.find((item) => item.id === nodeId) ?? null;
+    if (!node) {
+      return false;
+    }
+    return !node.tags.includes("suggestion") && !node.tags.includes("suggestion-loading");
+  });
+  if (ids.length > 0) {
+    return ids;
+  }
+  if (
+    activeTab?.type === "note" &&
+    activeTab.canvasId === activeCanvasId &&
+    contextDocument?.nodes.some((node) => node.id === activeTab.nodeId)
+  ) {
+    return [activeTab.nodeId];
+  }
+  return [];
+}
+
+function buildCanvasTitleFromSelection(
+  document: CanvasDocument | null,
+  nodeIds: string[],
+) {
+  const nodes = nodeIds
+    .map((nodeId) => document?.nodes.find((node) => node.id === nodeId) ?? null)
+    .filter((node): node is CanvasNode => Boolean(node));
+  if (nodes.length === 1) {
+    return `${nodes[0].title} Focus`;
+  }
+  if (nodes.length === 2) {
+    return `${nodes[0].title} + ${nodes[1].title}`;
+  }
+  return `Focused Canvas (${nodes.length})`;
+}
+
+function deriveCanvasTitleFromPrompt(prompt: string) {
+  const cleaned = prompt
+    .replace(/^\/?new-canvas\s+/i, "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!cleaned) {
+    return "New canvas";
+  }
+  return cleaned.length > 56 ? `${cleaned.slice(0, 53).trimEnd()}...` : cleaned;
+}
+
+function buildExplorationDraftSnapshot(
+  document: CanvasDocument | null,
+  branch: ExplorationBranch | null,
+) {
+  if (!document || !branch) {
+    return { nodes: [] as CanvasNode[], edges: [] as CanvasEdge[] };
+  }
+
+  const contextDocument = buildExplorationContextDocument(document, branch);
+  if (!contextDocument) {
+    return { nodes: [] as CanvasNode[], edges: [] as CanvasEdge[] };
+  }
+
+  return buildCanvasSnapshotFromSelection(contextDocument, branch.revealedNodeIds);
+}
+
+function buildExplorationDraftTitle(
+  document: CanvasDocument | null,
+  branch: ExplorationBranch,
+) {
+  const rootTitle = findCanvasNodeTitle(buildExplorationContextDocument(document, branch), branch.rootNodeId);
+  return `${rootTitle} Exploration`;
+}
+
 function countExplorationConcepts(branch: ExplorationBranch) {
   return (
     uniqueNodeIds([...branch.revealedNodeIds, ...branch.transientNodes.map((node) => node.id)]).length +
@@ -6103,6 +6461,7 @@ function areExplorationBranchesEqual(left: ExplorationBranch | null, right: Expl
   return (
     left.id === right.id &&
     left.canvasId === right.canvasId &&
+    left.draftCanvasId === right.draftCanvasId &&
     left.rootNodeId === right.rootNodeId &&
     left.activeNodeId === right.activeNodeId &&
     left.relationQuery === right.relationQuery &&

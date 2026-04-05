@@ -9,6 +9,7 @@ from uuid import uuid4
 from .models import (
     CanvasCollection,
     CanvasCreateRequest,
+    CanvasCreateFromSnapshotRequest,
     CanvasDuplicateRequest,
     CanvasEditChangeRecord,
     CanvasDocument,
@@ -188,6 +189,26 @@ class CanvasService:
         self.store.save_collection(collection)
         return document
 
+    def create_canvas_from_snapshot(self, request: CanvasCreateFromSnapshotRequest) -> CanvasDocument:
+        repo_path = request.repo_path
+        collection = self.store.load_collection_for_repo(repo_path)
+        requested_title = (request.title or "").strip() or f"Canvas {len(collection.canvases) + 1}"
+        title = self._dedupe_canvas_title(collection, requested_title)
+        nodes, edges = self._normalize_snapshot_layout(
+            deepcopy(request.nodes),
+            deepcopy(request.edges),
+        )
+        document = CanvasDocument(
+            id=f"canvas_{uuid4().hex[:10]}",
+            title=title,
+            repo_path=repo_path,
+            nodes=nodes,
+            edges=edges,
+        )
+        collection.canvases.append(document)
+        self.store.save_collection(collection)
+        return document
+
     def update_canvas(self, request: CanvasUpdateRequest, canvas_id: str) -> CanvasDocument:
         collection = self.store.load_collection_for_repo(request.repo_path)
         document = next((canvas for canvas in collection.canvases if canvas.id == canvas_id), None)
@@ -338,6 +359,36 @@ class CanvasService:
             if next_candidate.lower() not in normalized_titles:
                 return next_candidate
             suffix += 1
+
+    def _normalize_snapshot_layout(
+        self,
+        nodes: list[CanvasNode],
+        edges: list[CanvasEdge],
+    ) -> tuple[list[CanvasNode], list[CanvasEdge]]:
+        if not nodes:
+            return [], []
+
+        valid_node_ids = {node.id for node in nodes}
+        filtered_edges = [
+            edge
+            for edge in edges
+            if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
+        ]
+        min_x = min(node.x for node in nodes)
+        min_y = min(node.y for node in nodes)
+        offset_x = 120 - min_x
+        offset_y = 120 - min_y
+
+        normalized_nodes = [
+            node.model_copy(
+                update={
+                    "x": node.x + offset_x,
+                    "y": node.y + offset_y,
+                }
+            )
+            for node in nodes
+        ]
+        return normalized_nodes, filtered_edges
 
     def append_generated_map(
         self,

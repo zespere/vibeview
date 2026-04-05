@@ -570,6 +570,19 @@ class CanvasCreateRequest(BaseModel):
     title: str | None = None
 
 
+class CanvasCreateFromSnapshotRequest(BaseModel):
+    repo_path: str
+    title: str | None = None
+    nodes: list[CanvasNode] = Field(default_factory=list)
+    edges: list[CanvasEdge] = Field(default_factory=list)
+
+
+class CanvasCreateFromPromptRequest(BaseModel):
+    repo_path: str
+    title: str | None = None
+    prompt: str = Field(min_length=2, max_length=500)
+
+
 class CanvasUpdateRequest(BaseModel):
     repo_path: str
     title: str = Field(min_length=1, max_length=120)

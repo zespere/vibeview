@@ -21,6 +21,8 @@ from .models import (
     AssistImpactResponse,
     CanvasEdgeCreateRequest,
     CanvasCreateRequest,
+    CanvasCreateFromPromptRequest,
+    CanvasCreateFromSnapshotRequest,
     CanvasDuplicateRequest,
     CanvasEditApplyRequest,
     CanvasEditApplyResponse,
@@ -727,6 +729,61 @@ def create_canvas(request: CanvasCreateRequest) -> CanvasResponse:
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return CanvasResponse(document=document)
+
+
+@app.post("/canvases/from-snapshot", response_model=CanvasResponse)
+def create_canvas_from_snapshot(request: CanvasCreateFromSnapshotRequest) -> CanvasResponse:
+    resolved_repo_path = str(Path(request.repo_path).resolve())
+    try:
+        document = canvas_service.create_canvas_from_snapshot(
+            CanvasCreateFromSnapshotRequest(
+                repo_path=resolved_repo_path,
+                title=request.title,
+                nodes=request.nodes,
+                edges=request.edges,
+            )
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return CanvasResponse(document=document)
+
+
+@app.post("/canvases/from-prompt", response_model=CanvasGenerateResponse)
+def create_canvas_from_prompt(request: CanvasCreateFromPromptRequest) -> CanvasGenerateResponse:
+    repo_path = Path(request.repo_path)
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
+    if not repo_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
+
+    resolved_repo_path = str(repo_path.resolve())
+    try:
+        created_canvas = canvas_service.create_canvas(
+            CanvasCreateRequest(
+                repo_path=resolved_repo_path,
+                title=request.title or "New canvas",
+            )
+        )
+        nodes, edges, summary = codex_service.generate_architecture_notes(
+            repo_path=resolved_repo_path,
+            prompt=request.prompt,
+        )
+        document, created_count, note_changes = canvas_service.append_generated_map(
+            resolved_repo_path,
+            created_canvas.id,
+            nodes,
+            edges,
+        )
+    except RuntimeError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    return CanvasGenerateResponse(
+        document=document,
+        summary=f"{summary} {note_changes.summary}".strip(),
+        created_count=created_count,
+    )
 
 
 @app.patch("/canvases/{canvas_id}", response_model=CanvasResponse)
