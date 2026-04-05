@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 
 import "@xyflow/react/dist/style.css";
 import {
@@ -26,15 +26,6 @@ interface CanvasBoardProps {
   selectedNodeIds: string[];
   edgeNodeIds?: string[];
   expandedNodeId?: string | null;
-  explorationControls?: {
-    activeNodeId: string | null;
-    pathTitles: string[];
-    relationQuery: string;
-    persistent: boolean;
-    onRelationQueryChange: (value: string) => void;
-    onRelationSubmit: () => void;
-    onReturnToOverview?: () => void;
-  } | null;
   onCreateNodeAt: (x: number, y: number) => void;
   onDeleteNode: (nodeId: string) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
@@ -42,8 +33,6 @@ interface CanvasBoardProps {
   onSelectNodes: (nodeIds: string[]) => void;
   onOpenNode: (nodeId: string, options?: { activate?: boolean }) => void;
   onRenameNode: (nodeId: string) => void;
-  onActivateNode: (nodeId: string) => void;
-  onExploreNode: (nodeId: string) => void;
   onPaneClick?: () => void;
 }
 
@@ -60,10 +49,8 @@ interface NoteNodeData extends Record<string, unknown> {
   onOpenNode: (nodeId: string, options?: { activate?: boolean }) => void;
   onOpenNodeInBackground: (nodeId: string) => void;
   onSelectNode: (nodeId: string) => void;
-  onActivateNode: (nodeId: string) => void;
   detailLevel: "minimal" | "compact" | "full";
   isExpanded: boolean;
-  explorationControls: CanvasBoardProps["explorationControls"];
 }
 
 const NODE_WIDTH = 240;
@@ -80,7 +67,6 @@ export function CanvasBoard({
   selectedNodeIds,
   edgeNodeIds,
   expandedNodeId,
-  explorationControls,
   onCreateNodeAt,
   onDeleteNode,
   onMoveNodeEnd,
@@ -88,8 +74,6 @@ export function CanvasBoard({
   onSelectNodes,
   onOpenNode,
   onRenameNode,
-  onActivateNode,
-  onExploreNode,
   onPaneClick,
 }: CanvasBoardProps) {
   const flowRef = useRef<ReactFlowInstance<Node<NoteNodeData>, Edge> | null>(null);
@@ -97,7 +81,6 @@ export function CanvasBoard({
   const suppressSelectionUntilRef = useRef<number>(0);
   const openNodeRef = useRef(onOpenNode);
   const selectNodeRef = useRef(onSelectNode);
-  const activateNodeRef = useRef(onActivateNode);
   const repoPath = document?.repo_path ?? "";
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [localNodes, setLocalNodes] = useState<Array<Node<NoteNodeData>>>([]);
@@ -110,8 +93,7 @@ export function CanvasBoard({
   useEffect(() => {
     openNodeRef.current = onOpenNode;
     selectNodeRef.current = onSelectNode;
-    activateNodeRef.current = onActivateNode;
-  }, [onActivateNode, onOpenNode, onSelectNode]);
+  }, [onOpenNode, onSelectNode]);
 
   useEffect(() => {
     if (!contextMenu) {
@@ -159,15 +141,13 @@ export function CanvasBoard({
           openNodeRef.current(nodeId, { activate: false });
         },
         onSelectNode: (nodeId: string) => selectNodeRef.current(nodeId),
-        onActivateNode: (nodeId: string) => activateNodeRef.current(nodeId),
         detailLevel,
         isExpanded: expandedNodeId === node.id,
-        explorationControls,
       },
       selected: selectedNodeIds.includes(node.id),
       draggable: true,
     }));
-  }, [detailLevel, document, expandedNodeId, explorationControls, selectedNodeIds]);
+  }, [detailLevel, document, expandedNodeId, selectedNodeIds]);
 
   useEffect(() => {
     if (isDraggingRef.current) {
@@ -469,18 +449,6 @@ export function CanvasBoard({
                   Open in tab
                 </button>
               ) : null}
-              {canExploreCanvasNode(document, contextMenu.nodeId) ? (
-                <button
-                  className={styles.canvasContextItem}
-                  onClick={() => {
-                    onExploreNode(contextMenu.nodeId as string);
-                    setContextMenu(null);
-                  }}
-                  type="button"
-                >
-                  Explore
-                </button>
-              ) : null}
               {canRenameCanvasNode(document, contextMenu.nodeId) ? (
                 <button
                   className={styles.canvasContextItem}
@@ -514,50 +482,33 @@ export function CanvasBoard({
 function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boolean }) {
   const {
     node,
-    onActivateNode,
     onOpenNode,
     onOpenNodeInBackground,
     onSelectNode,
     detailLevel,
-    explorationControls,
     isExpanded,
   } = data;
   const isMinimal = detailLevel === "minimal";
   const isCompact = detailLevel === "compact";
   const isSuggestion = node.tags.includes("suggestion");
-  const isLoadingSuggestion = node.tags.includes("suggestion-loading");
-  const isBranchSummary = node.id.startsWith("branch-summary:");
-  const isTransientExploration = node.id.startsWith("explore-node:");
-  const canOpenInTab = !isSuggestion && !isLoadingSuggestion && !isBranchSummary && !isTransientExploration;
-  const isExplorationActive = explorationControls?.activeNodeId === node.id;
   const nodeClassName = selected
-    ? `${styles.canvasNodeActive} ${isSuggestion ? styles.canvasNodeSuggestionActive : ""} ${isLoadingSuggestion ? styles.canvasNodeSuggestionLoading : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
-    : `${styles.canvasNode} ${isSuggestion ? styles.canvasNodeSuggestion : ""} ${isLoadingSuggestion ? styles.canvasNodeSuggestionLoading : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim();
+    ? `${styles.canvasNodeActive} ${isSuggestion ? styles.canvasNodeSuggestionActive : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
+    : `${styles.canvasNode} ${isSuggestion ? styles.canvasNodeSuggestion : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim();
 
   function handleCardClick(event: ReactMouseEvent<HTMLDivElement>) {
-    if (isLoadingSuggestion) {
-      return;
-    }
     if (event.metaKey || event.ctrlKey) {
-      if (canOpenInTab) {
-        event.preventDefault();
-        onOpenNodeInBackground(node.id);
-      }
+      event.preventDefault();
+      onOpenNodeInBackground(node.id);
       return;
     }
     onSelectNode(node.id);
   }
 
   function handleCardMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
-    if (isLoadingSuggestion) {
-      return;
-    }
     if ((event.metaKey || event.ctrlKey) && event.button === 2) {
       event.preventDefault();
       event.stopPropagation();
-      if (canOpenInTab) {
-        onOpenNodeInBackground(node.id);
-      }
+      onOpenNodeInBackground(node.id);
       return;
     }
     if (event.metaKey || event.ctrlKey) {
@@ -567,9 +518,6 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
   }
 
   function handleCardMouseDownCapture(event: ReactMouseEvent<HTMLDivElement>) {
-    if (isLoadingSuggestion) {
-      return;
-    }
     if ((event.metaKey || event.ctrlKey) && event.button === 2) {
       event.preventDefault();
       event.stopPropagation();
@@ -577,39 +525,22 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
   }
 
   function handleCardContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
-    if (isLoadingSuggestion) {
-      return;
-    }
-    if ((event.metaKey || event.ctrlKey) && canOpenInTab) {
+    if (event.metaKey || event.ctrlKey) {
       event.preventDefault();
       event.stopPropagation();
     }
   }
 
   function handleCardContextMenuCapture(event: ReactMouseEvent<HTMLDivElement>) {
-    if (isLoadingSuggestion) {
-      return;
-    }
-    if ((event.metaKey || event.ctrlKey) && canOpenInTab) {
+    if (event.metaKey || event.ctrlKey) {
       event.preventDefault();
       event.stopPropagation();
     }
   }
 
   function handleCardDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
-    if (isLoadingSuggestion) {
-      return;
-    }
     event.preventDefault();
-    if (canOpenInTab) {
-      onOpenNode(node.id);
-      return;
-    }
-    onActivateNode(node.id);
-  }
-
-  function stopInteraction(event: SyntheticEvent) {
-    event.stopPropagation();
+    onOpenNode(node.id);
   }
 
   return (
@@ -633,13 +564,13 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
         tabIndex={0}
         onClick={handleCardClick}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !isLoadingSuggestion) {
+          if (event.key === "Enter") {
             event.preventDefault();
             onSelectNode(node.id);
           }
         }}
       >
-        {(!isMinimal || isExpanded) && !isLoadingSuggestion ? (
+        {!isMinimal || isExpanded ? (
           <div className={styles.canvasNodeHeader}>
             <div className={styles.canvasTagList}>
               {isSuggestion ? (
@@ -657,128 +588,43 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
             </div>
           </div>
         ) : null}
-        {isLoadingSuggestion ? (
-          <div className={styles.canvasLoadingCard}>
-            <span aria-hidden="true" className={styles.canvasLoadingSpinner} />
-            <strong className={styles.canvasLoadingTitle}>Generating suggestion</strong>
-          </div>
-        ) : (
-          <>
-            <strong className={styles.canvasNodeTitle}>{node.title}</strong>
-            {isExpanded ? (
-              <div className={`${styles.canvasNodeExpandedBody} nodrag`}>
-                {isExplorationActive && explorationControls?.pathTitles.length ? (
-                  <div className={styles.canvasExplorationPath}>
-                    {explorationControls.pathTitles.map((title) => (
-                      <span className={styles.canvasExplorationPathChip} key={title}>
-                        {title}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <p className={styles.canvasNodeDescriptionExpanded}>{node.description || "No description yet."}</p>
-                {isSuggestion ? (
-                  <div className={styles.canvasSuggestionMeta}>Click to explore</div>
-                ) : (
-                  <>
-                    <div className={styles.canvasNodeMetaExpanded}>
-                      <span>{node.linked_files.length} files</span>
-                      <span>{node.linked_symbols.length} symbols</span>
-                    </div>
-                    {node.linked_files.length > 0 ? (
-                      <ul className={styles.canvasNodeList}>
-                        {node.linked_files.slice(0, 6).map((file) => (
-                          <li key={file}>{file}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </>
-                )}
-                {isExplorationActive && explorationControls ? (
-                  <div className={styles.canvasExplorationComposer}>
-                    <label className={styles.canvasExplorationField}>
-                      <span>Explore another relation</span>
-                      <input
-                        className={`${styles.canvasExplorationInput} nodrag nopan nowheel`}
-                        onChange={(event) => {
-                          stopInteraction(event);
-                          explorationControls.onRelationQueryChange(event.target.value);
-                        }}
-                        onClick={stopInteraction}
-                        onDoubleClick={stopInteraction}
-                        onMouseDown={stopInteraction}
-                        onPointerDown={stopInteraction}
-                        placeholder="e.g. persistence, UI state, side effects"
-                        value={explorationControls.relationQuery}
-                      />
-                    </label>
-                    <div className={styles.canvasExplorationActions}>
-                      <button
-                        className={styles.canvasNodeActionPrimary}
-                        disabled={!explorationControls.relationQuery.trim()}
-                        onDoubleClick={stopInteraction}
-                        onMouseDown={stopInteraction}
-                        onPointerDown={stopInteraction}
-                        onClick={(event) => {
-                          stopInteraction(event);
-                          explorationControls.onRelationSubmit();
-                        }}
-                        type="button"
-                      >
-                        Add relation
-                      </button>
-                      {!explorationControls.persistent && explorationControls.onReturnToOverview ? (
-                        <button
-                          className={styles.canvasNodeAction}
-                          onDoubleClick={stopInteraction}
-                          onMouseDown={stopInteraction}
-                          onPointerDown={stopInteraction}
-                          onClick={(event) => {
-                            stopInteraction(event);
-                            explorationControls.onReturnToOverview?.();
-                          }}
-                          type="button"
-                        >
-                          Overview
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
+        <>
+          <strong className={styles.canvasNodeTitle}>{node.title}</strong>
+          {isExpanded ? (
+            <div className={`${styles.canvasNodeExpandedBody} nodrag`}>
+              <p className={styles.canvasNodeDescriptionExpanded}>{node.description || "No description yet."}</p>
+              <div className={styles.canvasNodeMetaExpanded}>
+                <span>{node.linked_files.length} files</span>
+                <span>{node.linked_symbols.length} symbols</span>
               </div>
-            ) : detailLevel === "full" ? (
-              <>
-                <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
-                {isSuggestion ? (
-                  <div className={styles.canvasSuggestionMeta}>Click to explore</div>
-                ) : (
-                  <div className={styles.canvasNodeMeta}>
-                    <span>{node.linked_files.length} files</span>
-                    <span>{node.linked_symbols.length} symbols</span>
-                  </div>
-                )}
-              </>
-            ) : null}
-          </>
-        )}
+              {node.linked_files.length > 0 ? (
+                <ul className={styles.canvasNodeList}>
+                  {node.linked_files.slice(0, 6).map((file) => (
+                    <li key={file}>{file}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : detailLevel === "full" ? (
+            <>
+              <p className={styles.canvasNodeDescription}>{compactDescription(node.description)}</p>
+              <div className={styles.canvasNodeMeta}>
+                <span>{node.linked_files.length} files</span>
+                <span>{node.linked_symbols.length} symbols</span>
+              </div>
+            </>
+          ) : null}
+        </>
       </div>
     </div>
   );
 }
 
 function canOpenCanvasNodeInTab(document: CanvasDocument | null, nodeId: string) {
-  const node = document?.nodes.find((item) => item.id === nodeId);
-  if (!node) {
-    return false;
-  }
-  return !node.tags.includes("suggestion") && !node.tags.includes("suggestion-loading") && !node.id.startsWith("branch-summary:") && !node.id.startsWith("explore-node:");
+  return !!document?.nodes.find((item) => item.id === nodeId);
 }
 
 function canRenameCanvasNode(document: CanvasDocument | null, nodeId: string) {
-  return canOpenCanvasNodeInTab(document, nodeId);
-}
-
-function canExploreCanvasNode(document: CanvasDocument | null, nodeId: string) {
   return canOpenCanvasNodeInTab(document, nodeId);
 }
 
@@ -804,11 +650,7 @@ function areFlowNodesEquivalent(left: Array<Node<NoteNodeData>>, right: Array<No
         node.data.node.title === other.data.node.title &&
         node.data.node.description === other.data.node.description &&
         node.data.detailLevel === other.data.detailLevel &&
-        node.data.isExpanded === other.data.isExpanded &&
-        node.data.explorationControls?.activeNodeId === other.data.explorationControls?.activeNodeId &&
-        node.data.explorationControls?.relationQuery === other.data.explorationControls?.relationQuery &&
-        (node.data.explorationControls?.pathTitles ?? []).join("|") ===
-          (other.data.explorationControls?.pathTitles ?? []).join("|")
+        node.data.isExpanded === other.data.isExpanded
       );
     })
   );
