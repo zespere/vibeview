@@ -237,9 +237,17 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [requestedTitleFocusNodeId, setRequestedTitleFocusNodeId] = useState<string | null>(null);
   const [copiedConsoleLinkKey, setCopiedConsoleLinkKey] = useState<string | null>(null);
+  const [canvasRailMenu, setCanvasRailMenu] = useState<{
+    canvas: CanvasSummary;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [renamingCanvasId, setRenamingCanvasId] = useState<string | null>(null);
+  const [renamingCanvasTitle, setRenamingCanvasTitle] = useState("");
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const noteTitleInputRef = useRef<HTMLInputElement | null>(null);
+  const renamingCanvasInputRef = useRef<HTMLInputElement | null>(null);
   const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const leaderResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const expectedRepoPathRef = useRef("");
@@ -293,6 +301,34 @@ export default function Home() {
   useEffect(() => {
     composerImageAttachmentsRef.current = composerImageAttachments;
   }, [composerImageAttachments]);
+
+  useEffect(() => {
+    if (!canvasRailMenu) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setCanvasRailMenu(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canvasRailMenu]);
+
+  useEffect(() => {
+    if (!renamingCanvasId) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      renamingCanvasInputRef.current?.focus();
+      renamingCanvasInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [renamingCanvasId]);
 
   useEffect(() => {
     return () => {
@@ -2130,12 +2166,26 @@ export default function Home() {
     });
   }
 
+  function beginCanvasRename(canvas: CanvasSummary) {
+    setCanvasRailMenu(null);
+    setRenamingCanvasId(canvas.id);
+    setRenamingCanvasTitle(canvas.title);
+  }
+
+  function cancelCanvasRename() {
+    setRenamingCanvasId(null);
+    setRenamingCanvasTitle("");
+  }
+
   async function handleRenameProjectCanvas(canvas: CanvasSummary) {
     if (!activeRepoPath) {
+      cancelCanvasRename();
       return;
     }
-    const nextTitle = window.prompt("Rename canvas", canvas.title)?.trim();
+
+    const nextTitle = renamingCanvasTitle.trim();
     if (!nextTitle || nextTitle === canvas.title) {
+      cancelCanvasRename();
       return;
     }
 
@@ -2147,10 +2197,12 @@ export default function Home() {
           setProjectCanvases((current) =>
             current.map((item) => (item.id === canvas.id ? { ...item, title: response.document.title } : item)),
           );
+          setCanvasRailMenu(null);
           if (canvasDocument?.id === canvas.id) {
             setCanvasDocument(response.document);
           }
           await refreshProjectsTree();
+          cancelCanvasRename();
           setComposerStatus(`Renamed canvas to ${response.document.title}.`);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
@@ -2174,6 +2226,7 @@ export default function Home() {
             ...current,
             { id: response.document.id ?? `canvas-${Date.now()}`, title: response.document.title, node_count: response.document.nodes.length },
           ]);
+          setCanvasRailMenu(null);
           await refreshProjectsTree();
           if (response.document.id) {
             openCanvasTab(response.document.id);
@@ -2202,6 +2255,7 @@ export default function Home() {
           const response = await deleteProjectCanvas(activeRepoPath, canvas.id);
           const nextCanvases = response.canvases;
           setProjectCanvases(nextCanvases);
+          setCanvasRailMenu(null);
           setOpenTabs((current) =>
             current.filter(
               (tab) =>
@@ -5114,55 +5168,64 @@ export default function Home() {
               ) : (
                 activeProjectCanvases.map((canvas) => (
                   <div className={styles.projectTreeCanvasRow} key={canvas.id}>
-                    <button
-                      className={
-                        activeCanvasId === canvas.id
-                          ? styles.projectTreeConversationActive
-                          : styles.projectTreeConversation
-                      }
-                      onClick={() => openCanvasTab(canvas.id)}
-                      type="button"
-                    >
-                      <span className={styles.projectTreeConversationTitle}>{canvas.title}</span>
-                      <span className={styles.projectTreeConversationMeta}>
-                        {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
-                      </span>
-                    </button>
-                    <div className={styles.projectTreeCanvasActions}>
+                    {renamingCanvasId === canvas.id ? (
+                      <div
+                        className={
+                          activeCanvasId === canvas.id
+                            ? styles.projectTreeConversationActive
+                            : styles.projectTreeConversation
+                        }
+                      >
+                        <input
+                          aria-label={`Rename ${canvas.title}`}
+                          className={styles.projectTreeCanvasRenameInput}
+                          onBlur={() => {
+                            void handleRenameProjectCanvas(canvas);
+                          }}
+                          onChange={(event) => setRenamingCanvasTitle(event.currentTarget.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void handleRenameProjectCanvas(canvas);
+                              return;
+                            }
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              cancelCanvasRename();
+                            }
+                          }}
+                          ref={renamingCanvasInputRef}
+                          type="text"
+                          value={renamingCanvasTitle}
+                        />
+                        <span className={styles.projectTreeConversationMeta}>
+                          {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                    ) : (
                       <button
-                        className={styles.projectTreeCanvasAction}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleRenameProjectCanvas(canvas);
+                        className={
+                          activeCanvasId === canvas.id
+                            ? styles.projectTreeConversationActive
+                            : styles.projectTreeConversation
+                        }
+                        onClick={() => openCanvasTab(canvas.id)}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setCanvasRailMenu({
+                            canvas,
+                            x: event.clientX,
+                            y: event.clientY,
+                          });
                         }}
-                        title="Rename canvas"
                         type="button"
                       >
-                        Rename
+                        <span className={styles.projectTreeConversationTitle}>{canvas.title}</span>
+                        <span className={styles.projectTreeConversationMeta}>
+                          {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
+                        </span>
                       </button>
-                      <button
-                        className={styles.projectTreeCanvasAction}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleDuplicateProjectCanvas(canvas);
-                        }}
-                        title="Duplicate canvas"
-                        type="button"
-                      >
-                        Duplicate
-                      </button>
-                      <button
-                        className={styles.projectTreeCanvasActionDanger}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void handleDeleteProjectCanvas(canvas);
-                        }}
-                        title="Delete canvas"
-                        type="button"
-                      >
-                        Delete
-                      </button>
-                    </div>
+                    )}
                   </div>
                 ))
               )}
@@ -5281,6 +5344,56 @@ export default function Home() {
           {activeTab?.type === "note" ? null : renderUnifiedDock()}
         </main>
       </div>
+      {canvasRailMenu && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className={styles.projectTreeContextOverlay}
+              onClick={() => setCanvasRailMenu(null)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setCanvasRailMenu(null);
+              }}
+              role="presentation"
+            >
+              <div
+                className={styles.projectTreeContextMenu}
+                onClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.preventDefault()}
+                role="menu"
+                style={{ left: canvasRailMenu.x, top: canvasRailMenu.y }}
+              >
+                <button
+                  className={styles.projectTreeContextItem}
+                  onClick={() => {
+                    beginCanvasRename(canvasRailMenu.canvas);
+                  }}
+                  type="button"
+                >
+                  Rename
+                </button>
+                <button
+                  className={styles.projectTreeContextItem}
+                  onClick={() => {
+                    void handleDuplicateProjectCanvas(canvasRailMenu.canvas);
+                  }}
+                  type="button"
+                >
+                  Duplicate
+                </button>
+                <button
+                  className={styles.projectTreeContextItemDanger}
+                  onClick={() => {
+                    void handleDeleteProjectCanvas(canvasRailMenu.canvas);
+                  }}
+                  type="button"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

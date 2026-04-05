@@ -359,33 +359,64 @@
   gap: 4px;
 }
 
-.projectTreeCanvasActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding-left: 10px;
+.projectTreeCanvasRenameInput {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 1px solid rgba(196, 176, 148, 0.92);
+  border-radius: 6px;
+  background: rgba(255, 253, 249, 0.96);
+  color: #2f261f;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.25;
+  outline: none;
+  padding: 4px 7px;
 }
 
-.projectTreeCanvasAction,
-.projectTreeCanvasActionDanger {
-  min-height: 22px;
-  border: 1px solid rgba(205, 189, 169, 0.58);
-  border-radius: 999px;
-  background: rgba(255, 252, 247, 0.78);
-  color: #6d5d4d;
+.projectTreeCanvasRenameInput:focus {
+  border-color: rgba(161, 126, 88, 0.9);
+  box-shadow: 0 0 0 3px rgba(194, 165, 128, 0.14);
+}
+
+.projectTreeContextOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+
+.projectTreeContextMenu {
+  position: fixed;
+  display: flex;
+  min-width: 164px;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid rgba(202, 187, 165, 0.92);
+  border-radius: 10px;
+  background: #fffdfa;
+  box-shadow: 0 10px 30px rgba(46, 35, 23, 0.14);
+  padding: 6px;
+}
+
+.projectTreeContextItem,
+.projectTreeContextItemDanger {
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #4a3f34;
   cursor: pointer;
   font: inherit;
-  font-size: 10px;
-  line-height: 1;
-  padding: 0 8px;
+  font-size: 12px;
+  padding: 0 10px;
+  text-align: left;
 }
 
-.projectTreeCanvasAction:hover,
-.projectTreeCanvasActionDanger:hover {
-  background: rgba(255, 250, 242, 0.94);
+.projectTreeContextItem:hover,
+.projectTreeContextItemDanger:hover {
+  background: rgba(248, 241, 230, 0.78);
 }
 
-.projectTreeCanvasActionDanger {
+.projectTreeContextItemDanger {
   color: #8e5d4c;
 }
 
