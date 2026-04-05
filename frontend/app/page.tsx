@@ -183,6 +183,7 @@ export default function Home() {
   const [projectCanvases, setProjectCanvases] = useState<CanvasSummary[]>([]);
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null);
   const [isProjectsSectionExpanded, setIsProjectsSectionExpanded] = useState(true);
+  const [isCanvasesSectionExpanded, setIsCanvasesSectionExpanded] = useState(true);
   const [expandedProjectPaths, setExpandedProjectPaths] = useState<Set<string>>(new Set());
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversationRepoPath, setActiveConversationRepoPath] = useState<string | null>(null);
@@ -1641,6 +1642,13 @@ export default function Home() {
           setRailWidth(Math.min(420, Math.max(240, parsedWidth)));
         }
       }
+
+      const storedCanvasesExpanded = window.localStorage.getItem("konceptura:rail:canvases-expanded");
+      if (storedCanvasesExpanded === "0") {
+        setIsCanvasesSectionExpanded(false);
+      } else if (storedCanvasesExpanded === "1") {
+        setIsCanvasesSectionExpanded(true);
+      }
     } catch {
       // Ignore localStorage failures and keep the rail usable.
     }
@@ -1650,10 +1658,11 @@ export default function Home() {
     try {
       window.localStorage.setItem("konceptura:rail:expanded", isRailExpanded ? "1" : "0");
       window.localStorage.setItem("konceptura:rail:width", `${railWidth}`);
+      window.localStorage.setItem("konceptura:rail:canvases-expanded", isCanvasesSectionExpanded ? "1" : "0");
     } catch {
       // Ignore localStorage failures and keep the rail usable.
     }
-  }, [isRailExpanded, railWidth]);
+  }, [isCanvasesSectionExpanded, isRailExpanded, railWidth]);
 
   useEffect(() => {
     explorationSuggestionStatesRef.current = explorationSuggestionStates;
@@ -5143,8 +5152,15 @@ export default function Home() {
         {activeRepoPath ? (
           <div className={styles.projectTreeSection}>
             <div className={styles.projectTreeRow}>
-              <div className={styles.projectTreeHeaderButton}>
+              <button
+                className={styles.projectTreeHeaderButton}
+                onClick={() => setIsCanvasesSectionExpanded((current) => !current)}
+                type="button"
+              >
                 <span className={styles.projectTreeLabel}>
+                  <span className={styles.projectTreeChevron}>
+                    <ChevronIcon expanded={isCanvasesSectionExpanded} />
+                  </span>
                   <span className={styles.railIcon}>
                     <svg aria-hidden="true" viewBox="0 0 16 16">
                       <path d="M3 4.5h10M3 8h10M3 11.5h10" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.2" />
@@ -5152,7 +5168,7 @@ export default function Home() {
                   </span>
                   <span>Canvases</span>
                 </span>
-              </div>
+              </button>
               <button
                 className={styles.projectTreeAddButton}
                 onClick={handleCreateProjectCanvas}
@@ -5162,74 +5178,76 @@ export default function Home() {
                 +
               </button>
             </div>
-            <div className={styles.projectTreeConversations}>
-              {activeProjectCanvases.length === 0 ? (
-                <p className={styles.railMeta}>No canvases yet.</p>
-              ) : (
-                activeProjectCanvases.map((canvas) => (
-                  <div className={styles.projectTreeCanvasRow} key={canvas.id}>
-                    {renamingCanvasId === canvas.id ? (
-                      <div
-                        className={
-                          activeCanvasId === canvas.id
-                            ? styles.projectTreeConversationActive
-                            : styles.projectTreeConversation
-                        }
-                      >
-                        <input
-                          aria-label={`Rename ${canvas.title}`}
-                          className={styles.projectTreeCanvasRenameInput}
-                          onBlur={() => {
-                            void handleRenameProjectCanvas(canvas);
-                          }}
-                          onChange={(event) => setRenamingCanvasTitle(event.currentTarget.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
+            {isCanvasesSectionExpanded ? (
+              <div className={styles.projectTreeConversations}>
+                {activeProjectCanvases.length === 0 ? (
+                  <p className={styles.railMeta}>No canvases yet.</p>
+                ) : (
+                  activeProjectCanvases.map((canvas) => (
+                    <div className={styles.projectTreeCanvasRow} key={canvas.id}>
+                      {renamingCanvasId === canvas.id ? (
+                        <div
+                          className={
+                            activeCanvasId === canvas.id
+                              ? styles.projectTreeConversationActive
+                              : styles.projectTreeConversation
+                          }
+                        >
+                          <input
+                            aria-label={`Rename ${canvas.title}`}
+                            className={styles.projectTreeCanvasRenameInput}
+                            onBlur={() => {
                               void handleRenameProjectCanvas(canvas);
-                              return;
-                            }
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              cancelCanvasRename();
-                            }
+                            }}
+                            onChange={(event) => setRenamingCanvasTitle(event.currentTarget.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void handleRenameProjectCanvas(canvas);
+                                return;
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                cancelCanvasRename();
+                              }
+                            }}
+                            ref={renamingCanvasInputRef}
+                            type="text"
+                            value={renamingCanvasTitle}
+                          />
+                          <span className={styles.projectTreeConversationMeta}>
+                            {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          className={
+                            activeCanvasId === canvas.id
+                              ? styles.projectTreeConversationActive
+                              : styles.projectTreeConversation
+                          }
+                          onClick={() => openCanvasTab(canvas.id)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            setCanvasRailMenu({
+                              canvas,
+                              x: event.clientX,
+                              y: event.clientY,
+                            });
                           }}
-                          ref={renamingCanvasInputRef}
-                          type="text"
-                          value={renamingCanvasTitle}
-                        />
-                        <span className={styles.projectTreeConversationMeta}>
-                          {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
-                        </span>
-                      </div>
-                    ) : (
-                      <button
-                        className={
-                          activeCanvasId === canvas.id
-                            ? styles.projectTreeConversationActive
-                            : styles.projectTreeConversation
-                        }
-                        onClick={() => openCanvasTab(canvas.id)}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          setCanvasRailMenu({
-                            canvas,
-                            x: event.clientX,
-                            y: event.clientY,
-                          });
-                        }}
-                        type="button"
-                      >
-                        <span className={styles.projectTreeConversationTitle}>{canvas.title}</span>
-                        <span className={styles.projectTreeConversationMeta}>
-                          {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
+                          type="button"
+                        >
+                          <span className={styles.projectTreeConversationTitle}>{canvas.title}</span>
+                          <span className={styles.projectTreeConversationMeta}>
+                            {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </>
