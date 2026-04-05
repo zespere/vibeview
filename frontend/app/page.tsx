@@ -175,6 +175,7 @@ export default function Home() {
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null);
   const [isProjectsSectionExpanded, setIsProjectsSectionExpanded] = useState(true);
   const [isCanvasesSectionExpanded, setIsCanvasesSectionExpanded] = useState(true);
+  const [isEmptyCanvasGuideDismissed, setIsEmptyCanvasGuideDismissed] = useState(false);
   const [expandedProjectPaths, setExpandedProjectPaths] = useState<Set<string>>(new Set());
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversationRepoPath, setActiveConversationRepoPath] = useState<string | null>(null);
@@ -193,7 +194,6 @@ export default function Home() {
   const [isPushing, setIsPushing] = useState(false);
   const [isPreviewingCanvasEdits, setIsPreviewingCanvasEdits] = useState(false);
   const [isApplyingCanvasEdits, setIsApplyingCanvasEdits] = useState(false);
-  const [isGeneratingCanvas, setIsGeneratingCanvas] = useState(false);
   const [commitStatus, setCommitStatus] = useState<CommitStatusResponse | null>(null);
   const [dockVisibility, setDockVisibility] = useState<DockVisibilityState>("visible");
   const [consoleVisibility, setConsoleVisibility] = useState<ConsoleVisibilityState>("collapsed");
@@ -511,12 +511,6 @@ export default function Home() {
     }
     return [...ids];
   }, [focusedCanvasNodeId, pinnedCanvasNodeIds, selectedCanvasNodeIds]);
-  const shouldShowCanvasSetup =
-    !!canvasDocument &&
-    canvasDocument.nodes.length === 0 &&
-    !!activeRepoPath &&
-    workspaceStatus?.repo_path === activeRepoPath &&
-    workspaceStatus.has_project_files;
   const isSlashCommandMode = codexPrompt.trim().startsWith("/");
   const commandQuery = isSlashCommandMode ? codexPrompt.trim().slice(1).trim() : "";
   const activeNoteMention = useMemo(
@@ -564,6 +558,17 @@ export default function Home() {
     window.setTimeout(() => {
       composerInputRef.current?.focus();
       const value = composerInputRef.current?.value ?? "/new-canvas ";
+      composerInputRef.current?.setSelectionRange(value.length, value.length);
+    }, 0);
+  }, []);
+  const seedOverviewCommand = useCallback(() => {
+    setLeaderScope(null);
+    setDockVisibility("visible");
+    setConsoleVisibility("expanded");
+    setCodexPrompt("/overview");
+    window.setTimeout(() => {
+      composerInputRef.current?.focus();
+      const value = composerInputRef.current?.value ?? "/overview";
       composerInputRef.current?.setSelectionRange(value.length, value.length);
     }, 0);
   }, []);
@@ -742,17 +747,11 @@ export default function Home() {
       },
       {
         id: "action-setup-canvas",
-        title: canvasDocument?.nodes.length ? "Regenerate canvas" : "Set up canvas",
-        subtitle: "Map the current project into canvas notes",
+        title: canvasDocument?.nodes.length ? "Regenerate overview" : "Generate overview",
+        subtitle: "Insert an explicit /overview command into the composer",
         group: "action",
-        searchText: "canvas map generate setup regenerate",
-        run: () => {
-          setCodexPrompt("");
-          setLeaderScope(null);
-          startCanvasTransition(() => {
-            void handleGenerateCanvas();
-          });
-        },
+        searchText: "canvas overview map generate setup regenerate explicit",
+        run: seedOverviewCommand,
       },
       {
         id: "action-reset-canvas",
@@ -1480,6 +1479,13 @@ export default function Home() {
       } else if (storedCanvasesExpanded === "1") {
         setIsCanvasesSectionExpanded(true);
       }
+
+      const storedEmptyCanvasGuide = window.localStorage.getItem("konceptura:canvas:empty-guide-dismissed");
+      if (storedEmptyCanvasGuide === "1") {
+        setIsEmptyCanvasGuideDismissed(true);
+      } else if (storedEmptyCanvasGuide === "0") {
+        setIsEmptyCanvasGuideDismissed(false);
+      }
     } catch {
       // Ignore localStorage failures and keep the rail usable.
     }
@@ -1490,10 +1496,11 @@ export default function Home() {
       window.localStorage.setItem("konceptura:rail:expanded", isRailExpanded ? "1" : "0");
       window.localStorage.setItem("konceptura:rail:width", `${railWidth}`);
       window.localStorage.setItem("konceptura:rail:canvases-expanded", isCanvasesSectionExpanded ? "1" : "0");
+      window.localStorage.setItem("konceptura:canvas:empty-guide-dismissed", isEmptyCanvasGuideDismissed ? "1" : "0");
     } catch {
       // Ignore localStorage failures and keep the rail usable.
     }
-  }, [isCanvasesSectionExpanded, isRailExpanded, railWidth]);
+  }, [isCanvasesSectionExpanded, isEmptyCanvasGuideDismissed, isRailExpanded, railWidth]);
 
   useEffect(() => {
     if (!canvasEditPreview) {
@@ -2157,7 +2164,6 @@ export default function Home() {
     startCanvasTransition(() => {
       void (async () => {
         try {
-          setIsGeneratingCanvas(true);
           setErrorMessage(null);
           setComposerStatus("Generating project canvas...");
           const response = await generateCanvasFromPrompt(
@@ -2175,8 +2181,6 @@ export default function Home() {
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
           setComposerStatus("Canvas generation failed.");
-        } finally {
-          setIsGeneratingCanvas(false);
         }
       })();
     });
@@ -3107,6 +3111,31 @@ export default function Home() {
       return actionCommandItems.filter((item) => item.id === "action-push");
     }
 
+    if (commandName === "overview") {
+      return [
+        {
+          id: "execute-overview",
+          title: "Generate overview",
+          subtitle:
+            !activeRepoPath || !activeCanvasId
+              ? "Open a project canvas first"
+              : "Map the current project into the active canvas",
+          disabled: !activeRepoPath || !activeCanvasId,
+          group: "execute",
+          searchText: "overview generate project canvas map",
+          run: () => {
+            if (!activeRepoPath || !activeCanvasId) {
+              return;
+            }
+            setLeaderScope(null);
+            startCanvasTransition(() => {
+              void handleGenerateCanvas();
+            });
+          },
+        },
+      ];
+    }
+
     if (commandName === "new-canvas") {
       if (!commandArgs) {
         return [
@@ -3602,29 +3631,16 @@ export default function Home() {
   }
 
   function renderCanvasView() {
+    const showBlankCanvasGuide =
+      !!canvasDocument &&
+      canvasDocument.nodes.length === 0 &&
+      !isEmptyCanvasGuideDismissed;
+
     return (
       <div className={styles.notesWorkspace}>
         <div className={styles.canvasFrame}>
           {!canvasDocument ? (
             <EmptyState message="Load or create a canvas for this repo. Double-click empty space to add a node." />
-          ) : shouldShowCanvasSetup ? (
-            <div className={styles.canvasSetupCard}>
-              <strong className={styles.resultTitle}>Do you want to set up the canvas?</strong>
-              <p className={styles.resultMeta}>
-                This project already has {workspaceStatus.visible_file_count} file
-                {workspaceStatus.visible_file_count === 1 ? "" : "s"}, but the canvas is blank.
-              </p>
-              <div className={styles.actionsRow}>
-                <button
-                  className={styles.primaryButton}
-                  disabled={isGeneratingCanvas}
-                  onClick={handleGenerateCanvas}
-                  type="button"
-                >
-                  {isGeneratingCanvas ? "Generating..." : "Set up canvas"}
-                </button>
-              </div>
-            </div>
           ) : (
             <>
               <CanvasBoard
@@ -3663,6 +3679,40 @@ export default function Home() {
                 referenceCanvases={projectCanvases.filter((canvas) => canvas.id !== activeCanvasId)}
                 selectedNodeIds={selectedCanvasNodeIds}
               />
+              {showBlankCanvasGuide ? (
+                <div className={styles.canvasEmptyGuide} role="note">
+                  <div className={styles.canvasEmptyGuideBody}>
+                    <p className={styles.canvasEmptyGuideText}>
+                      This canvas is empty. Generate an overview, start a focused canvas from the
+                      conversation, or double-click anywhere to add a note.
+                    </p>
+                    <div className={styles.canvasEmptyGuideCommands}>
+                      <button
+                        className={styles.canvasEmptyGuideCommand}
+                        onClick={seedOverviewCommand}
+                        type="button"
+                      >
+                        /overview
+                      </button>
+                      <button
+                        className={styles.canvasEmptyGuideCommand}
+                        onClick={seedNewCanvasPrompt}
+                        type="button"
+                      >
+                        /new-canvas
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    className={styles.canvasEmptyGuideDismiss}
+                    onClick={() => setIsEmptyCanvasGuideDismissed(true)}
+                    type="button"
+                    aria-label="Dismiss empty canvas tip"
+                  >
+                    Hide tip
+                  </button>
+                </div>
+              ) : null}
               {renderCanvasEditReview()}
             </>
           )}
