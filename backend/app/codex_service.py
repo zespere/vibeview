@@ -617,12 +617,15 @@ class CodexService:
                     after_node.linked_files = [path.strip() for path in patch.linked_files if path.strip()]
                 if patch.linked_symbols is not None:
                     after_node.linked_symbols = [symbol.strip() for symbol in patch.linked_symbols if symbol.strip()]
+                if "linked_canvas_id" in patch.model_fields_set:
+                    after_node.linked_canvas_id = patch.linked_canvas_id
                 if (
                     after_node.title == before_node.title
                     and after_node.description == before_node.description
                     and after_node.tags == before_node.tags
                     and after_node.linked_files == before_node.linked_files
                     and after_node.linked_symbols == before_node.linked_symbols
+                    and after_node.linked_canvas_id == before_node.linked_canvas_id
                 ):
                     continue
                 changes.append(
@@ -670,6 +673,7 @@ class CodexService:
                         for symbol in after_payload.get("linked_symbols", [])
                         if str(symbol).strip()
                     ],
+                    linked_canvas_id=str(after_payload.get("linked_canvas_id") or "").strip() or None,
                 )
                 anchor_node_id = str(item.get("anchor_node_id") or "").strip() or None
                 changes.append(
@@ -1044,6 +1048,7 @@ class CodexService:
                 y=0,
                 linked_files=primary_node.linked_files,
                 linked_symbols=primary_node.linked_symbols,
+                linked_canvas_id=None,
             )
             updated_node = primary_node.model_copy(deep=True)
             updated_node.description = (
@@ -1151,6 +1156,7 @@ class CodexService:
                 y=0,
                 linked_files=primary_node.linked_files,
                 linked_symbols=primary_node.linked_symbols,
+                linked_canvas_id=None,
             )
             create_change_id = f"fallback_create_node_{primary_node.id}"
             changes.extend(

@@ -2951,8 +2951,28 @@ export default function Home() {
     setComposerStatus("Cleared pinned context.");
   }
 
+  const openCanvasTab = useCallback((canvasId: string, options?: { activate?: boolean }) => {
+    const tabId = `canvas:${canvasId}` as const;
+    setOpenTabs((current) =>
+      current.some((tab) => tab.id === tabId) ? current : [...current, { id: tabId, type: "canvas", canvasId }],
+    );
+    if (options?.activate !== false) {
+      setActiveTabId(tabId);
+    }
+  }, []);
+
   const openCanvasNode = useCallback((nodeId: string, options?: { focusTitle?: boolean; activate?: boolean }) => {
     if (!activeCanvasId) {
+      return;
+    }
+    const node = canvasDocument?.nodes.find((item) => item.id === nodeId) ?? null;
+    if (node?.linked_canvas_id) {
+      const linkedCanvasExists = projectCanvases.some((canvas) => canvas.id === node.linked_canvas_id);
+      if (!linkedCanvasExists) {
+        setErrorMessage(`Linked canvas for "${node.title}" no longer exists.`);
+        return;
+      }
+      openCanvasTab(node.linked_canvas_id, { activate: options?.activate });
       return;
     }
     const tabId = `note:${activeCanvasId}:${nodeId}` as const;
@@ -2968,9 +2988,14 @@ export default function Home() {
     if (options?.focusTitle) {
       setRequestedTitleFocusNodeId(nodeId);
     }
-  }, [activeCanvasId]);
+  }, [activeCanvasId, canvasDocument, openCanvasTab, projectCanvases]);
 
   function handleRenameCanvasNode(nodeId: string) {
+    const node = canvasDocument?.nodes.find((item) => item.id === nodeId) ?? null;
+    if (node?.linked_canvas_id) {
+      setComposerStatus(`"${node.title}" is a canvas reference. Rename it from the canvas details instead.`);
+      return;
+    }
     openCanvasNode(nodeId, { focusTitle: true });
   }
 
@@ -3001,16 +3026,6 @@ export default function Home() {
       return next;
     });
   }
-
-  const openCanvasTab = useCallback((canvasId: string, options?: { activate?: boolean }) => {
-    const tabId = `canvas:${canvasId}` as const;
-    setOpenTabs((current) =>
-      current.some((tab) => tab.id === tabId) ? current : [...current, { id: tabId, type: "canvas", canvasId }],
-    );
-    if (options?.activate !== false) {
-      setActiveTabId(tabId);
-    }
-  }, []);
 
   function handleSelectCanvasNodes(nodeIds: string[]) {
     const normalized = [...nodeIds].sort();
@@ -3488,6 +3503,7 @@ export default function Home() {
             y,
             linked_files: [],
             linked_symbols: [],
+            linked_canvas_id: null,
           });
           setCanvasDocument(response.document);
           const createdNode = response.document.nodes.at(-1) ?? null;
@@ -3517,6 +3533,43 @@ export default function Home() {
     });
   }
 
+  async function handleInsertCanvasReferenceNode(targetCanvas: CanvasSummary) {
+    if (!activeRepoPath || !activeCanvasId || activeCanvasId === targetCanvas.id) {
+      return;
+    }
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          const anchorNode =
+            (selectedCanvasNodeIds.length > 0
+              ? canvasDocument?.nodes.find((node) => node.id === selectedCanvasNodeIds[0]) ?? null
+              : null) ??
+            canvasDocument?.nodes.at(-1) ??
+            null;
+          const x = anchorNode ? anchorNode.x + 320 : 96;
+          const y = anchorNode ? anchorNode.y : 96;
+          const response = await createCanvasNode({
+            repo_path: activeRepoPath,
+            canvas_id: activeCanvasId,
+            title: targetCanvas.title,
+            description: `Open the ${targetCanvas.title} canvas to continue work in its own focused space.`,
+            tags: ["canvas-ref"],
+            x,
+            y,
+            linked_files: [],
+            linked_symbols: [],
+            linked_canvas_id: targetCanvas.id,
+          });
+          setCanvasDocument(response.document);
+          setComposerStatus(`Inserted canvas reference to ${targetCanvas.title}.`);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
   async function handleSaveCanvasNode() {
     if (!editableCanvasNode || !activeRepoPath) {
       return;
@@ -3535,6 +3588,7 @@ export default function Home() {
             y: editableCanvasNode.y,
             linked_files: parseLineList(canvasDraftFiles),
             linked_symbols: parseLineList(canvasDraftSymbols),
+            linked_canvas_id: editableCanvasNode.linked_canvas_id,
           });
           setCanvasDocument(response.document);
         } catch (error) {
@@ -3651,6 +3705,7 @@ export default function Home() {
                 <div className={styles.noteMetaBar}>
                   <span>{node.linked_files.length} linked files</span>
                   <span>{node.linked_symbols.length} linked symbols</span>
+                  {node.linked_canvas_id ? <span>linked canvas</span> : null}
                   <span>{noteOutgoingEdges.length} outgoing</span>
                   <span>{noteIncomingEdges.length} incoming</span>
                 </div>
@@ -3686,6 +3741,19 @@ export default function Home() {
                     value={canvasDraftTags}
                   />
                 </div>
+
+                {node.linked_canvas_id ? (
+                  <div className={styles.noteSidebarSection}>
+                    <span className={styles.fieldLabel}>Linked canvas</span>
+                    <button
+                      className={styles.noteSidebarLinkButton}
+                      onClick={() => openCanvasTab(node.linked_canvas_id as string)}
+                      type="button"
+                    >
+                      {projectCanvases.find((canvas) => canvas.id === node.linked_canvas_id)?.title ?? "Open linked canvas"}
+                    </button>
+                  </div>
+                ) : null}
 
                 <div className={styles.noteSidebarSection}>
                   <span className={styles.fieldLabel}>Linked files</span>
@@ -4789,6 +4857,18 @@ export default function Home() {
                 >
                   Duplicate
                 </button>
+                {activeCanvasId && activeCanvasId !== canvasRailMenu.canvas.id ? (
+                  <button
+                    className={styles.projectTreeContextItem}
+                    onClick={() => {
+                      void handleInsertCanvasReferenceNode(canvasRailMenu.canvas);
+                      setCanvasRailMenu(null);
+                    }}
+                    type="button"
+                  >
+                    Insert reference in current canvas
+                  </button>
+                ) : null}
                 <button
                   className={styles.projectTreeContextItemDanger}
                   onClick={() => {
@@ -5164,6 +5244,7 @@ function areCanvasNodesEqual(left: CanvasNode[], right: CanvasNode[]) {
         node.description === other.description &&
         node.x === other.x &&
         node.y === other.y &&
+        node.linked_canvas_id === other.linked_canvas_id &&
         areStringArraysEqual(node.tags, other.tags) &&
         areStringArraysEqual(node.linked_files, other.linked_files) &&
         areStringArraysEqual(node.linked_symbols, other.linked_symbols)
@@ -5299,11 +5380,13 @@ function buildSelectedNoteContext(document: CanvasDocument | null, focusNodeIds:
       const tags = node.tags.length > 0 ? node.tags.join(", ") : "untagged";
       const files = node.linked_files.length > 0 ? node.linked_files.join(", ") : "none";
       const symbols = node.linked_symbols.length > 0 ? node.linked_symbols.join(", ") : "none";
+      const linkedCanvas = node.linked_canvas_id ? node.linked_canvas_id : "none";
       return [
         `Note: ${node.title}`,
         `Tags: ${tags}`,
         `Files: ${files}`,
         `Symbols: ${symbols}`,
+        `Linked canvas: ${linkedCanvas}`,
         `Summary: ${summarizeNote(node.description)}`,
       ].join("\n");
     })
@@ -5432,6 +5515,9 @@ function getChangedCanvasFields(beforeNode: CanvasNode | null | undefined, after
   }
   if (beforeNode.linked_symbols.join("\n") !== afterNode.linked_symbols.join("\n")) {
     fields.push("symbols");
+  }
+  if ((beforeNode.linked_canvas_id ?? "") !== (afterNode.linked_canvas_id ?? "")) {
+    fields.push("linked canvas");
   }
   return fields;
 }

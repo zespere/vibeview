@@ -413,6 +413,7 @@ class CanvasNode(BaseModel):
     y: int
     linked_files: list[str] = Field(default_factory=list)
     linked_symbols: list[str] = Field(default_factory=list)
+    linked_canvas_id: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -545,6 +546,7 @@ class CanvasNodeCreateRequest(BaseModel):
     y: int = 80
     linked_files: list[str] = Field(default_factory=list)
     linked_symbols: list[str] = Field(default_factory=list)
+    linked_canvas_id: str | None = None
 
 
 class CanvasNodeUpdateRequest(BaseModel):
@@ -555,6 +557,7 @@ class CanvasNodeUpdateRequest(BaseModel):
     y: int | None = None
     linked_files: list[str] | None = None
     linked_symbols: list[str] | None = None
+    linked_canvas_id: str | None = None
 
 
 class CanvasEdgeCreateRequest(BaseModel):
@@ -634,6 +637,7 @@ class CanvasEditPatch(BaseModel):
     tags: list[str] | None = None
     linked_files: list[str] | None = None
     linked_symbols: list[str] | None = None
+    linked_canvas_id: str | None = None
 
 
 class CanvasEditChangeRecord(BaseModel):

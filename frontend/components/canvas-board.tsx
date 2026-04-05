@@ -507,6 +507,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
   const isMinimal = detailLevel === "minimal";
   const isCompact = detailLevel === "compact";
   const isSuggestion = node.tags.includes("suggestion");
+  const isCanvasReference = !!node.linked_canvas_id;
   const nodeClassName = selected
     ? `${styles.canvasNodeActive} ${isSuggestion ? styles.canvasNodeSuggestionActive : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim()
     : `${styles.canvasNode} ${isSuggestion ? styles.canvasNodeSuggestion : ""} ${isExpanded ? styles.canvasNodeExpanded : ""} ${isMinimal ? styles.canvasNodeMinimal : isCompact ? styles.canvasNodeCompact : ""}`.trim();
@@ -612,6 +613,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
               <div className={styles.canvasNodeMetaExpanded}>
                 <span>{node.linked_files.length} files</span>
                 <span>{node.linked_symbols.length} symbols</span>
+                {isCanvasReference ? <span>linked canvas</span> : null}
               </div>
               {node.linked_files.length > 0 ? (
                 <ul className={styles.canvasNodeList}>
@@ -627,6 +629,7 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
               <div className={styles.canvasNodeMeta}>
                 <span>{node.linked_files.length} files</span>
                 <span>{node.linked_symbols.length} symbols</span>
+                {isCanvasReference ? <span>linked canvas</span> : null}
               </div>
             </>
           ) : null}
@@ -641,7 +644,8 @@ function canOpenCanvasNodeInTab(document: CanvasDocument | null, nodeId: string)
 }
 
 function canRenameCanvasNode(document: CanvasDocument | null, nodeId: string) {
-  return canOpenCanvasNodeInTab(document, nodeId);
+  const node = document?.nodes.find((item) => item.id === nodeId) ?? null;
+  return !!node && !node.linked_canvas_id;
 }
 
 function compactDescription(value: string) {
@@ -665,6 +669,7 @@ function areFlowNodesEquivalent(left: Array<Node<NoteNodeData>>, right: Array<No
         node.data.node.id === other.data.node.id &&
         node.data.node.title === other.data.node.title &&
         node.data.node.description === other.data.node.description &&
+        node.data.node.linked_canvas_id === other.data.node.linked_canvas_id &&
         node.data.detailLevel === other.data.detailLevel &&
         node.data.isExpanded === other.data.isExpanded
       );

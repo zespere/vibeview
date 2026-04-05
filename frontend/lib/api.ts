@@ -175,6 +175,7 @@ export interface CanvasNode {
   y: number;
   linked_files: string[];
   linked_symbols: string[];
+  linked_canvas_id: string | null;
 }
 
 export interface CanvasEdge {
@@ -737,6 +738,7 @@ export function createCanvasNode(payload: {
   y: number;
   linked_files?: string[];
   linked_symbols?: string[];
+  linked_canvas_id?: string | null;
 }) {
   return apiRequest<CanvasResponse>("/canvas/nodes", {
     method: "POST",
@@ -756,6 +758,7 @@ export function updateCanvasNode(
     y: number;
     linked_files: string[];
     linked_symbols: string[];
+    linked_canvas_id: string | null;
   }>,
 ) {
   const params = new URLSearchParams({ repo_path: repoPath });

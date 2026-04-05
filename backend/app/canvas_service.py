@@ -265,6 +265,7 @@ class CanvasService:
             y=request.y,
             linked_files=request.linked_files,
             linked_symbols=request.linked_symbols,
+            linked_canvas_id=request.linked_canvas_id,
         )
         document.nodes.append(node)
         logger.info("Created canvas node %s", node.id)
@@ -422,6 +423,7 @@ class CanvasService:
                 y=y,
                 linked_files=generated.linked_files,
                 linked_symbols=generated.linked_symbols,
+                linked_canvas_id=None,
             )
             document.nodes.append(node)
             title_to_id[normalized_title] = node.id
@@ -550,6 +552,7 @@ class CanvasService:
                 y=next_y,
                 linked_files=[item.strip() for item in draft_node.linked_files if item.strip()],
                 linked_symbols=[item.strip() for item in draft_node.linked_symbols if item.strip()],
+                linked_canvas_id=draft_node.linked_canvas_id,
             )
             document.nodes.append(created_node)
             existing_nodes[created_node.id] = created_node
@@ -576,6 +579,7 @@ class CanvasService:
             node.tags = _normalize_tags(change.after_node.tags)
             node.linked_files = [item.strip() for item in change.after_node.linked_files if item.strip()]
             node.linked_symbols = [item.strip() for item in change.after_node.linked_symbols if item.strip()]
+            node.linked_canvas_id = change.after_node.linked_canvas_id
             existing_titles[normalized_next_title] = node.id
             if change.id not in applied_change_ids:
                 applied_change_ids.append(change.id)
@@ -730,6 +734,7 @@ class CanvasService:
                 previous.tags != current.tags,
                 previous.linked_files != current.linked_files,
                 previous.linked_symbols != current.linked_symbols,
+                previous.linked_canvas_id != current.linked_canvas_id,
             ]
         )
 

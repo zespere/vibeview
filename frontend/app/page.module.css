@@ -2484,6 +2484,32 @@
   outline: none;
 }
 
+.noteSidebarLinkButton {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d7c8b6;
+  border-radius: 9px;
+  background: #fffaf3;
+  color: #5d4021;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.noteSidebarLinkButton:hover {
+  background: #fff7ee;
+  border-color: #c8b39a;
+}
+
+.noteSidebarLinkButton:focus-visible {
+  outline: 2px solid #dcc7ae;
+  outline-offset: 2px;
+}
+
 .noteRelationshipList {
   display: flex;
   flex-direction: column;
