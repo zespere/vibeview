@@ -62,16 +62,10 @@ import {
   type ProjectRunStreamEvent,
 } from "@/lib/api";
 
-type WorkspaceView = "project";
 type OpenTab =
-  | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
   | { id: `canvas:${string}`; type: "canvas"; canvasId: string }
   | { id: `note:${string}:${string}`; type: "note"; nodeId: string; canvasId: string }
   | { id: `explore:${string}:${string}`; type: "exploration"; explorationId: string; canvasId: string };
-
-const RAIL_VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
-  { id: "project", label: "Project" },
-];
 
 interface CommandResultItem {
   id: string;
@@ -90,7 +84,6 @@ type LeaderScope =
   | "canvases"
   | "notes"
   | "conversations"
-  | "views"
   | "models"
   | "reasoning"
   | "actions"
@@ -178,10 +171,8 @@ export default function Home() {
   const [isRailResizing, setIsRailResizing] = useState(false);
   const [railResizeStartX, setRailResizeStartX] = useState<number | null>(null);
   const [railResizeStartWidth, setRailResizeStartWidth] = useState<number | null>(null);
-  const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { id: "view:project", type: "view", view: "project", preview: false },
-  ]);
-  const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:project");
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<OpenTab["id"] | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [project, setProject] = useState<ProjectProfile | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState<ProjectWorkspaceStatusResponse | null>(null);
@@ -267,7 +258,7 @@ export default function Home() {
   const composerImageAttachmentsRef = useRef<ComposerImageAttachment[]>([]);
 
   const [, startStatusTransition] = useTransition();
-  const [projectPending, startProjectTransition] = useTransition();
+  const [, startProjectTransition] = useTransition();
   const [codexPending, startCodexTransition] = useTransition();
   const [, startCanvasTransition] = useTransition();
 
@@ -281,7 +272,6 @@ export default function Home() {
     [activeTabId, openTabs],
   );
 
-  const activeView = activeTab?.type === "view" ? activeTab.view : null;
   const activeNoteTabId = activeTab?.type === "note" ? activeTab.nodeId : null;
   const activeNoteTabNode = useMemo(
     () => (activeNoteTabId ? canvasDocument?.nodes.find((item) => item.id === activeNoteTabId) ?? null : null),
@@ -438,14 +428,9 @@ export default function Home() {
       setConsoleVisibility("collapsed");
       return;
     }
-    if (activeView === "project") {
-      setDockVisibility("hidden");
-      setConsoleVisibility("collapsed");
-      return;
-    }
     setDockVisibility("visible");
     setConsoleVisibility("collapsed");
-  }, [activeTab?.type, activeView]);
+  }, [activeTab?.type]);
 
   const openCanvasNodes = useMemo(() => {
     if (!canvasDocument) {
@@ -581,22 +566,6 @@ export default function Home() {
         },
       })),
     [composerReasoning],
-  );
-  const viewCommandItems = useMemo(
-    () =>
-      (["project"] as WorkspaceView[]).map<CommandResultItem>((view) => ({
-        id: `view:${view}`,
-        title: viewLabel(view),
-        subtitle: "workspace view",
-        group: "navigate",
-        searchText: [viewLabel(view), view, "view"].join(" ").toLowerCase(),
-        run: () => {
-          setCodexPrompt("");
-          setLeaderScope(null);
-          openViewTab(view);
-        },
-      })),
-    [],
   );
   const canvasCommandItems = useMemo(
     () =>
@@ -891,8 +860,6 @@ export default function Home() {
         return noteCommandItems.slice(0, 10);
       case "conversations":
         return conversationCommandItems.slice(0, 10);
-      case "views":
-        return viewCommandItems.slice(0, 10);
       case "models":
         return modelCommandItems.slice(0, 10);
       case "reasoning":
@@ -913,7 +880,6 @@ export default function Home() {
     noteCommandItems,
     projectCommandItems,
     reasoningCommandItems,
-    viewCommandItems,
   ]);
   const notesExplorationPresentation = useMemo(
     () =>
@@ -1298,7 +1264,7 @@ export default function Home() {
       }
       return [...current, { id: `canvas:${projectCanvases[0].id}`, type: "canvas", canvasId: projectCanvases[0].id }];
     });
-    setActiveTabId((current) => (current === "view:project" ? `canvas:${projectCanvases[0].id}` : current));
+    setActiveTabId((current) => current ?? `canvas:${projectCanvases[0].id}`);
   }, [activeRepoPath, openTabs, projectCanvases]);
 
   useEffect(() => {
@@ -1902,7 +1868,6 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     activeTab,
-    activeView,
     canvasDocument,
     codexPrompt,
     commandSelectedIndex,
@@ -1969,9 +1934,6 @@ export default function Home() {
     });
     setOpenTabs((current) => {
       const next = current.filter((tab) => {
-        if (tab.type === "view") {
-          return true;
-        }
         if (tab.type === "note") {
           return validNodeIds.has(tab.nodeId);
         }
@@ -2827,13 +2789,12 @@ export default function Home() {
         setNotesExploration(null);
         setExplorationTabs({});
         setOpenCanvasNodeIds([]);
-        setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-        setActiveTabId("view:project");
+        setOpenTabs([]);
+        setActiveTabId(null);
         setActiveCanvasId(null);
         setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
       }
       setRepoPath(normalizedRepoPath);
-      openViewTab("project");
       if (conversation) {
         await loadConversation(normalizedRepoPath, conversation);
       } else {
@@ -2848,43 +2809,6 @@ export default function Home() {
     }
   }
   openProjectConversationRef.current = openProjectConversation;
-
-  async function handleSaveProject() {
-    startProjectTransition(() => {
-      void (async () => {
-        try {
-          setErrorMessage(null);
-          const response = await updateProject({
-            repo_path: repoPath.trim(),
-            name: "",
-            recent_projects: [],
-          });
-          setProject(response.project);
-          void refreshProjectsTree();
-          setWorkspaceStatus(null);
-          setCanvasDocument(null);
-          setSelectedCanvasNodeId(null);
-          setSelectedCanvasNodeIds([]);
-          setNotesExploration(null);
-          setExplorationTabs({});
-          setOpenCanvasNodeIds([]);
-          setCanvasEditPreview(null);
-          setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-          setActiveTabId("view:project");
-          setActiveCanvasId(null);
-          setActiveConversationId(null);
-          setActiveConversationRepoPath(response.project.repo_path || null);
-          setConsoleMessages([]);
-          openViewTab("project");
-          if (response.project.repo_path) {
-            expectedRepoPathRef.current = response.project.repo_path;
-          }
-        } catch (error) {
-          setErrorMessage(getErrorMessage(error));
-        }
-      })();
-    });
-  }
 
   async function handlePickProjectFolder() {
     startProjectTransition(() => {
@@ -2912,13 +2836,12 @@ export default function Home() {
           setExplorationTabs({});
           setOpenCanvasNodeIds([]);
           setCanvasEditPreview(null);
-          setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-          setActiveTabId("view:project");
+          setOpenTabs([]);
+          setActiveTabId(null);
           setActiveCanvasId(null);
           setActiveConversationId(null);
           setActiveConversationRepoPath(projectResponse.project.repo_path || null);
           setConsoleMessages([]);
-          openViewTab("project");
           if (projectResponse.project.repo_path) {
             expectedRepoPathRef.current = projectResponse.project.repo_path;
           }
@@ -2946,8 +2869,8 @@ export default function Home() {
           setExplorationTabs({});
           setOpenCanvasNodeIds([]);
           setCanvasEditPreview(null);
-          setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-          setActiveTabId("view:project");
+          setOpenTabs([]);
+          setActiveTabId(null);
           setComposerStatus("Canvas reset.");
           await Promise.all([
             refreshCanvas(targetRepoPath),
@@ -3395,34 +3318,10 @@ export default function Home() {
         (item) => !(item.type === "note" && item.canvasId === canvasId && item.nodeId === nodeId),
       );
       if (activeTab?.type === "note" && activeTab.canvasId === canvasId && activeTab.nodeId === nodeId) {
-        setActiveTabId(next.at(-1)?.id ?? "view:project");
+        setActiveTabId(next.at(-1)?.id ?? null);
       }
       return next;
     });
-  }
-
-  function openViewTab(view: WorkspaceView) {
-    const id = `view:${view}` as const;
-    setOpenTabs((current) => {
-      const existingTab = current.find((tab) => tab.id === id);
-      if (existingTab) {
-        return current;
-      }
-
-      const previewIndex = current.findIndex(
-        (tab) => tab.type === "view" && tab.view !== "project" && tab.preview,
-      );
-      const nextTab: OpenTab = { id, type: "view", view, preview: true };
-
-      if (previewIndex === -1) {
-        return [...current, nextTab];
-      }
-
-      const next = [...current];
-      next[previewIndex] = nextTab;
-      return next;
-    });
-    setActiveTabId(id);
   }
 
   const openCanvasTab = useCallback((canvasId: string, options?: { activate?: boolean }) => {
@@ -3600,7 +3499,6 @@ export default function Home() {
       ...noteCommandItems,
       ...projectCommandItems,
       ...conversationCommandItems,
-      ...viewCommandItems,
     ]
       .filter((item) => {
         if (!query) {
@@ -3815,21 +3713,7 @@ export default function Home() {
     setComposerCaretIndex(event.currentTarget.selectionStart ?? 0);
   }
 
-  function pinPreviewTab(tabId: OpenTab["id"]) {
-    setOpenTabs((current) =>
-      current.map((tab) => {
-        if (tab.id !== tabId || tab.type !== "view" || !tab.preview) {
-          return tab;
-        }
-        return { ...tab, preview: false };
-      }),
-    );
-  }
-
   function handleSelectTab(tab: OpenTab) {
-    if (tab.type === "view" && tab.preview && activeTabId === tab.id) {
-      pinPreviewTab(tab.id);
-    }
     if (tab.type === "canvas") {
       setActiveCanvasId((current) => (current === tab.canvasId ? current : tab.canvasId));
     }
@@ -3853,9 +3737,6 @@ export default function Home() {
   }
 
   function closeTab(tabId: OpenTab["id"]) {
-    if (tabId === "view:project") {
-      return;
-    }
     const tab = openTabs.find((item) => item.id === tabId);
     if (!tab) {
       return;
@@ -3874,7 +3755,7 @@ export default function Home() {
     setOpenTabs((current) => {
       const next = current.filter((item) => item.id !== tabId);
       if (activeTabId === tabId) {
-        setActiveTabId(next.at(-1)?.id ?? "view:project");
+        setActiveTabId(next.at(-1)?.id ?? null);
       }
       return next;
     });
@@ -4448,137 +4329,6 @@ export default function Home() {
     );
   }
 
-  function renderProjectView() {
-    const isGitReady = !!commitStatus?.is_git_repo;
-    const projectFileSummary = workspaceStatus
-      ? workspaceStatus.has_project_files
-        ? `${workspaceStatus.visible_file_count} visible file${workspaceStatus.visible_file_count === 1 ? "" : "s"}`
-        : "No visible project files yet"
-      : "Checking workspace…";
-    const canvasSummary = canvasDocument?.nodes.length
-      ? `${canvasDocument.nodes.length} canvas note${canvasDocument.nodes.length === 1 ? "" : "s"}`
-      : "Canvas not set up";
-    const branchSummary = isGitReady
-      ? commitStatus?.branch_name ?? "Detached HEAD"
-      : "Not a git repository";
-    const syncSummary = !isGitReady
-      ? "Git unavailable"
-      : !commitStatus?.upstream_name
-        ? "No upstream"
-        : commitStatus.ahead_count > 0 || commitStatus.behind_count > 0
-          ? `${commitStatus.ahead_count} ahead · ${commitStatus.behind_count} behind`
-          : "In sync";
-
-    return (
-      <div className={styles.setupShell}>
-        <div className={styles.setupPanel}>
-          <div className={styles.setupHeader}>
-            <strong className={styles.setupTitle}>Project</strong>
-          </div>
-          <div className={styles.projectPanel}>
-            <div className={styles.projectSection}>
-              <label className={styles.field}>
-                <span className={styles.fieldLabel}>Repository path</span>
-                <select
-                  className={styles.input}
-                  onChange={(event) => setRepoPath(event.target.value)}
-                  value={repoPath}
-                >
-                  {repoPath ? (
-                    <option value={repoPath}>
-                      {PathLabel(repoPath)}
-                    </option>
-                  ) : (
-                    <option value="">Select a project</option>
-                  )}
-                  {[...(project?.recent_projects ?? [])]
-                    .filter((path) => path && path !== repoPath)
-                    .map((path) => (
-                      <option key={path} value={path}>
-                        {PathLabel(path)}
-                      </option>
-                    ))}
-                </select>
-              </label>
-
-              <div className={styles.actionsRow}>
-                <button className={styles.primaryButton} disabled={projectPending || !repoPath} onClick={handleSaveProject} type="button">
-                  {projectPending ? "Saving..." : "Open project"}
-                </button>
-                <button
-                  className={styles.secondaryButton}
-                  disabled={projectPending}
-                  onClick={handlePickProjectFolder}
-                  type="button"
-                >
-                  Choose folder
-                </button>
-                <button
-                  className={styles.secondaryButton}
-                  disabled={!activeRepoPath || isGeneratingCanvas}
-                  onClick={handleGenerateCanvas}
-                  type="button"
-                >
-                  {isGeneratingCanvas
-                    ? "Generating..."
-                    : canvasDocument?.nodes.length
-                      ? "Regenerate canvas"
-                      : "Set up canvas"}
-                </button>
-                <button className={styles.secondaryButton} disabled={!activeRepoPath} onClick={handleResetCanvas} type="button">
-                  Reset canvas
-                </button>
-              </div>
-            </div>
-            <div className={styles.projectSummaryGrid}>
-              <div className={styles.projectSummaryCard}>
-                <span className={styles.projectSummaryLabel}>Workspace</span>
-                <strong className={styles.projectSummaryValue}>{projectFileSummary}</strong>
-                <span className={styles.projectSummaryMeta}>{canvasSummary}</span>
-              </div>
-              <div className={styles.projectSummaryCard}>
-                <span className={styles.projectSummaryLabel}>Branch</span>
-                <strong className={styles.projectSummaryValue}>{branchSummary}</strong>
-                <span className={styles.projectSummaryMeta}>{syncSummary}</span>
-              </div>
-            </div>
-
-            <div className={styles.projectGitSection}>
-              <div className={styles.projectGitHeader}>
-                <strong className={styles.projectGitTitle}>Git</strong>
-                <span className={styles.projectGitMeta}>
-                  {!isGitReady
-                    ? "Unavailable"
-                    : commitStatus?.has_changes
-                      ? `${commitStatus.changed_files.length} changed file${commitStatus.changed_files.length === 1 ? "" : "s"}`
-                      : "Working tree clean"}
-                </span>
-              </div>
-              <div className={styles.projectGitActions}>
-                <button
-                  className={styles.commitButton}
-                  disabled={isCommitting || isPushing || !commitStatus?.has_changes}
-                  onClick={handleCommitClick}
-                  type="button"
-                >
-                  Commit
-                </button>
-                <button
-                  className={styles.commitButton}
-                  disabled={isPushing || isCommitting || !commitStatus?.can_push}
-                  onClick={handlePushClick}
-                  type="button"
-                >
-                  Push
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function renderUnifiedDock(mode: "floating" | "embedded" = "floating") {
     const selectedCommandResult =
       composerResults[Math.min(commandSelectedIndex, Math.max(composerResults.length - 1, 0))] ?? null;
@@ -4647,7 +4397,7 @@ export default function Home() {
               {isSlashCommandMode ? (
                 <div className={styles.commandResults}>
                   {composerResults.length === 0 ? (
-                    <p className={styles.helperText}>Type a slash command, or search notes, projects, conversations, and views with `/`.</p>
+                    <p className={styles.helperText}>Type a slash command, or search notes, projects, conversations, and canvases with `/`.</p>
                   ) : (
                     composerResults.map((item, index) => (
                       <button
@@ -5120,21 +4870,31 @@ export default function Home() {
     return (
       <>
         <div className={styles.projectTreeSection}>
-          <button
-            className={styles.projectTreeHeaderButton}
-            onClick={() => setIsProjectsSectionExpanded((current) => !current)}
-            type="button"
-          >
-            <span className={styles.projectTreeLabel}>
-              <span className={styles.projectTreeChevron}>
-                <ChevronIcon expanded={isProjectsSectionExpanded} />
+          <div className={styles.projectTreeRow}>
+            <button
+              className={styles.projectTreeHeaderButton}
+              onClick={() => setIsProjectsSectionExpanded((current) => !current)}
+              type="button"
+            >
+              <span className={styles.projectTreeLabel}>
+                <span className={styles.projectTreeChevron}>
+                  <ChevronIcon expanded={isProjectsSectionExpanded} />
+                </span>
+                <span className={styles.railIcon}>
+                  <FolderIcon />
+                </span>
+                {isRailExpanded ? <span>Projects</span> : null}
               </span>
-              <span className={styles.railIcon}>
-                <FolderIcon />
-              </span>
-              {isRailExpanded ? <span>Projects</span> : null}
-            </span>
-          </button>
+            </button>
+            <button
+              className={styles.projectTreeAddButton}
+              onClick={handlePickProjectFolder}
+              title="Add project"
+              type="button"
+            >
+              +
+            </button>
+          </div>
 
           {isRailExpanded && isProjectsSectionExpanded ? (
             <div className={styles.projectTreeList}>
@@ -5238,7 +4998,7 @@ export default function Home() {
                 activeProjectCanvases.map((canvas) => (
                   <button
                     className={
-                      activeCanvasId === canvas.id && activeTab?.type !== "view"
+                      activeCanvasId === canvas.id
                         ? styles.projectTreeConversationActive
                         : styles.projectTreeConversation
                     }
@@ -5261,8 +5021,8 @@ export default function Home() {
   }
 
   function renderActiveView() {
-    if (!repoPath.trim()) {
-      return renderProjectView();
+    if (!activeRepoPath) {
+      return <EmptyState message="Select a project from the left rail to start." />;
     }
 
     if (activeTab?.type === "note") {
@@ -5283,13 +5043,10 @@ export default function Home() {
       }
       return renderCanvasView();
     }
-
-    switch (activeView) {
-      case "project":
-        return renderProjectView();
-      default:
-        return null;
+    if (activeRepoPath && projectCanvases.length === 0) {
+      return <EmptyState message="No canvases yet. Create one from the Canvases section in the left rail." />;
     }
+    return <EmptyState message="Open a canvas from the left rail." />;
   }
 
   return (
@@ -5297,19 +5054,6 @@ export default function Home() {
       <div className={isRailExpanded ? styles.shellExpanded : styles.shell}>
         <aside className={isRailExpanded ? styles.leftRailExpanded : styles.leftRail} style={{ width: currentRailWidth }}>
           <nav className={styles.railNav}>
-            {RAIL_VIEW_ITEMS.map((item) => (
-              <button
-                className={activeView === item.id ? styles.railButtonActive : styles.railButton}
-                key={item.id}
-                onClick={() => openViewTab(item.id)}
-                type="button"
-                title={!isRailExpanded ? item.label : undefined}
-              >
-                <span className={styles.railIcon}><ViewIcon view={item.id} /></span>
-                {isRailExpanded ? <span className={styles.railLabel}>{item.label}</span> : null}
-              </button>
-            ))}
-            <div className={styles.railSectionDivider} />
             {renderProjectsTree()}
           </nav>
 
@@ -5351,23 +5095,19 @@ export default function Home() {
             {openTabs.map((tab) => (
               <div className={activeTabId === tab.id ? styles.documentTabActive : styles.documentTab} key={tab.id}>
                 <button
-                  className={tab.type === "view" && tab.preview ? styles.documentTabButtonPreview : styles.documentTabButton}
+                  className={styles.documentTabButton}
                   onClick={() => handleSelectTab(tab)}
                   type="button"
                 >
-                  {tab.type === "view"
-                    ? viewLabel(tab.view)
-                    : tab.type === "canvas"
-                      ? projectCanvases.find((canvas) => canvas.id === tab.canvasId)?.title ?? activeCanvasSummary?.title ?? "Canvas"
+                  {tab.type === "canvas"
+                    ? projectCanvases.find((canvas) => canvas.id === tab.canvasId)?.title ?? activeCanvasSummary?.title ?? "Canvas"
                     : tab.type === "note"
                       ? canvasDocument?.nodes.find((node) => node.id === tab.nodeId)?.title ?? "Note"
                       : explorationTabTitle(canvasDocument, explorationTabs[tab.explorationId] ?? null)}
                 </button>
-                {tab.id !== "view:project" ? (
-                  <button className={styles.documentTabClose} onClick={() => closeTab(tab.id)} type="button">
-                    ×
-                  </button>
-                ) : null}
+                <button className={styles.documentTabClose} onClick={() => closeTab(tab.id)} type="button">
+                  ×
+                </button>
               </div>
             ))}
           </div>
@@ -5394,29 +5134,6 @@ export default function Home() {
 
 function EmptyState({ message }: { message: string }) {
   return <p className={styles.helperText}>{message}</p>;
-}
-
-function viewLabel(view: WorkspaceView) {
-  switch (view) {
-    case "project":
-      return "Project";
-    default:
-      return view;
-  }
-}
-
-function ViewIcon({ view }: { view: WorkspaceView }) {
-  switch (view) {
-    case "project":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path d="M3 13.2h10M4 11V4.6a1.6 1.6 0 0 1 1.6-1.6h4.8L12 4.6V11" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-          <path d="M10.4 3v2h2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
-        </svg>
-      );
-    default:
-      return null;
-  }
 }
 
 function ToggleIcon({ collapsed }: { collapsed: boolean }) {
