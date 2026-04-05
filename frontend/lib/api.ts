@@ -87,10 +87,17 @@ export interface ConversationResponse {
   conversation: ConversationRecord;
 }
 
+export interface CanvasSummary {
+  id: string;
+  title: string;
+  node_count: number;
+}
+
 export interface ProjectTreeItem {
   name: string;
   repo_path: string;
   conversations: ConversationSummary[];
+  canvases: CanvasSummary[];
 }
 
 export interface ProjectTreeResponse {
@@ -178,6 +185,8 @@ export interface CanvasEdge {
 }
 
 export interface CanvasDocument {
+  id: string | null;
+  title: string;
   repo_path: string | null;
   nodes: CanvasNode[];
   edges: CanvasEdge[];
@@ -185,6 +194,11 @@ export interface CanvasDocument {
 
 export interface CanvasResponse {
   document: CanvasDocument;
+}
+
+export interface CanvasListResponse {
+  repo_path: string;
+  canvases: CanvasSummary[];
 }
 
 export interface CanvasEditChangeRecord {
@@ -552,6 +566,7 @@ export async function streamProjectRun(
   repoPath: string,
   mode: "ask" | "plan" | "build" | "auto",
   prompt: string,
+  canvasId: string | null | undefined,
   semanticContext: string | undefined,
   conversationContext: string | undefined,
   imagePaths: string[] | undefined,
@@ -566,6 +581,7 @@ export async function streamProjectRun(
       repo_path: repoPath,
       mode,
       prompt,
+      canvas_id: canvasId,
       semantic_context: semanticContext,
       conversation_context: conversationContext,
       image_paths: imagePaths,
@@ -615,18 +631,47 @@ export async function uploadProjectImage(file: File) {
   });
 }
 
-export function fetchCanvas(repoPath?: string) {
-  const suffix = repoPath ? `?repo_path=${encodeURIComponent(repoPath)}` : "";
+export function fetchCanvases(repoPath: string) {
+  return apiRequest<CanvasListResponse>(`/canvases?repo_path=${encodeURIComponent(repoPath)}`, {
+    cache: "no-store",
+  });
+}
+
+export function createProjectCanvas(repoPath: string, title?: string) {
+  return apiRequest<CanvasResponse>("/canvases", {
+    method: "POST",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      title,
+    }),
+  });
+}
+
+export function fetchCanvas(repoPath?: string, canvasId?: string | null) {
+  const params = new URLSearchParams();
+  if (repoPath) {
+    params.set("repo_path", repoPath);
+  }
+  if (canvasId) {
+    params.set("canvas_id", canvasId);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiRequest<CanvasResponse>(`/canvas${suffix}`, { cache: "no-store" });
 }
 
-export function resetCanvas(repoPath: string) {
-  return apiRequest<CanvasResponse>(`/canvas?repo_path=${encodeURIComponent(repoPath)}`, {
+export function resetCanvas(repoPath: string, canvasId?: string | null) {
+  const params = new URLSearchParams({ repo_path: repoPath });
+  if (canvasId) {
+    params.set("canvas_id", canvasId);
+  }
+  return apiRequest<CanvasResponse>(`/canvas?${params.toString()}`, {
     method: "DELETE",
   });
 }
 
 export function createCanvasNode(payload: {
+  repo_path: string;
+  canvas_id?: string | null;
   title: string;
   description: string;
   tags?: string[];
@@ -643,6 +688,8 @@ export function createCanvasNode(payload: {
 
 export function updateCanvasNode(
   nodeId: string,
+  repoPath: string,
+  canvasId: string | null | undefined,
   payload: Partial<{
     title: string;
     description: string;
@@ -653,19 +700,29 @@ export function updateCanvasNode(
     linked_symbols: string[];
   }>,
 ) {
-  return apiRequest<CanvasResponse>(`/canvas/nodes/${encodeURIComponent(nodeId)}`, {
+  const params = new URLSearchParams({ repo_path: repoPath });
+  if (canvasId) {
+    params.set("canvas_id", canvasId);
+  }
+  return apiRequest<CanvasResponse>(`/canvas/nodes/${encodeURIComponent(nodeId)}?${params.toString()}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
 
-export function deleteCanvasNode(nodeId: string) {
-  return apiRequest<CanvasResponse>(`/canvas/nodes/${encodeURIComponent(nodeId)}`, {
+export function deleteCanvasNode(nodeId: string, repoPath: string, canvasId: string | null | undefined) {
+  const params = new URLSearchParams({ repo_path: repoPath });
+  if (canvasId) {
+    params.set("canvas_id", canvasId);
+  }
+  return apiRequest<CanvasResponse>(`/canvas/nodes/${encodeURIComponent(nodeId)}?${params.toString()}`, {
     method: "DELETE",
   });
 }
 
 export function createCanvasEdge(payload: {
+  repo_path: string;
+  canvas_id?: string | null;
   source_node_id: string;
   target_node_id: string;
   label?: string;
@@ -676,21 +733,26 @@ export function createCanvasEdge(payload: {
   });
 }
 
-export function deleteCanvasEdge(edgeId: string) {
-  return apiRequest<CanvasResponse>(`/canvas/edges/${encodeURIComponent(edgeId)}`, {
+export function deleteCanvasEdge(edgeId: string, repoPath: string, canvasId: string | null | undefined) {
+  const params = new URLSearchParams({ repo_path: repoPath });
+  if (canvasId) {
+    params.set("canvas_id", canvasId);
+  }
+  return apiRequest<CanvasResponse>(`/canvas/edges/${encodeURIComponent(edgeId)}?${params.toString()}`, {
     method: "DELETE",
   });
 }
 
-export function generateCanvasFromPrompt(repoPath: string, prompt: string) {
+export function generateCanvasFromPrompt(repoPath: string, prompt: string, canvasId?: string | null) {
   return apiRequest<CanvasGenerateResponse>("/canvas/generate", {
     method: "POST",
-    body: JSON.stringify({ repo_path: repoPath, prompt }),
+    body: JSON.stringify({ repo_path: repoPath, prompt, canvas_id: canvasId }),
   });
 }
 
 export function previewCanvasEdits(
   repoPath: string,
+  canvasId: string | null | undefined,
   prompt: string,
   targetNoteIds: string[],
   semanticContext?: string,
@@ -700,6 +762,7 @@ export function previewCanvasEdits(
     method: "POST",
     body: JSON.stringify({
       repo_path: repoPath,
+      canvas_id: canvasId,
       prompt,
       target_note_ids: targetNoteIds,
       semantic_context: semanticContext,
@@ -710,6 +773,7 @@ export function previewCanvasEdits(
 
 export function applyCanvasEdits(
   repoPath: string,
+  canvasId: string | null | undefined,
   changes: CanvasEditChangeRecord[],
   acceptedChangeIds: string[],
 ) {
@@ -717,6 +781,7 @@ export function applyCanvasEdits(
     method: "POST",
     body: JSON.stringify({
       repo_path: repoPath,
+      canvas_id: canvasId,
       changes,
       accepted_change_ids: acceptedChangeIds,
     }),

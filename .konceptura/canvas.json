@@ -109,6 +109,7 @@
       "target_node_id": "node_d2f821532a"
     }
   ],
+  "id": "canvas_9468876852",
   "nodes": [
     {
       "description": "The frontend is a single Next.js workspace that concentrates the main product behaviors: project selection, note canvas, conversations, composer actions, and git controls. `Home` in `frontend/app/page.tsx` owns the bulk of client state, toggles between Notes and Project views, and coordinates build, plan, ask, commit, push, and canvas-edit flows through the API layer. This is the primary user surface where architecture mapping and implementation work meet.",
@@ -411,5 +412,6 @@
       "y": -500
     }
   ],
-  "repo_path": "/home/wniak/konceptura"
+  "repo_path": "/home/wniak/konceptura",
+  "title": "Canvas"
 }

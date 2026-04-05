@@ -20,12 +20,14 @@ from .models import (
     AssistImpactRequest,
     AssistImpactResponse,
     CanvasEdgeCreateRequest,
+    CanvasCreateRequest,
     CanvasEditApplyRequest,
     CanvasEditApplyResponse,
     CanvasEditPreviewRequest,
     CanvasEditPreviewResponse,
     CanvasGenerateRequest,
     CanvasGenerateResponse,
+    CanvasListResponse,
     CanvasResponse,
     CanvasNodeCreateRequest,
     CanvasNodeUpdateRequest,
@@ -189,6 +191,8 @@ def get_project_workspace_status(repo_path: str) -> ProjectWorkspaceStatusRespon
 @app.get("/projects/tree", response_model=ProjectTreeResponse)
 def get_projects_tree() -> ProjectTreeResponse:
     active_repo_path, projects = project_service.list_project_items()
+    for item in projects:
+        item.canvases = canvas_service.list_canvases_for_repo(item.repo_path)
     return ProjectTreeResponse(active_repo_path=active_repo_path, projects=projects)
 
 
@@ -427,7 +431,12 @@ def build_project(request: ProjectBuildRequest) -> ProjectBuildResponse:
             repo_path=resolved_repo_path,
             prompt=request.prompt,
         )
-        document, notes_created, note_changes = canvas_service.append_generated_map(generated_nodes, generated_edges)
+        document, notes_created, note_changes = canvas_service.append_generated_map(
+            resolved_repo_path,
+            None,
+            generated_nodes,
+            generated_edges,
+        )
     except RuntimeError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
@@ -647,7 +656,12 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                 prompt=request.prompt,
                 image_paths=request.image_paths,
             )
-            document, notes_created, note_changes = canvas_service.append_generated_map(generated_nodes, generated_edges)
+            document, notes_created, note_changes = canvas_service.append_generated_map(
+                resolved_repo_path,
+                request.canvas_id,
+                generated_nodes,
+                generated_edges,
+            )
 
             modified_files = [item.path for item in change_response.changed_files]
             file_count = len(modified_files)
@@ -691,26 +705,53 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
     return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
+@app.get("/canvases", response_model=CanvasListResponse)
+def list_canvases(repo_path: str) -> CanvasListResponse:
+    resolved_path = Path(repo_path)
+    if not resolved_path.exists():
+        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {resolved_path}")
+    if not resolved_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {resolved_path}")
+    resolved_repo_path = str(resolved_path.resolve())
+    return CanvasListResponse(repo_path=resolved_repo_path, canvases=canvas_service.list_canvases_for_repo(resolved_repo_path))
+
+
+@app.post("/canvases", response_model=CanvasResponse)
+def create_canvas(request: CanvasCreateRequest) -> CanvasResponse:
+    resolved_repo_path = str(Path(request.repo_path).resolve())
+    try:
+        document = canvas_service.create_canvas(CanvasCreateRequest(repo_path=resolved_repo_path, title=request.title))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return CanvasResponse(document=document)
+
+
 @app.get("/canvas", response_model=CanvasResponse)
-def get_canvas(repo_path: str | None = None) -> CanvasResponse:
+def get_canvas(repo_path: str | None = None, canvas_id: str | None = None) -> CanvasResponse:
     if repo_path:
         resolved_path = Path(repo_path)
         if not resolved_path.exists():
             raise HTTPException(status_code=404, detail=f"Repository path does not exist: {resolved_path}")
         if not resolved_path.is_dir():
             raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {resolved_path}")
-        return CanvasResponse(document=canvas_service.get_document_for_repo(str(resolved_path.resolve())))
+        try:
+            return CanvasResponse(document=canvas_service.get_document_for_repo(str(resolved_path.resolve()), canvas_id))
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
     return CanvasResponse(document=canvas_service.get_document())
 
 
 @app.delete("/canvas", response_model=CanvasResponse)
-def reset_canvas(repo_path: str) -> CanvasResponse:
+def reset_canvas(repo_path: str, canvas_id: str | None = None) -> CanvasResponse:
     resolved_path = Path(repo_path)
     if not resolved_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository path does not exist: {resolved_path}")
     if not resolved_path.is_dir():
         raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {resolved_path}")
-    return CanvasResponse(document=canvas_service.reset_repo_canvas(str(resolved_path.resolve())))
+    try:
+        return CanvasResponse(document=canvas_service.reset_repo_canvas(str(resolved_path.resolve()), canvas_id))
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.post("/canvas/nodes", response_model=CanvasResponse)
@@ -719,18 +760,18 @@ def create_canvas_node(request: CanvasNodeCreateRequest) -> CanvasResponse:
 
 
 @app.patch("/canvas/nodes/{node_id}", response_model=CanvasResponse)
-def update_canvas_node(node_id: str, request: CanvasNodeUpdateRequest) -> CanvasResponse:
+def update_canvas_node(node_id: str, request: CanvasNodeUpdateRequest, repo_path: str, canvas_id: str | None = None) -> CanvasResponse:
     try:
-        document = canvas_service.update_node(node_id, request)
+        document = canvas_service.update_node(str(Path(repo_path).resolve()), canvas_id, node_id, request)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return CanvasResponse(document=document)
 
 
 @app.delete("/canvas/nodes/{node_id}", response_model=CanvasResponse)
-def delete_canvas_node(node_id: str) -> CanvasResponse:
+def delete_canvas_node(node_id: str, repo_path: str, canvas_id: str | None = None) -> CanvasResponse:
     try:
-        document = canvas_service.delete_node(node_id)
+        document = canvas_service.delete_node(str(Path(repo_path).resolve()), canvas_id, node_id)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return CanvasResponse(document=document)
@@ -746,9 +787,9 @@ def create_canvas_edge(request: CanvasEdgeCreateRequest) -> CanvasResponse:
 
 
 @app.delete("/canvas/edges/{edge_id}", response_model=CanvasResponse)
-def delete_canvas_edge(edge_id: str) -> CanvasResponse:
+def delete_canvas_edge(edge_id: str, repo_path: str, canvas_id: str | None = None) -> CanvasResponse:
     try:
-        document = canvas_service.delete_edge(edge_id)
+        document = canvas_service.delete_edge(str(Path(repo_path).resolve()), canvas_id, edge_id)
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return CanvasResponse(document=document)
@@ -768,7 +809,12 @@ def generate_canvas_from_prompt(request: CanvasGenerateRequest) -> CanvasGenerat
             repo_path=str(repo_path.resolve()),
             prompt=request.prompt,
         )
-        document, created_count, note_changes = canvas_service.append_generated_map(nodes, edges)
+        document, created_count, note_changes = canvas_service.append_generated_map(
+            str(repo_path.resolve()),
+            request.canvas_id,
+            nodes,
+            edges,
+        )
     except RuntimeError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
@@ -789,7 +835,7 @@ def preview_canvas_edits(request: CanvasEditPreviewRequest) -> CanvasEditPreview
 
     resolved_repo_path = str(repo_path.resolve())
     canvas_service.set_repo_path(resolved_repo_path)
-    document = canvas_service.get_document_for_repo(resolved_repo_path)
+    document = canvas_service.get_document_for_repo(resolved_repo_path, request.canvas_id)
     target_note_ids = [node_id for node_id in request.target_note_ids if node_id.strip()]
     if not target_note_ids:
         raise HTTPException(status_code=400, detail="Select or mention at least one note to edit.")
@@ -834,6 +880,8 @@ def apply_canvas_edits(request: CanvasEditApplyRequest) -> CanvasEditApplyRespon
     canvas_service.set_repo_path(resolved_repo_path)
     try:
         document, note_changes, applied_change_ids, remaining_change_ids = canvas_service.apply_canvas_edit_changes(
+            resolved_repo_path,
+            request.canvas_id,
             request.changes,
             request.accepted_change_ids,
         )

@@ -19,12 +19,14 @@ import styles from "./page.module.css";
 import { CanvasBoard } from "@/components/canvas-board";
 import {
   applyCanvasEdits,
+  createProjectCanvas,
   createCanvasNode,
   createProjectCommit,
   pushProjectCommits,
   deleteCanvasNode,
   fetchExplorationSuggestions,
   fetchCanvas,
+  fetchCanvases,
   fetchCommitStatus,
   fetchProjectConversation,
   fetchProjectsTree,
@@ -46,6 +48,7 @@ import {
   type CanvasDocument,
   type CanvasEdge,
   type CanvasNode,
+  type CanvasSummary,
   type CommitStatusResponse,
   type ConversationMessage,
   type ConversationSummary,
@@ -59,14 +62,14 @@ import {
   type ProjectRunStreamEvent,
 } from "@/lib/api";
 
-type WorkspaceView = "notes" | "project";
+type WorkspaceView = "project";
 type OpenTab =
   | { id: `view:${WorkspaceView}`; type: "view"; view: WorkspaceView; preview: boolean }
-  | { id: `note:${string}`; type: "note"; nodeId: string }
-  | { id: `explore:${string}`; type: "exploration"; explorationId: string };
+  | { id: `canvas:${string}`; type: "canvas"; canvasId: string }
+  | { id: `note:${string}:${string}`; type: "note"; nodeId: string; canvasId: string }
+  | { id: `explore:${string}:${string}`; type: "exploration"; explorationId: string; canvasId: string };
 
 const RAIL_VIEW_ITEMS: Array<{ id: WorkspaceView; label: string }> = [
-  { id: "notes", label: "Notes" },
   { id: "project", label: "Project" },
 ];
 
@@ -84,6 +87,7 @@ interface CommandResultItem {
 type LeaderScope =
   | "root"
   | "projects"
+  | "canvases"
   | "notes"
   | "conversations"
   | "views"
@@ -120,6 +124,7 @@ interface ExplorationSuggestionState {
 
 interface ExplorationBranch {
   id: string;
+  canvasId: string;
   rootNodeId: string;
   activeNodeId: string | null;
   pathNodeIds: string[];
@@ -174,13 +179,15 @@ export default function Home() {
   const [railResizeStartX, setRailResizeStartX] = useState<number | null>(null);
   const [railResizeStartWidth, setRailResizeStartWidth] = useState<number | null>(null);
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { id: "view:notes", type: "view", view: "notes", preview: false },
+    { id: "view:project", type: "view", view: "project", preview: false },
   ]);
-  const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:notes");
+  const [activeTabId, setActiveTabId] = useState<OpenTab["id"]>("view:project");
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [project, setProject] = useState<ProjectProfile | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState<ProjectWorkspaceStatusResponse | null>(null);
   const [projectsTree, setProjectsTree] = useState<ProjectTreeItem[]>([]);
+  const [projectCanvases, setProjectCanvases] = useState<CanvasSummary[]>([]);
+  const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null);
   const [isProjectsSectionExpanded, setIsProjectsSectionExpanded] = useState(true);
   const [expandedProjectPaths, setExpandedProjectPaths] = useState<Set<string>>(new Set());
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -245,7 +252,14 @@ export default function Home() {
   const openProjectConversationRef = useRef<((repoPathToOpen: string, conversation?: ConversationSummary) => Promise<void>) | null>(
     null,
   );
-  const urlIntentRef = useRef<{ repoPath: string | null; noteId: string | null; handledRepo: boolean; handledNote: boolean } | null>(null);
+  const urlIntentRef = useRef<{
+    repoPath: string | null;
+    canvasId: string | null;
+    noteId: string | null;
+    handledRepo: boolean;
+    handledCanvas: boolean;
+    handledNote: boolean;
+  } | null>(null);
   const explorationSuggestionStatesRef = useRef<Record<string, ExplorationSuggestionState>>({});
   const dockDragStartRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const exploreCanvasNodeRef = useRef<(nodeId: string) => void>(() => undefined);
@@ -267,7 +281,7 @@ export default function Home() {
     [activeTabId, openTabs],
   );
 
-  const activeView = activeTab?.type === "view" ? activeTab.view : "notes";
+  const activeView = activeTab?.type === "view" ? activeTab.view : null;
   const activeNoteTabId = activeTab?.type === "note" ? activeTab.nodeId : null;
   const activeNoteTabNode = useMemo(
     () => (activeNoteTabId ? canvasDocument?.nodes.find((item) => item.id === activeNoteTabId) ?? null : null),
@@ -276,8 +290,7 @@ export default function Home() {
   const editableCanvasNode = activeNoteTabNode ?? selectedCanvasNode;
   const activeExplorationSession =
     activeTab?.type === "exploration" ? explorationTabs[activeTab.explorationId] ?? null : null;
-  const transientNotesExploration =
-    activeTab?.type === "view" && activeTab.view === "notes" ? notesExploration : null;
+  const transientNotesExploration = activeTab?.type === "canvas" ? notesExploration : null;
   const currentExplorationSession = activeExplorationSession ?? transientNotesExploration;
   const inspectedComposerImage = useMemo(
     () => composerImageAttachments.find((item) => item.id === inspectedComposerImageId) ?? null,
@@ -445,6 +458,10 @@ export default function Home() {
 
   const currentRailWidth = isRailExpanded ? railWidth : 72;
   const activeRepoPath = (project?.repo_path || repoPath).trim();
+  const activeCanvasSummary = useMemo(
+    () => projectCanvases.find((canvas) => canvas.id === activeCanvasId) ?? null,
+    [activeCanvasId, projectCanvases],
+  );
   const focusedCanvasNodeId =
     activeTab?.type === "note"
       ? activeTab.nodeId
@@ -453,6 +470,14 @@ export default function Home() {
     () => projectsTree.find((item) => item.repo_path === activeRepoPath) ?? null,
     [activeRepoPath, projectsTree],
   );
+  const activeTabCanvasId =
+    activeTab?.type === "canvas"
+      ? activeTab.canvasId
+      : activeTab?.type === "note"
+        ? activeTab.canvasId
+        : activeTab?.type === "exploration"
+          ? activeTab.canvasId
+          : null;
   const visibleContextNodeIds = useMemo(() => {
     const ids = new Set<string>();
     if (focusedCanvasNodeId) {
@@ -559,7 +584,7 @@ export default function Home() {
   );
   const viewCommandItems = useMemo(
     () =>
-      (["notes", "project"] as WorkspaceView[]).map<CommandResultItem>((view) => ({
+      (["project"] as WorkspaceView[]).map<CommandResultItem>((view) => ({
         id: `view:${view}`,
         title: viewLabel(view),
         subtitle: "workspace view",
@@ -573,6 +598,28 @@ export default function Home() {
       })),
     [],
   );
+  const canvasCommandItems = useMemo(
+    () =>
+      projectCanvases.slice(0, 200).map<CommandResultItem>((canvas) => ({
+        id: `canvas:${canvas.id}`,
+        title: canvas.title,
+        subtitle: `${canvas.node_count} note${canvas.node_count === 1 ? "" : "s"}`,
+        group: "navigate",
+        searchText: [canvas.title, "canvas"].join(" ").toLowerCase(),
+        run: () => {
+          setCodexPrompt("");
+          setLeaderScope(null);
+          const tabId = `canvas:${canvas.id}` as const;
+          setOpenTabs((current) =>
+            current.some((tab) => tab.id === tabId)
+              ? current
+              : [...current, { id: tabId, type: "canvas", canvasId: canvas.id }],
+          );
+          setActiveTabId(tabId);
+        },
+      })),
+    [projectCanvases],
+  );
   const noteCommandItems = useMemo(
     () =>
       (canvasDocument?.nodes ?? []).slice(0, 200).map<CommandResultItem>((node) => ({
@@ -584,10 +631,20 @@ export default function Home() {
         run: () => {
           setCodexPrompt("");
           setLeaderScope(null);
-          openCanvasNode(node.id);
+          if (!activeCanvasId) {
+            return;
+          }
+          const tabId = `note:${activeCanvasId}:${node.id}` as const;
+          setOpenCanvasNodeIds((current) => (current.includes(node.id) ? current : [...current, node.id]));
+          setOpenTabs((current) =>
+            current.some((tab) => tab.id === tabId)
+              ? current
+              : [...current, { id: tabId, type: "note", nodeId: node.id, canvasId: activeCanvasId }],
+          );
+          setActiveTabId(tabId);
         },
       })),
-    [canvasDocument],
+    [activeCanvasId, canvasDocument],
   );
   const projectCommandItems = projectsTree.slice(0, 200).map<CommandResultItem>((item) => ({
         id: `project:${item.repo_path}`,
@@ -792,9 +849,9 @@ export default function Home() {
   const leaderRootItems = useMemo<LeaderGroupItem[]>(
     () => [
       { id: "leader-projects", key: "p", title: "Projects", subtitle: "Switch project", scope: "projects" },
-      { id: "leader-notes", key: "n", title: "Notes", subtitle: "Open note", scope: "notes" },
+      { id: "leader-canvases", key: "v", title: "Canvases", subtitle: "Open canvas", scope: "canvases" },
+      { id: "leader-notes", key: "n", title: "Notes", subtitle: "Open note on current canvas", scope: "notes" },
       { id: "leader-conversations", key: "c", title: "Conversations", subtitle: "Open conversation", scope: "conversations" },
-      { id: "leader-views", key: "v", title: "Views", subtitle: "Switch workspace view", scope: "views" },
       { id: "leader-actions", key: "a", title: "Actions", subtitle: "Run canvas and project actions", scope: "actions" },
       { id: "leader-git", key: "g", title: "Git", subtitle: "Commit and push", scope: "git" },
       { id: "leader-models", key: "m", title: "Models", subtitle: "Switch model", scope: "models" },
@@ -828,6 +885,8 @@ export default function Home() {
     switch (leaderScope) {
       case "projects":
         return projectCommandItems.slice(0, 10);
+      case "canvases":
+        return canvasCommandItems.slice(0, 10);
       case "notes":
         return noteCommandItems.slice(0, 10);
       case "conversations":
@@ -847,6 +906,7 @@ export default function Home() {
     }
   }, [
     actionCommandItems,
+    canvasCommandItems,
     conversationCommandItems,
     leaderScope,
     modelCommandItems,
@@ -928,16 +988,35 @@ export default function Home() {
   }, [activeRepoPath]);
 
   useEffect(() => {
+    setProjectCanvases(activeProjectTreeItem?.canvases ?? []);
+  }, [activeProjectTreeItem]);
+
+  useEffect(() => {
+    if (activeTabCanvasId) {
+      setActiveCanvasId((current) => (current === activeTabCanvasId ? current : activeTabCanvasId));
+      return;
+    }
+    if (!projectCanvases.length) {
+      setActiveCanvasId(null);
+      return;
+    }
+    setActiveCanvasId((current) => current ?? projectCanvases[0]?.id ?? null);
+  }, [activeTabCanvasId, projectCanvases]);
+
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const repoParam = params.get("repo")?.trim() || null;
+    const canvasParam = params.get("canvas")?.trim() || null;
     const noteParam = params.get("note")?.trim() || null;
-    if (!repoParam && !noteParam) {
+    if (!repoParam && !canvasParam && !noteParam) {
       return;
     }
     urlIntentRef.current = {
       repoPath: repoParam,
+      canvasId: canvasParam,
       noteId: noteParam,
       handledRepo: false,
+      handledCanvas: false,
       handledNote: false,
     };
     if (repoParam) {
@@ -996,8 +1075,7 @@ export default function Home() {
       void (async () => {
         try {
           setErrorMessage(null);
-          const response = await fetchCanvas();
-          setCanvasDocument(response.document);
+          setCanvasDocument(null);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -1117,23 +1195,12 @@ export default function Home() {
       setExplorationBranches({});
       setExplorationSuggestionStates({});
       setCanvasEditPreview(null);
+      setCanvasDocument(null);
+      setProjectCanvases([]);
+      setActiveCanvasId(null);
       return;
     }
     const repoPathValue = project.repo_path;
-    startCanvasTransition(() => {
-      void (async () => {
-        try {
-          setErrorMessage(null);
-          const response = await fetchCanvas(repoPathValue);
-          if (expectedRepoPathRef.current && expectedRepoPathRef.current !== repoPathValue) {
-            return;
-          }
-          setCanvasDocument(response.document);
-        } catch (error) {
-          setErrorMessage(getErrorMessage(error));
-        }
-      })();
-    });
     startProjectTransition(() => {
       void (async () => {
         try {
@@ -1171,6 +1238,70 @@ export default function Home() {
   }, [project?.repo_path]);
 
   useEffect(() => {
+    if (!activeRepoPath) {
+      setCanvasDocument(null);
+      return;
+    }
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await fetchCanvas(activeRepoPath, activeCanvasId);
+          if (expectedRepoPathRef.current && expectedRepoPathRef.current !== activeRepoPath) {
+            return;
+          }
+          setCanvasDocument(response.document);
+          setActiveCanvasId(response.document.id ?? activeCanvasId ?? null);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }, [activeCanvasId, activeRepoPath]);
+
+  useEffect(() => {
+    if (!activeRepoPath) {
+      setProjectCanvases([]);
+      return;
+    }
+    startProjectTransition(() => {
+      void (async () => {
+        try {
+          const response = await fetchCanvases(activeRepoPath);
+          if (expectedRepoPathRef.current && expectedRepoPathRef.current !== activeRepoPath) {
+            return;
+          }
+          setProjectCanvases(response.canvases);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }, [activeRepoPath]);
+
+  useEffect(() => {
+    if (!activeRepoPath || projectCanvases.length === 0) {
+      return;
+    }
+    const hasCanvasTab = openTabs.some(
+      (tab) =>
+        (tab.type === "canvas" || tab.type === "note" || tab.type === "exploration") &&
+        tab.canvasId === projectCanvases[0]?.id,
+    );
+    if (hasCanvasTab) {
+      return;
+    }
+    setOpenTabs((current) => {
+      if (current.some((tab) => tab.type === "canvas" && tab.canvasId === projectCanvases[0].id)) {
+        return current;
+      }
+      return [...current, { id: `canvas:${projectCanvases[0].id}`, type: "canvas", canvasId: projectCanvases[0].id }];
+    });
+    setActiveTabId((current) => (current === "view:project" ? `canvas:${projectCanvases[0].id}` : current));
+  }, [activeRepoPath, openTabs, projectCanvases]);
+
+  useEffect(() => {
     const intent = urlIntentRef.current;
     if (!intent || intent.handledRepo) {
       return;
@@ -1191,6 +1322,28 @@ export default function Home() {
 
   useEffect(() => {
     const intent = urlIntentRef.current;
+    if (!intent || intent.handledCanvas || !intent.canvasId || !activeRepoPath || !projectCanvases.length) {
+      return;
+    }
+    if (intent.repoPath && intent.repoPath !== activeRepoPath) {
+      return;
+    }
+    const targetCanvas = projectCanvases.find((canvas) => canvas.id === intent.canvasId);
+    if (!targetCanvas) {
+      return;
+    }
+    intent.handledCanvas = true;
+    const tabId = `canvas:${targetCanvas.id}` as const;
+    setOpenTabs((current) =>
+      current.some((tab) => tab.id === tabId)
+        ? current
+        : [...current, { id: tabId, type: "canvas", canvasId: targetCanvas.id }],
+    );
+    setActiveTabId(tabId);
+  }, [activeRepoPath, projectCanvases]);
+
+  useEffect(() => {
+    const intent = urlIntentRef.current;
     if (!intent || intent.handledNote || !intent.noteId || !intent.repoPath) {
       return;
     }
@@ -1201,7 +1354,17 @@ export default function Home() {
       return;
     }
     intent.handledNote = true;
-    openCanvasNode(intent.noteId);
+    if (!canvasDocument.id) {
+      return;
+    }
+    const tabId = `note:${canvasDocument.id}:${intent.noteId}` as const;
+    setOpenCanvasNodeIds((current) => (current.includes(intent.noteId!) ? current : [...current, intent.noteId!]));
+    setOpenTabs((current) =>
+      current.some((tab) => tab.id === tabId)
+        ? current
+        : [...current, { id: tabId, type: "note", nodeId: intent.noteId!, canvasId: canvasDocument.id! }],
+    );
+    setActiveTabId(tabId);
   }, [activeRepoPath, canvasDocument]);
 
   useEffect(() => {
@@ -1209,8 +1372,15 @@ export default function Home() {
     if (activeRepoPath) {
       params.set("repo", activeRepoPath);
     }
+    if (activeTab?.type === "canvas") {
+      params.set("canvas", activeTab.canvasId);
+    }
     if (activeTab?.type === "note") {
+      params.set("canvas", activeTab.canvasId);
       params.set("note", activeTab.nodeId);
+    }
+    if (activeTab?.type === "exploration") {
+      params.set("canvas", activeTab.canvasId);
     }
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
@@ -1613,7 +1783,7 @@ export default function Home() {
       const canUseCanvasOpenShortcut =
         !isTypingIntoField &&
         !leaderScope &&
-        (activeTab?.type === "view" || activeTab?.type === "exploration") &&
+        (activeTab?.type === "canvas" || activeTab?.type === "exploration") &&
         !!selectedCanvasNodeId &&
         !!canvasDocument?.nodes.find(
           (node) =>
@@ -1625,7 +1795,18 @@ export default function Home() {
         );
       if (canUseCanvasOpenShortcut && (event.key === "Enter" || event.key.toLowerCase() === "o")) {
         event.preventDefault();
-        openCanvasNode(selectedCanvasNodeId as string);
+        if (!activeCanvasId) {
+          return;
+        }
+        const nodeId = selectedCanvasNodeId as string;
+        const tabId = `note:${activeCanvasId}:${nodeId}` as const;
+        setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
+        setOpenTabs((current) =>
+          current.some((tab) => tab.id === tabId)
+            ? current
+            : [...current, { id: tabId, type: "note", nodeId, canvasId: activeCanvasId }],
+        );
+        setActiveTabId(tabId);
         return;
       }
 
@@ -1638,8 +1819,7 @@ export default function Home() {
       const canUseCanvasExploreShortcut =
         !isTypingIntoField &&
         !leaderScope &&
-        activeTab?.type === "view" &&
-        activeTab.view === "notes" &&
+        activeTab?.type === "canvas" &&
         !!selectedCanvasNodeId &&
         !!canvasDocument?.nodes.find(
           (node) =>
@@ -1678,8 +1858,7 @@ export default function Home() {
       if (
         (event.metaKey || event.ctrlKey) &&
         event.key.toLowerCase() === "n" &&
-        activeTab?.type === "view" &&
-        activeTab.view === "notes" &&
+        activeTab?.type === "canvas" &&
         notesExploration &&
         canvasDocument
       ) {
@@ -1706,12 +1885,13 @@ export default function Home() {
           ...current,
           [promotedBranch.id]: promotedBranch,
         }));
+        const explorationTabId = `explore:${promotedBranch.canvasId}:${promotedBranch.id}` as const;
         setOpenTabs((current) =>
-          current.some((tab) => tab.id === `explore:${promotedBranch.id}`)
+          current.some((tab) => tab.id === explorationTabId)
             ? current
-            : [...current, { id: `explore:${promotedBranch.id}`, type: "exploration", explorationId: promotedBranch.id }],
+            : [...current, { id: explorationTabId, type: "exploration", explorationId: promotedBranch.id, canvasId: promotedBranch.canvasId }],
         );
-        setActiveTabId(`explore:${promotedBranch.id}`);
+        setActiveTabId(explorationTabId);
         setComposerStatus(`Opened an exploration tab for ${findCanvasNodeTitle(canvasDocument, promotedBranch.rootNodeId)}.`);
         return;
       }
@@ -1730,6 +1910,7 @@ export default function Home() {
     leaderRootItems,
     leaderScope,
     notesExploration,
+    activeCanvasId,
     selectedCanvasNodeId,
   ]);
 
@@ -1918,8 +2099,8 @@ export default function Home() {
       setPendingPlan(null);
       setComposerStatus(`Created ${response.conversation.title}.`);
       await refreshProjectsTree();
-      if (!options?.preserveActiveView) {
-        openViewTab("notes");
+      if (!options?.preserveActiveView && activeCanvasId) {
+        openCanvasTab(activeCanvasId);
       }
       return response.conversation.id;
     } catch (error) {
@@ -1950,7 +2131,7 @@ export default function Home() {
     try {
       setErrorMessage(null);
       const targetRepoPath = (nextRepoPath ?? activeRepoPath).trim() || undefined;
-      const response = await fetchCanvas(targetRepoPath);
+      const response = await fetchCanvas(targetRepoPath, activeCanvasId);
       if (targetRepoPath && expectedRepoPathRef.current && expectedRepoPathRef.current !== targetRepoPath) {
         return;
       }
@@ -1960,9 +2141,33 @@ export default function Home() {
     }
   }
 
+  async function handleCreateProjectCanvas() {
+    if (!activeRepoPath) {
+      return;
+    }
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await createProjectCanvas(activeRepoPath);
+          setCanvasDocument(response.document);
+          setActiveCanvasId(response.document.id);
+          await refreshProjectsTree();
+          if (response.document.id) {
+            openCanvasTab(response.document.id);
+          }
+          setComposerStatus(`Created ${response.document.title}.`);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
   async function handleGenerateCanvas() {
     const targetRepoPath = activeRepoPath;
-    if (!targetRepoPath) {
+    if (!targetRepoPath || !activeCanvasId) {
       return;
     }
 
@@ -1975,6 +2180,7 @@ export default function Home() {
           const response = await generateCanvasFromPrompt(
             targetRepoPath,
             buildCanvasSetupPrompt(targetRepoPath, workspaceStatus?.visible_file_count ?? 0),
+            activeCanvasId,
           );
           setCanvasDocument(response.document);
           setCanvasEditPreview(null);
@@ -2071,6 +2277,7 @@ export default function Home() {
         activeRepoPath,
         "build",
         prompt,
+        activeCanvasId,
         buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
         buildConversationContext(pendingMessages),
         readyComposerImagePaths,
@@ -2219,6 +2426,7 @@ export default function Home() {
         activeRepoPath,
         "plan",
         prompt,
+        activeCanvasId,
         buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
         buildConversationContext(pendingMessages),
         readyComposerImagePaths,
@@ -2349,6 +2557,7 @@ export default function Home() {
           `Original request:\n${plan.prompt}`,
           `Approved plan:\n${plan.planText}`,
         ].join("\n\n"),
+        activeCanvasId,
         buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
         buildConversationContext(pendingMessages),
         readyComposerImagePaths,
@@ -2514,9 +2723,12 @@ export default function Home() {
       setIsPreviewingCanvasEdits(true);
       setErrorMessage(null);
       setComposerStatus("Drafting canvas note changes...");
-      openViewTab("notes");
+      if (activeCanvasId) {
+        openCanvasTab(activeCanvasId);
+      }
       const response = await previewCanvasEdits(
         activeRepoPath,
+        activeCanvasId,
         prompt,
         promptContextNodeIds,
         buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
@@ -2546,7 +2758,7 @@ export default function Home() {
           ? "Applying all canvas note changes..."
           : "Applying canvas note change...",
       );
-      const response = await applyCanvasEdits(activeRepoPath, canvasEditPreview.changes, acceptedChangeIds);
+      const response = await applyCanvasEdits(activeRepoPath, activeCanvasId, canvasEditPreview.changes, acceptedChangeIds);
       setCanvasDocument(response.document);
       setComposerStatus(response.note_changes_summary || response.summary);
       await refreshCommitStatus(activeRepoPath);
@@ -2616,11 +2828,12 @@ export default function Home() {
         setExplorationTabs({});
         setOpenCanvasNodeIds([]);
         setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-        setActiveTabId("view:notes");
+        setActiveTabId("view:project");
+        setActiveCanvasId(null);
         setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
       }
       setRepoPath(normalizedRepoPath);
-      openViewTab("notes");
+      openViewTab("project");
       if (conversation) {
         await loadConversation(normalizedRepoPath, conversation);
       } else {
@@ -2657,11 +2870,12 @@ export default function Home() {
           setOpenCanvasNodeIds([]);
           setCanvasEditPreview(null);
           setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-          setActiveTabId("view:notes");
+          setActiveTabId("view:project");
+          setActiveCanvasId(null);
           setActiveConversationId(null);
           setActiveConversationRepoPath(response.project.repo_path || null);
           setConsoleMessages([]);
-          openViewTab("notes");
+          openViewTab("project");
           if (response.project.repo_path) {
             expectedRepoPathRef.current = response.project.repo_path;
           }
@@ -2699,11 +2913,12 @@ export default function Home() {
           setOpenCanvasNodeIds([]);
           setCanvasEditPreview(null);
           setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-          setActiveTabId("view:notes");
+          setActiveTabId("view:project");
+          setActiveCanvasId(null);
           setActiveConversationId(null);
           setActiveConversationRepoPath(projectResponse.project.repo_path || null);
           setConsoleMessages([]);
-          openViewTab("notes");
+          openViewTab("project");
           if (projectResponse.project.repo_path) {
             expectedRepoPathRef.current = projectResponse.project.repo_path;
           }
@@ -2723,7 +2938,7 @@ export default function Home() {
           if (!targetRepoPath) {
             return;
           }
-          const response = await resetCanvas(targetRepoPath);
+          const response = await resetCanvas(targetRepoPath, activeCanvasId);
           setCanvasDocument(response.document);
           setSelectedCanvasNodeId(null);
           setSelectedCanvasNodeIds([]);
@@ -2732,7 +2947,7 @@ export default function Home() {
           setOpenCanvasNodeIds([]);
           setCanvasEditPreview(null);
           setOpenTabs((current) => current.filter((tab) => tab.type === "view"));
-          setActiveTabId("view:notes");
+          setActiveTabId("view:project");
           setComposerStatus("Canvas reset.");
           await Promise.all([
             refreshCanvas(targetRepoPath),
@@ -2792,20 +3007,24 @@ export default function Home() {
     setComposerStatus("Cleared pinned context.");
   }
 
-  function openCanvasNode(nodeId: string, options?: { focusTitle?: boolean; activate?: boolean }) {
+  const openCanvasNode = useCallback((nodeId: string, options?: { focusTitle?: boolean; activate?: boolean }) => {
+    if (!activeCanvasId) {
+      return;
+    }
+    const tabId = `note:${activeCanvasId}:${nodeId}` as const;
     setOpenCanvasNodeIds((current) => (current.includes(nodeId) ? current : [...current, nodeId]));
     setOpenTabs((current) =>
-      current.some((tab) => tab.id === `note:${nodeId}`)
+      current.some((tab) => tab.id === tabId)
         ? current
-        : [...current, { id: `note:${nodeId}`, type: "note", nodeId }],
+        : [...current, { id: tabId, type: "note", nodeId, canvasId: activeCanvasId }],
     );
     if (options?.activate !== false) {
-      setActiveTabId(`note:${nodeId}`);
+      setActiveTabId(tabId);
     }
     if (options?.focusTitle) {
       setRequestedTitleFocusNodeId(nodeId);
     }
-  }
+  }, [activeCanvasId]);
 
   function handleRenameCanvasNode(nodeId: string) {
     openCanvasNode(nodeId, { focusTitle: true });
@@ -2876,12 +3095,17 @@ export default function Home() {
     const nextBranch =
       notesExploration && notesExploration.rootNodeId === nodeId
         ? advanceExplorationBranch(notesExploration, nodeId)
-        : createExplorationBranch(nodeId, canvasDocument);
+        : activeCanvasId
+          ? createExplorationBranch(nodeId, canvasDocument, activeCanvasId)
+          : null;
+    if (!nextBranch) {
+      return;
+    }
     setNotesExploration(nextBranch);
     setSelectedCanvasNodeId(nodeId);
     setSelectedCanvasNodeIds([nodeId]);
     setExpandedCanvasNodeId(nodeId);
-  }, [canvasDocument, explorationBranches, notesExploration]);
+  }, [activeCanvasId, canvasDocument, explorationBranches, notesExploration]);
 
   useEffect(() => {
     exploreCanvasNodeRef.current = handleExploreCanvasNode;
@@ -3157,7 +3381,7 @@ export default function Home() {
     openCanvasNode(nodeId);
   }
 
-  function handleCloseCanvasTab(nodeId: string) {
+  function handleCloseCanvasTab(canvasId: string, nodeId: string) {
     setOpenCanvasNodeIds((current) => {
       const next = current.filter((item) => item !== nodeId);
       if (selectedCanvasNodeId === nodeId) {
@@ -3167,9 +3391,11 @@ export default function Home() {
       return next;
     });
     setOpenTabs((current) => {
-      const next = current.filter((item) => item.id !== `note:${nodeId}`);
-      if (activeTabId === `note:${nodeId}`) {
-        setActiveTabId(next.at(-1)?.id ?? "view:notes");
+      const next = current.filter(
+        (item) => !(item.type === "note" && item.canvasId === canvasId && item.nodeId === nodeId),
+      );
+      if (activeTab?.type === "note" && activeTab.canvasId === canvasId && activeTab.nodeId === nodeId) {
+        setActiveTabId(next.at(-1)?.id ?? "view:project");
       }
       return next;
     });
@@ -3177,16 +3403,6 @@ export default function Home() {
 
   function openViewTab(view: WorkspaceView) {
     const id = `view:${view}` as const;
-    if (view === "notes") {
-      setOpenTabs((current) =>
-        current.some((tab) => tab.id === id)
-          ? current
-          : [...current, { id, type: "view", view, preview: false }],
-      );
-      setActiveTabId(id);
-      return;
-    }
-
     setOpenTabs((current) => {
       const existingTab = current.find((tab) => tab.id === id);
       if (existingTab) {
@@ -3194,7 +3410,7 @@ export default function Home() {
       }
 
       const previewIndex = current.findIndex(
-        (tab) => tab.type === "view" && tab.view !== "notes" && tab.preview,
+        (tab) => tab.type === "view" && tab.view !== "project" && tab.preview,
       );
       const nextTab: OpenTab = { id, type: "view", view, preview: true };
 
@@ -3208,6 +3424,16 @@ export default function Home() {
     });
     setActiveTabId(id);
   }
+
+  const openCanvasTab = useCallback((canvasId: string, options?: { activate?: boolean }) => {
+    const tabId = `canvas:${canvasId}` as const;
+    setOpenTabs((current) =>
+      current.some((tab) => tab.id === tabId) ? current : [...current, { id: tabId, type: "canvas", canvasId }],
+    );
+    if (options?.activate !== false) {
+      setActiveTabId(tabId);
+    }
+  }, []);
 
   function handleSelectCanvasNodes(nodeIds: string[]) {
     const normalized = [...nodeIds].sort();
@@ -3370,6 +3596,7 @@ export default function Home() {
     const query = loweredCommand;
     return [
       ...actionCommandItems,
+      ...canvasCommandItems,
       ...noteCommandItems,
       ...projectCommandItems,
       ...conversationCommandItems,
@@ -3603,13 +3830,18 @@ export default function Home() {
     if (tab.type === "view" && tab.preview && activeTabId === tab.id) {
       pinPreviewTab(tab.id);
     }
+    if (tab.type === "canvas") {
+      setActiveCanvasId((current) => (current === tab.canvasId ? current : tab.canvasId));
+    }
     if (tab.type === "note") {
+      setActiveCanvasId((current) => (current === tab.canvasId ? current : tab.canvasId));
       setSelectedCanvasNodeId((current) => (current === tab.nodeId ? current : tab.nodeId));
       setSelectedCanvasNodeIds((current) =>
         current.length === 1 && current[0] === tab.nodeId ? current : [tab.nodeId],
       );
     }
     if (tab.type === "exploration") {
+      setActiveCanvasId((current) => (current === tab.canvasId ? current : tab.canvasId));
       const session = explorationTabs[tab.explorationId] ?? null;
       const activeNodeId = session?.activeNodeId ?? null;
       setSelectedCanvasNodeId((current) => (current === activeNodeId ? current : activeNodeId));
@@ -3621,7 +3853,7 @@ export default function Home() {
   }
 
   function closeTab(tabId: OpenTab["id"]) {
-    if (tabId === "view:notes") {
+    if (tabId === "view:project") {
       return;
     }
     const tab = openTabs.find((item) => item.id === tabId);
@@ -3629,7 +3861,7 @@ export default function Home() {
       return;
     }
     if (tab.type === "note") {
-      handleCloseCanvasTab(tab.nodeId);
+      handleCloseCanvasTab(tab.canvasId, tab.nodeId);
       return;
     }
     if (tab.type === "exploration") {
@@ -3642,7 +3874,7 @@ export default function Home() {
     setOpenTabs((current) => {
       const next = current.filter((item) => item.id !== tabId);
       if (activeTabId === tabId) {
-        setActiveTabId(next.at(-1)?.id ?? "view:notes");
+        setActiveTabId(next.at(-1)?.id ?? "view:project");
       }
       return next;
     });
@@ -3650,7 +3882,10 @@ export default function Home() {
 
   async function handlePersistCanvasNodePosition(nodeId: string, x: number, y: number) {
     try {
-      const response = await updateCanvasNode(nodeId, { x, y });
+      if (!activeRepoPath) {
+        return;
+      }
+      const response = await updateCanvasNode(nodeId, activeRepoPath, activeCanvasId, { x, y });
       setCanvasDocument(response.document);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -3658,10 +3893,15 @@ export default function Home() {
   }
 
   async function handleCreateCanvasNodeAt(x = 96, y = 96) {
+    if (!activeRepoPath || !activeCanvasId) {
+      return;
+    }
     startCanvasTransition(() => {
       void (async () => {
         try {
           const response = await createCanvasNode({
+            repo_path: activeRepoPath,
+            canvas_id: activeCanvasId,
             title: "New note",
             description: "Describe the feature, screen, workflow, or constraint this note represents.",
             tags: ["feature"],
@@ -3685,6 +3925,7 @@ export default function Home() {
   async function handleDeleteCanvasNode(nodeId: string) {
     const branchId = parseBranchSummaryNodeId(nodeId);
     if (branchId) {
+      const branchCanvasId = explorationBranches[branchId]?.canvasId ?? activeCanvasId ?? null;
       setExplorationBranches((current) => {
         if (!current[branchId]) {
           return current;
@@ -3714,14 +3955,21 @@ export default function Home() {
       setSelectedCanvasNodeId((current) => (current === nodeId ? null : current));
       setSelectedCanvasNodeIds((current) => current.filter((item) => item !== nodeId));
       setExpandedCanvasNodeId((current) => (current === nodeId ? null : current));
-      setActiveTabId((current) => (current === `explore:${branchId}` ? "view:notes" : current));
+      setActiveTabId((current) =>
+        current === `explore:${branchCanvasId ?? ""}:${branchId}`
+          ? (`canvas:${branchCanvasId ?? ""}` as OpenTab["id"])
+          : current,
+      );
       return;
     }
 
     startCanvasTransition(() => {
       void (async () => {
         try {
-          const response = await deleteCanvasNode(nodeId);
+          if (!activeRepoPath) {
+            return;
+          }
+          const response = await deleteCanvasNode(nodeId, activeRepoPath, activeCanvasId);
           setCanvasDocument(response.document);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
@@ -3731,13 +3979,16 @@ export default function Home() {
   }
 
   async function handleSaveCanvasNode() {
-    if (!editableCanvasNode) {
+    if (!editableCanvasNode || !activeRepoPath) {
       return;
     }
     startCanvasTransition(() => {
       void (async () => {
         try {
-          const response = await updateCanvasNode(editableCanvasNode.id, {
+          if (!activeRepoPath) {
+            return;
+          }
+          const response = await updateCanvasNode(editableCanvasNode.id, activeRepoPath, activeCanvasId, {
             title: canvasDraftTitle.trim(),
             description: canvasDraftDescription,
             tags: parseTagList(canvasDraftTags),
@@ -3754,7 +4005,7 @@ export default function Home() {
     });
   }
 
-  function renderNotesView() {
+  function renderCanvasView() {
     return (
       <div className={styles.notesWorkspace}>
         <div className={styles.canvasFrame}>
@@ -4864,109 +5115,148 @@ export default function Home() {
       );
     }
 
+    const activeProjectCanvases = activeProjectTreeItem?.canvases ?? [];
+
     return (
-      <div className={styles.projectTreeSection}>
-        <button
-          className={styles.projectTreeHeaderButton}
-          onClick={() => setIsProjectsSectionExpanded((current) => !current)}
-          type="button"
-        >
-          <span className={styles.projectTreeLabel}>
-            <span className={styles.projectTreeChevron}>
-              <ChevronIcon expanded={isProjectsSectionExpanded} />
+      <>
+        <div className={styles.projectTreeSection}>
+          <button
+            className={styles.projectTreeHeaderButton}
+            onClick={() => setIsProjectsSectionExpanded((current) => !current)}
+            type="button"
+          >
+            <span className={styles.projectTreeLabel}>
+              <span className={styles.projectTreeChevron}>
+                <ChevronIcon expanded={isProjectsSectionExpanded} />
+              </span>
+              <span className={styles.railIcon}>
+                <FolderIcon />
+              </span>
+              {isRailExpanded ? <span>Projects</span> : null}
             </span>
-            <span className={styles.railIcon}>
-              <FolderIcon />
-            </span>
-            {isRailExpanded ? <span>Projects</span> : null}
-          </span>
-        </button>
+          </button>
 
-        {isRailExpanded && isProjectsSectionExpanded ? (
-          <div className={styles.projectTreeList}>
-            {projectsTree.length === 0 ? (
-              <p className={styles.railMeta}>No recent projects yet.</p>
-            ) : (
-              projectsTree.map((item) => {
-                const isActiveProject = item.repo_path === (project?.repo_path ?? repoPath.trim());
-                const isActiveConversationProject = item.repo_path === activeConversationRepoPath;
-                const isProjectExpanded = expandedProjectPaths.has(item.repo_path);
-                return (
-                  <div className={styles.projectTreeItem} key={item.repo_path}>
-                    <div className={styles.projectTreeRow}>
-                      <button
-                        className={isActiveProject ? styles.projectTreeProjectActive : styles.projectTreeProject}
-                        onClick={() => {
-                          setExpandedProjectPaths((current) => {
-                            const next = new Set(current);
-                            if (next.has(item.repo_path)) {
-                              next.delete(item.repo_path);
-                            } else {
-                              next.add(item.repo_path);
-                            }
-                            return next;
-                          });
-                          startProjectTransition(() => {
-                            void openProjectConversation(item.repo_path);
-                          });
-                        }}
-                        type="button"
-                      >
-                        <span className={styles.projectTreeProjectChevron}>
-                          <ChevronIcon expanded={isProjectExpanded} />
-                        </span>
-                        <span className={styles.projectTreeProjectTitle}>{item.name}</span>
-                      </button>
-                      <button
-                        className={styles.projectTreeAddButton}
-                        onClick={() => {
-                          startProjectTransition(() => {
-                            void createConversationForProject(item.repo_path);
-                          });
-                        }}
-                        title={`New conversation in ${item.name}`}
-                        type="button"
-                      >
-                        +
-                      </button>
-                    </div>
-
-                    {isProjectExpanded ? (
-                      <div className={styles.projectTreeConversations}>
-                        {item.conversations.map((conversation) => {
-                          const isActiveConversation =
-                            isActiveConversationProject && activeConversationId === conversation.id;
-                          return (
-                            <button
-                              className={
-                                isActiveConversation
-                                  ? styles.projectTreeConversationActive
-                                  : styles.projectTreeConversation
+          {isRailExpanded && isProjectsSectionExpanded ? (
+            <div className={styles.projectTreeList}>
+              {projectsTree.length === 0 ? (
+                <p className={styles.railMeta}>No recent projects yet.</p>
+              ) : (
+                projectsTree.map((item) => {
+                  const isActiveProject = item.repo_path === (project?.repo_path ?? repoPath.trim());
+                  const isProjectExpanded = expandedProjectPaths.has(item.repo_path);
+                  return (
+                    <div className={styles.projectTreeItem} key={item.repo_path}>
+                      <div className={styles.projectTreeRow}>
+                        <button
+                          className={isActiveProject ? styles.projectTreeProjectActive : styles.projectTreeProject}
+                          onClick={() => {
+                            setExpandedProjectPaths((current) => {
+                              const next = new Set(current);
+                              if (next.has(item.repo_path)) {
+                                next.delete(item.repo_path);
+                              } else {
+                                next.add(item.repo_path);
                               }
-                              key={`${item.repo_path}:${conversation.id}`}
-                              onClick={() => {
-                                startProjectTransition(() => {
-                                  void openProjectConversation(item.repo_path, conversation);
-                                });
-                              }}
-                              type="button"
-                            >
-                              <span className={styles.projectTreeConversationTitle}>{conversation.title}</span>
-                              <span className={styles.projectTreeConversationMeta}>
-                                {conversation.message_count} msg{conversation.message_count === 1 ? "" : "s"}
-                              </span>
-                            </button>
-                          );
-                        })}
+                              return next;
+                            });
+                            startProjectTransition(() => {
+                              void openProjectConversation(item.repo_path);
+                            });
+                          }}
+                          type="button"
+                        >
+                          <span className={styles.projectTreeProjectChevron}>
+                            <ChevronIcon expanded={isProjectExpanded} />
+                          </span>
+                          <span className={styles.projectTreeProjectTitle}>{item.name}</span>
+                        </button>
                       </div>
-                    ) : null}
-                  </div>
-                );
-              })
-            )}
+
+                      {isProjectExpanded ? (
+                        <div className={styles.projectTreeConversations}>
+                          {item.conversations.map((conversation) => {
+                            const isActiveConversation =
+                              item.repo_path === activeConversationRepoPath && activeConversationId === conversation.id;
+                            return (
+                              <button
+                                className={
+                                  isActiveConversation
+                                    ? styles.projectTreeConversationActive
+                                    : styles.projectTreeConversation
+                                }
+                                key={`${item.repo_path}:${conversation.id}`}
+                                onClick={() => {
+                                  startProjectTransition(() => {
+                                    void openProjectConversation(item.repo_path, conversation);
+                                  });
+                                }}
+                                type="button"
+                              >
+                                <span className={styles.projectTreeConversationTitle}>{conversation.title}</span>
+                                <span className={styles.projectTreeConversationMeta}>
+                                  {conversation.message_count} msg{conversation.message_count === 1 ? "" : "s"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : null}
+        </div>
+
+        {activeRepoPath ? (
+          <div className={styles.projectTreeSection}>
+            <div className={styles.projectTreeRow}>
+              <div className={styles.projectTreeHeaderButton}>
+                <span className={styles.projectTreeLabel}>
+                  <span className={styles.railIcon}>
+                    <svg aria-hidden="true" viewBox="0 0 16 16">
+                      <path d="M3 4.5h10M3 8h10M3 11.5h10" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.2" />
+                    </svg>
+                  </span>
+                  <span>Canvases</span>
+                </span>
+              </div>
+              <button
+                className={styles.projectTreeAddButton}
+                onClick={handleCreateProjectCanvas}
+                title="Create canvas"
+                type="button"
+              >
+                +
+              </button>
+            </div>
+            <div className={styles.projectTreeConversations}>
+              {activeProjectCanvases.length === 0 ? (
+                <p className={styles.railMeta}>No canvases yet.</p>
+              ) : (
+                activeProjectCanvases.map((canvas) => (
+                  <button
+                    className={
+                      activeCanvasId === canvas.id && activeTab?.type !== "view"
+                        ? styles.projectTreeConversationActive
+                        : styles.projectTreeConversation
+                    }
+                    key={canvas.id}
+                    onClick={() => openCanvasTab(canvas.id)}
+                    type="button"
+                  >
+                    <span className={styles.projectTreeConversationTitle}>{canvas.title}</span>
+                    <span className={styles.projectTreeConversationMeta}>
+                      {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         ) : null}
-      </div>
+      </>
     );
   }
 
@@ -4976,15 +5266,25 @@ export default function Home() {
     }
 
     if (activeTab?.type === "note") {
+      if (canvasDocument?.id !== activeTab.canvasId) {
+        return <EmptyState message="Loading canvas..." />;
+      }
       return renderNoteTabView(activeTab.nodeId);
     }
     if (activeTab?.type === "exploration") {
+      if (canvasDocument?.id !== activeTab.canvasId) {
+        return <EmptyState message="Loading canvas..." />;
+      }
       return renderExplorationTab(explorationTabs[activeTab.explorationId] ?? null);
+    }
+    if (activeTab?.type === "canvas") {
+      if (canvasDocument?.id !== activeTab.canvasId) {
+        return <EmptyState message="Loading canvas..." />;
+      }
+      return renderCanvasView();
     }
 
     switch (activeView) {
-      case "notes":
-        return renderNotesView();
       case "project":
         return renderProjectView();
       default:
@@ -5057,11 +5357,13 @@ export default function Home() {
                 >
                   {tab.type === "view"
                     ? viewLabel(tab.view)
+                    : tab.type === "canvas"
+                      ? projectCanvases.find((canvas) => canvas.id === tab.canvasId)?.title ?? activeCanvasSummary?.title ?? "Canvas"
                     : tab.type === "note"
                       ? canvasDocument?.nodes.find((node) => node.id === tab.nodeId)?.title ?? "Note"
                       : explorationTabTitle(canvasDocument, explorationTabs[tab.explorationId] ?? null)}
                 </button>
-                {tab.id !== "view:notes" ? (
+                {tab.id !== "view:project" ? (
                   <button className={styles.documentTabClose} onClick={() => closeTab(tab.id)} type="button">
                     ×
                   </button>
@@ -5074,7 +5376,7 @@ export default function Home() {
 
           <section
             className={[
-              activeTab?.type === "exploration" || (activeTab?.type === "view" && activeView === "notes")
+              activeTab?.type === "exploration" || activeTab?.type === "canvas"
                 ? styles.workspaceStageFlush
                 : styles.workspaceStage,
               dockVisibility === "visible" ? styles.workspaceStageWithDockExpanded : styles.workspaceStageWithDockCollapsed,
@@ -5096,8 +5398,6 @@ function EmptyState({ message }: { message: string }) {
 
 function viewLabel(view: WorkspaceView) {
   switch (view) {
-    case "notes":
-      return "Notes";
     case "project":
       return "Project";
     default:
@@ -5107,12 +5407,6 @@ function viewLabel(view: WorkspaceView) {
 
 function ViewIcon({ view }: { view: WorkspaceView }) {
   switch (view) {
-    case "notes":
-      return (
-        <svg aria-hidden="true" viewBox="0 0 16 16">
-          <path d="M4 4.5h8M4 8h8M4 11.5h6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      );
     case "project":
       return (
         <svg aria-hidden="true" viewBox="0 0 16 16">
@@ -5243,10 +5537,11 @@ function explorationTabTitle(document: CanvasDocument | null, branch: Exploratio
   return rootTitle === activeTitle ? `Explore: ${rootTitle}` : `${rootTitle} -> ${activeTitle}`;
 }
 
-function createExplorationBranch(nodeId: string, document: CanvasDocument | null): ExplorationBranch {
+function createExplorationBranch(nodeId: string, document: CanvasDocument | null, canvasId: string): ExplorationBranch {
   const rootNode = document?.nodes.find((node) => node.id === nodeId) ?? null;
   return {
     id: `explore-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    canvasId,
     rootNodeId: nodeId,
     activeNodeId: nodeId,
     pathNodeIds: [nodeId],
@@ -5703,7 +5998,8 @@ function buildOverviewCanvasDocument(
     return null;
   }
 
-  const branchNodes = Object.values(branches).map((branch) => {
+  const relevantBranches = Object.values(branches).filter((branch) => branch.canvasId === document.id);
+  const branchNodes = relevantBranches.map((branch) => {
     const branchDocument = buildExplorationContextDocument(document, branch);
     const rootTitle = findCanvasNodeTitle(branchDocument, branch.rootNodeId);
     const conceptCount = countExplorationConcepts(branch);
@@ -5719,7 +6015,7 @@ function buildOverviewCanvasDocument(
     } satisfies CanvasNode;
   });
 
-  const branchEdges = Object.values(branches).map((branch) => ({
+  const branchEdges = relevantBranches.map((branch) => ({
     id: `branch-summary-edge:${branch.id}`,
     source_node_id: branchSummaryNodeId(branch.id),
     target_node_id: branch.rootNodeId,
@@ -5805,6 +6101,7 @@ function areExplorationBranchesEqual(left: ExplorationBranch | null, right: Expl
 
   return (
     left.id === right.id &&
+    left.canvasId === right.canvasId &&
     left.rootNodeId === right.rootNodeId &&
     left.activeNodeId === right.activeNodeId &&
     left.relationQuery === right.relationQuery &&

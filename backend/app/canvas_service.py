@@ -6,10 +6,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from .models import (
+    CanvasCollection,
+    CanvasCreateRequest,
     CanvasEditChangeRecord,
     CanvasDocument,
     CanvasEdge,
     CanvasEdgeCreateRequest,
+    CanvasSummary,
     GeneratedCanvasEdge,
     GeneratedCanvasNode,
     NoteChangeSummary,
@@ -44,11 +47,14 @@ class CanvasStore:
     def _project_canvas_path(self, repo_path: str) -> Path:
         return Path(repo_path) / ".konceptura" / "canvas.json"
 
+    def _project_canvases_path(self, repo_path: str) -> Path:
+        return Path(repo_path) / ".konceptura" / "canvases.json"
+
     def _ensure_konceptura_gitignore(self, repo_path: str) -> None:
         konceptura_dir = Path(repo_path) / ".konceptura"
         konceptura_dir.mkdir(parents=True, exist_ok=True)
         gitignore_path = konceptura_dir / ".gitignore"
-        desired = "*\n!.gitignore\n!canvas.json\n"
+        desired = "*\n!.gitignore\n!canvas.json\n!canvases.json\n"
         current = gitignore_path.read_text() if gitignore_path.exists() else None
         if current != desired:
             gitignore_path.write_text(desired)
@@ -58,37 +64,79 @@ class CanvasStore:
             return CanvasDocument()
         return CanvasDocument.model_validate(json.loads(path.read_text()))
 
+    def _read_collection(self, path: Path) -> CanvasCollection:
+        if not path.exists():
+            return CanvasCollection()
+        return CanvasCollection.model_validate(json.loads(path.read_text()))
+
+    def _normalize_canvas(self, repo_path: str, document: CanvasDocument, index: int = 0) -> CanvasDocument:
+        return document.model_copy(
+            update={
+                "id": document.id or f"canvas_{uuid4().hex[:10]}",
+                "title": (document.title or "").strip() or ("Overview" if index == 0 else f"Canvas {index + 1}"),
+                "repo_path": repo_path,
+            }
+        )
+
     def load(self) -> CanvasDocument:
         pointer = self._read_document(self.path)
         if pointer.repo_path:
-            project_path = self._project_canvas_path(pointer.repo_path)
-            if project_path.exists():
-                return self._read_document(project_path)
-            return CanvasDocument(repo_path=pointer.repo_path)
+            return self.get_default_for_repo(pointer.repo_path)
         return pointer
 
-    def load_for_repo(self, repo_path: str) -> CanvasDocument:
-        project_path = self._project_canvas_path(repo_path)
-        if project_path.exists():
-            return self._read_document(project_path)
-        return CanvasDocument(repo_path=repo_path)
+    def load_collection_for_repo(self, repo_path: str) -> CanvasCollection:
+        collection_path = self._project_canvases_path(repo_path)
+        if collection_path.exists():
+            collection = self._read_collection(collection_path)
+            collection.repo_path = repo_path
+            collection.canvases = [
+                self._normalize_canvas(repo_path, canvas, index)
+                for index, canvas in enumerate(collection.canvases)
+            ]
+            return collection
 
-    def save(self, document: CanvasDocument) -> CanvasDocument:
-        payload = json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True)
-        self.path.write_text(payload)
-        if document.repo_path:
-            self._ensure_konceptura_gitignore(document.repo_path)
-            project_path = self._project_canvas_path(document.repo_path)
-            if document.nodes or document.edges or project_path.exists():
-                project_path.parent.mkdir(parents=True, exist_ok=True)
-                project_path.write_text(payload)
-        return document
+        legacy_document = self._read_document(self._project_canvas_path(repo_path))
+        if legacy_document.nodes or legacy_document.edges or legacy_document.id or legacy_document.title != "Canvas":
+            canvas = self._normalize_canvas(repo_path, legacy_document, 0)
+            collection = CanvasCollection(repo_path=repo_path, canvases=[canvas])
+            self.save_collection(collection)
+            return collection
+        return CanvasCollection(repo_path=repo_path, canvases=[])
+
+    def get_default_for_repo(self, repo_path: str) -> CanvasDocument:
+        collection = self.load_collection_for_repo(repo_path)
+        if collection.canvases:
+            return collection.canvases[0]
+        return CanvasDocument(repo_path=repo_path, title="Canvas")
+
+    def save_collection(self, collection: CanvasCollection) -> CanvasCollection:
+        if not collection.repo_path:
+            return collection
+        repo_path = collection.repo_path
+        self._ensure_konceptura_gitignore(repo_path)
+        collection.canvases = [
+            self._normalize_canvas(repo_path, canvas, index)
+            for index, canvas in enumerate(collection.canvases)
+        ]
+        payload = json.dumps(collection.model_dump(mode="json"), indent=2, sort_keys=True)
+        self._project_canvases_path(repo_path).write_text(payload)
+
+        pointer_document = collection.canvases[0] if collection.canvases else CanvasDocument(repo_path=repo_path, title="Canvas")
+        self.path.write_text(json.dumps(pointer_document.model_dump(mode="json"), indent=2, sort_keys=True))
+        legacy_path = self._project_canvas_path(repo_path)
+        if collection.canvases:
+            legacy_path.write_text(
+                json.dumps(collection.canvases[0].model_dump(mode="json"), indent=2, sort_keys=True)
+            )
+        elif legacy_path.exists():
+            legacy_path.unlink()
+        return collection
 
     def delete_for_repo(self, repo_path: str) -> None:
-        project_path = self._project_canvas_path(repo_path)
-        if project_path.exists():
-            project_path.unlink()
-        kon_path = project_path.parent
+        for project_path in [self._project_canvas_path(repo_path), self._project_canvases_path(repo_path)]:
+            if project_path.exists():
+                project_path.unlink()
+        kon_path = self._project_canvas_path(repo_path).parent
         if kon_path.exists() and not any(kon_path.iterdir()):
             kon_path.rmdir()
 
@@ -97,26 +145,54 @@ class CanvasService:
     def __init__(self, store: CanvasStore) -> None:
         self.store = store
 
+    def list_canvases_for_repo(self, repo_path: str) -> list[CanvasSummary]:
+        collection = self.store.load_collection_for_repo(repo_path)
+        return [
+            CanvasSummary(id=canvas.id or f"canvas_{index}", title=canvas.title, node_count=len(canvas.nodes))
+            for index, canvas in enumerate(collection.canvases)
+        ]
+
     def get_document(self) -> CanvasDocument:
         return self.store.load()
 
-    def get_document_for_repo(self, repo_path: str) -> CanvasDocument:
-        document = self.store.load_for_repo(repo_path)
-        document.repo_path = repo_path
-        return self.store.save(document)
+    def get_document_for_repo(self, repo_path: str, canvas_id: str | None = None) -> CanvasDocument:
+        collection = self.store.load_collection_for_repo(repo_path)
+        if canvas_id:
+            target = next((canvas for canvas in collection.canvases if canvas.id == canvas_id), None)
+            if target is None:
+                raise ValueError(f"Canvas not found: {canvas_id}")
+            return target
+        return self.store.get_default_for_repo(repo_path)
 
     def set_repo_path(self, repo_path: str) -> CanvasDocument:
-        document = self.store.load_for_repo(repo_path)
-        document.repo_path = repo_path
-        return self.store.save(document)
+        document = self.store.get_default_for_repo(repo_path)
+        self.store.path.write_text(json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True))
+        return document
 
-    def reset_repo_canvas(self, repo_path: str) -> CanvasDocument:
-        self.store.delete_for_repo(repo_path)
-        document = CanvasDocument(repo_path=repo_path)
-        return self.store.save(document)
+    def create_canvas(self, request: CanvasCreateRequest) -> CanvasDocument:
+        repo_path = request.repo_path
+        collection = self.store.load_collection_for_repo(repo_path)
+        title = (request.title or "").strip() or f"Canvas {len(collection.canvases) + 1}"
+        document = CanvasDocument(
+            id=f"canvas_{uuid4().hex[:10]}",
+            title=title,
+            repo_path=repo_path,
+            nodes=[],
+            edges=[],
+        )
+        collection.canvases.append(document)
+        self.store.save_collection(collection)
+        return document
+
+    def reset_repo_canvas(self, repo_path: str, canvas_id: str | None = None) -> CanvasDocument:
+        collection, document = self._load_canvas(repo_path, canvas_id)
+        document.nodes = []
+        document.edges = []
+        self._save_canvas(collection, document)
+        return document
 
     def create_node(self, request: CanvasNodeCreateRequest) -> CanvasDocument:
-        document = self.store.load()
+        collection, document = self._load_canvas(request.repo_path, request.canvas_id)
         node = CanvasNode(
             id=f"node_{uuid4().hex[:10]}",
             title=request.title.strip(),
@@ -129,10 +205,11 @@ class CanvasService:
         )
         document.nodes.append(node)
         logger.info("Created canvas node %s", node.id)
-        return self.store.save(document)
+        self._save_canvas(collection, document)
+        return document
 
-    def update_node(self, node_id: str, request: CanvasNodeUpdateRequest) -> CanvasDocument:
-        document = self.store.load()
+    def update_node(self, repo_path: str, canvas_id: str | None, node_id: str, request: CanvasNodeUpdateRequest) -> CanvasDocument:
+        collection, document = self._load_canvas(repo_path, canvas_id)
         node = next((item for item in document.nodes if item.id == node_id), None)
         if node is None:
             raise ValueError(f"Canvas node not found: {node_id}")
@@ -142,10 +219,11 @@ class CanvasService:
             updates["tags"] = _normalize_tags(updates["tags"])
         for key, value in updates.items():
             setattr(node, key, value)
-        return self.store.save(document)
+        self._save_canvas(collection, document)
+        return document
 
-    def delete_node(self, node_id: str) -> CanvasDocument:
-        document = self.store.load()
+    def delete_node(self, repo_path: str, canvas_id: str | None, node_id: str) -> CanvasDocument:
+        collection, document = self._load_canvas(repo_path, canvas_id)
         next_nodes = [item for item in document.nodes if item.id != node_id]
         if len(next_nodes) == len(document.nodes):
             raise ValueError(f"Canvas node not found: {node_id}")
@@ -156,10 +234,11 @@ class CanvasService:
             if edge.source_node_id != node_id and edge.target_node_id != node_id
         ]
         logger.info("Deleted canvas node %s", node_id)
-        return self.store.save(document)
+        self._save_canvas(collection, document)
+        return document
 
     def create_edge(self, request: CanvasEdgeCreateRequest) -> CanvasDocument:
-        document = self.store.load()
+        collection, document = self._load_canvas(request.repo_path, request.canvas_id)
         node_ids = {node.id for node in document.nodes}
         if request.source_node_id not in node_ids or request.target_node_id not in node_ids:
             raise ValueError("Both source and target nodes must exist before creating an edge.")
@@ -183,14 +262,37 @@ class CanvasService:
         )
         document.edges.append(edge)
         logger.info("Created canvas edge %s", edge.id)
-        return self.store.save(document)
+        self._save_canvas(collection, document)
+        return document
+
+    def _load_canvas(self, repo_path: str, canvas_id: str | None) -> tuple[CanvasCollection, CanvasDocument]:
+        collection = self.store.load_collection_for_repo(repo_path)
+        if not collection.canvases:
+            created = self.create_canvas(CanvasCreateRequest(repo_path=repo_path, title="Overview"))
+            collection = self.store.load_collection_for_repo(repo_path)
+            target = next((canvas for canvas in collection.canvases if canvas.id == created.id), created)
+            return collection, target
+
+        if canvas_id:
+            target = next((canvas for canvas in collection.canvases if canvas.id == canvas_id), None)
+            if target is None:
+                raise ValueError(f"Canvas not found: {canvas_id}")
+            return collection, target
+
+        return collection, collection.canvases[0]
+
+    def _save_canvas(self, collection: CanvasCollection, document: CanvasDocument) -> None:
+        collection.canvases = [document if canvas.id == document.id else canvas for canvas in collection.canvases]
+        self.store.save_collection(collection)
 
     def append_generated_map(
         self,
+        repo_path: str,
+        canvas_id: str | None,
         nodes: list[GeneratedCanvasNode],
         edges: list[GeneratedCanvasEdge],
     ) -> tuple[CanvasDocument, int, NoteChangeSummary]:
-        document = self.store.load()
+        collection, document = self._load_canvas(repo_path, canvas_id)
         before_document = document.model_copy(deep=True)
         existing_titles = {node.title.strip().lower(): node for node in document.nodes}
         title_to_id: dict[str, str] = {}
@@ -244,18 +346,19 @@ class CanvasService:
 
         if created_count:
             logger.info("Generated %s canvas nodes from prompt workflow", created_count)
-        saved = self.store.save(document)
-        note_changes = self._build_note_change_summary(before_document, saved)
-        return saved, created_count, note_changes
+        self._save_canvas(collection, document)
+        note_changes = self._build_note_change_summary(before_document, document)
+        return document, created_count, note_changes
 
-    def delete_edge(self, edge_id: str) -> CanvasDocument:
-        document = self.store.load()
+    def delete_edge(self, repo_path: str, canvas_id: str | None, edge_id: str) -> CanvasDocument:
+        collection, document = self._load_canvas(repo_path, canvas_id)
         next_edges = [edge for edge in document.edges if edge.id != edge_id]
         if len(next_edges) == len(document.edges):
             raise ValueError(f"Canvas edge not found: {edge_id}")
         document.edges = next_edges
         logger.info("Deleted canvas edge %s", edge_id)
-        return self.store.save(document)
+        self._save_canvas(collection, document)
+        return document
 
     def find_impacted_notes(
         self,
@@ -297,10 +400,12 @@ class CanvasService:
 
     def apply_canvas_edit_changes(
         self,
+        repo_path: str,
+        canvas_id: str | None,
         changes: list[CanvasEditChangeRecord],
         accepted_change_ids: list[str],
     ) -> tuple[CanvasDocument, NoteChangeSummary, list[str], list[str]]:
-        document = self.store.load()
+        collection, document = self._load_canvas(repo_path, canvas_id)
         before_document = document.model_copy(deep=True)
         changes_by_id = {change.id: change for change in changes}
         accepted_ids = {change_id for change_id in accepted_change_ids if change_id.strip()}
@@ -424,10 +529,10 @@ class CanvasService:
                 if edge.source_node_id not in deleted_node_ids and edge.target_node_id not in deleted_node_ids
             ]
 
-        saved = self.store.save(document)
-        note_changes = self._build_note_change_summary(before_document, saved)
+        self._save_canvas(collection, document)
+        note_changes = self._build_note_change_summary(before_document, document)
         remaining_change_ids = [change.id for change in changes if change.id not in set(applied_change_ids)]
-        return saved, note_changes, applied_change_ids, remaining_change_ids
+        return document, note_changes, applied_change_ids, remaining_change_ids
 
     def _resolve_canvas_edit_node_position(
         self,

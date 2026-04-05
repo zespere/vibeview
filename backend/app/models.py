@@ -102,6 +102,7 @@ class ProjectTreeItem(BaseModel):
     name: str
     repo_path: str
     conversations: list[ConversationSummary] = Field(default_factory=list)
+    canvases: list["CanvasSummary"] = Field(default_factory=list)
 
 
 class ProjectTreeResponse(BaseModel):
@@ -395,6 +396,7 @@ class ProjectRunStreamRequest(BaseModel):
     repo_path: str
     prompt: str = Field(min_length=2)
     mode: Literal["ask", "plan", "build", "auto"]
+    canvas_id: str | None = None
     semantic_context: str | None = None
     conversation_context: str | None = None
     image_paths: list[str] = Field(default_factory=list)
@@ -440,6 +442,8 @@ class CanvasEdge(BaseModel):
 
 
 class CanvasDocument(BaseModel):
+    id: str | None = None
+    title: str = "Canvas"
     repo_path: str | None = None
     nodes: list[CanvasNode] = Field(default_factory=list)
     edges: list[CanvasEdge] = Field(default_factory=list)
@@ -512,13 +516,28 @@ class CanvasDocument(BaseModel):
             )
 
         return {
+            "id": "canvas_overview",
+            "title": "Overview",
             "repo_path": value.get("repo_path"),
             "nodes": nodes,
             "edges": edges,
         }
 
 
+class CanvasCollection(BaseModel):
+    repo_path: str | None = None
+    canvases: list[CanvasDocument] = Field(default_factory=list)
+
+
+class CanvasSummary(BaseModel):
+    id: str
+    title: str
+    node_count: int
+
+
 class CanvasNodeCreateRequest(BaseModel):
+    repo_path: str
+    canvas_id: str | None = None
     title: str = Field(min_length=1, max_length=120)
     description: str = ""
     tags: list[str] = Field(default_factory=list)
@@ -539,9 +558,16 @@ class CanvasNodeUpdateRequest(BaseModel):
 
 
 class CanvasEdgeCreateRequest(BaseModel):
+    repo_path: str
+    canvas_id: str | None = None
     source_node_id: str
     target_node_id: str
     label: str = ""
+
+
+class CanvasCreateRequest(BaseModel):
+    repo_path: str
+    title: str | None = None
 
 
 class GeneratedCanvasNode(BaseModel):
@@ -560,6 +586,7 @@ class GeneratedCanvasEdge(BaseModel):
 
 class CanvasGenerateRequest(BaseModel):
     repo_path: str
+    canvas_id: str | None = None
     prompt: str = Field(min_length=2, max_length=500)
 
 
@@ -571,6 +598,11 @@ class CanvasGenerateResponse(BaseModel):
 
 class CanvasResponse(BaseModel):
     document: CanvasDocument
+
+
+class CanvasListResponse(BaseModel):
+    repo_path: str
+    canvases: list[CanvasSummary] = Field(default_factory=list)
 
 
 class CanvasEditPatch(BaseModel):
@@ -599,6 +631,7 @@ class CanvasEditChangeRecord(BaseModel):
 
 class CanvasEditPreviewRequest(BaseModel):
     repo_path: str
+    canvas_id: str | None = None
     prompt: str = Field(min_length=3, max_length=1200)
     target_note_ids: list[str] = Field(default_factory=list)
     semantic_context: str | None = None
@@ -616,6 +649,7 @@ class CanvasEditPreviewResponse(BaseModel):
 
 class CanvasEditApplyRequest(BaseModel):
     repo_path: str
+    canvas_id: str | None = None
     accepted_change_ids: list[str] = Field(default_factory=list)
     changes: list[CanvasEditChangeRecord] = Field(default_factory=list)
 
