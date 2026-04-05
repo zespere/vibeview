@@ -647,6 +647,32 @@ export function createProjectCanvas(repoPath: string, title?: string) {
   });
 }
 
+export function renameProjectCanvas(repoPath: string, canvasId: string, title: string) {
+  return apiRequest<CanvasResponse>(`/canvases/${encodeURIComponent(canvasId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      title,
+    }),
+  });
+}
+
+export function duplicateProjectCanvas(repoPath: string, canvasId: string, title?: string) {
+  return apiRequest<CanvasResponse>(`/canvases/${encodeURIComponent(canvasId)}/duplicate`, {
+    method: "POST",
+    body: JSON.stringify({
+      repo_path: repoPath,
+      title,
+    }),
+  });
+}
+
+export function deleteProjectCanvas(repoPath: string, canvasId: string) {
+  return apiRequest<CanvasListResponse>(`/canvases/${encodeURIComponent(canvasId)}?repo_path=${encodeURIComponent(repoPath)}`, {
+    method: "DELETE",
+  });
+}
+
 export function fetchCanvas(repoPath?: string, canvasId?: string | null) {
   const params = new URLSearchParams();
   if (repoPath) {

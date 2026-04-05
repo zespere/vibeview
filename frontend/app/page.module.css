@@ -353,6 +353,42 @@
   color: #8a7a67;
 }
 
+.projectTreeCanvasRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.projectTreeCanvasActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-left: 10px;
+}
+
+.projectTreeCanvasAction,
+.projectTreeCanvasActionDanger {
+  min-height: 22px;
+  border: 1px solid rgba(205, 189, 169, 0.58);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.78);
+  color: #6d5d4d;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 8px;
+}
+
+.projectTreeCanvasAction:hover,
+.projectTreeCanvasActionDanger:hover {
+  background: rgba(255, 250, 242, 0.94);
+}
+
+.projectTreeCanvasActionDanger {
+  color: #8e5d4c;
+}
+
 .railSectionDivider {
   height: 1px;
   margin: 6px 8px 4px;

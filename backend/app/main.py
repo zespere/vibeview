@@ -21,6 +21,7 @@ from .models import (
     AssistImpactResponse,
     CanvasEdgeCreateRequest,
     CanvasCreateRequest,
+    CanvasDuplicateRequest,
     CanvasEditApplyRequest,
     CanvasEditApplyResponse,
     CanvasEditPreviewRequest,
@@ -28,9 +29,11 @@ from .models import (
     CanvasGenerateRequest,
     CanvasGenerateResponse,
     CanvasListResponse,
+    CanvasSummary,
     CanvasResponse,
     CanvasNodeCreateRequest,
     CanvasNodeUpdateRequest,
+    CanvasUpdateRequest,
     CodexChangeRequest,
     CodexChangeResponse,
     CommitCreateRequest,
@@ -724,6 +727,48 @@ def create_canvas(request: CanvasCreateRequest) -> CanvasResponse:
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return CanvasResponse(document=document)
+
+
+@app.patch("/canvases/{canvas_id}", response_model=CanvasResponse)
+def update_canvas(canvas_id: str, request: CanvasUpdateRequest) -> CanvasResponse:
+    resolved_repo_path = str(Path(request.repo_path).resolve())
+    try:
+        document = canvas_service.update_canvas(
+            CanvasUpdateRequest(repo_path=resolved_repo_path, title=request.title),
+            canvas_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return CanvasResponse(document=document)
+
+
+@app.post("/canvases/{canvas_id}/duplicate", response_model=CanvasResponse)
+def duplicate_canvas(canvas_id: str, request: CanvasDuplicateRequest) -> CanvasResponse:
+    resolved_repo_path = str(Path(request.repo_path).resolve())
+    try:
+        document = canvas_service.duplicate_canvas(
+            CanvasDuplicateRequest(repo_path=resolved_repo_path, title=request.title),
+            canvas_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return CanvasResponse(document=document)
+
+
+@app.delete("/canvases/{canvas_id}", response_model=CanvasListResponse)
+def delete_canvas(canvas_id: str, repo_path: str) -> CanvasListResponse:
+    resolved_repo_path = str(Path(repo_path).resolve())
+    try:
+        collection = canvas_service.delete_canvas(resolved_repo_path, canvas_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return CanvasListResponse(
+        repo_path=resolved_repo_path,
+        canvases=[
+            CanvasSummary(id=canvas.id or f"canvas_{index}", title=canvas.title, node_count=len(canvas.nodes))
+            for index, canvas in enumerate(collection.canvases)
+        ],
+    )
 
 
 @app.get("/canvas", response_model=CanvasResponse)

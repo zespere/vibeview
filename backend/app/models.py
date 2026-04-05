@@ -570,6 +570,16 @@ class CanvasCreateRequest(BaseModel):
     title: str | None = None
 
 
+class CanvasUpdateRequest(BaseModel):
+    repo_path: str
+    title: str = Field(min_length=1, max_length=120)
+
+
+class CanvasDuplicateRequest(BaseModel):
+    repo_path: str
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+
+
 class GeneratedCanvasNode(BaseModel):
     title: str = Field(min_length=1, max_length=120)
     description: str = ""

@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import json
 import logging
+from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
 from .models import (
     CanvasCollection,
     CanvasCreateRequest,
+    CanvasDuplicateRequest,
     CanvasEditChangeRecord,
     CanvasDocument,
     CanvasEdge,
     CanvasEdgeCreateRequest,
     CanvasSummary,
+    CanvasUpdateRequest,
     GeneratedCanvasEdge,
     GeneratedCanvasNode,
     NoteChangeSummary,
@@ -172,7 +175,8 @@ class CanvasService:
     def create_canvas(self, request: CanvasCreateRequest) -> CanvasDocument:
         repo_path = request.repo_path
         collection = self.store.load_collection_for_repo(repo_path)
-        title = (request.title or "").strip() or f"Canvas {len(collection.canvases) + 1}"
+        requested_title = (request.title or "").strip() or f"Canvas {len(collection.canvases) + 1}"
+        title = self._dedupe_canvas_title(collection, requested_title)
         document = CanvasDocument(
             id=f"canvas_{uuid4().hex[:10]}",
             title=title,
@@ -183,6 +187,44 @@ class CanvasService:
         collection.canvases.append(document)
         self.store.save_collection(collection)
         return document
+
+    def update_canvas(self, request: CanvasUpdateRequest, canvas_id: str) -> CanvasDocument:
+        collection = self.store.load_collection_for_repo(request.repo_path)
+        document = next((canvas for canvas in collection.canvases if canvas.id == canvas_id), None)
+        if document is None:
+            raise ValueError(f"Canvas not found: {canvas_id}")
+        next_title = request.title.strip()
+        if not next_title:
+            raise ValueError("Canvas title cannot be empty.")
+        normalized = next_title.lower()
+        if any(canvas.id != canvas_id and canvas.title.strip().lower() == normalized for canvas in collection.canvases):
+            raise ValueError(f'Canvas title already exists: "{next_title}"')
+        document.title = next_title
+        self.store.save_collection(collection)
+        return document
+
+    def duplicate_canvas(self, request: CanvasDuplicateRequest, canvas_id: str) -> CanvasDocument:
+        collection = self.store.load_collection_for_repo(request.repo_path)
+        source = next((canvas for canvas in collection.canvases if canvas.id == canvas_id), None)
+        if source is None:
+            raise ValueError(f"Canvas not found: {canvas_id}")
+        requested_title = (request.title or "").strip() or f"{source.title} Copy"
+        next_title = self._dedupe_canvas_title(collection, requested_title)
+        duplicate = deepcopy(source)
+        duplicate.id = f"canvas_{uuid4().hex[:10]}"
+        duplicate.title = next_title
+        collection.canvases.append(duplicate)
+        self.store.save_collection(collection)
+        return duplicate
+
+    def delete_canvas(self, repo_path: str, canvas_id: str) -> CanvasCollection:
+        collection = self.store.load_collection_for_repo(repo_path)
+        next_canvases = [canvas for canvas in collection.canvases if canvas.id != canvas_id]
+        if len(next_canvases) == len(collection.canvases):
+            raise ValueError(f"Canvas not found: {canvas_id}")
+        collection.canvases = next_canvases
+        self.store.save_collection(collection)
+        return collection
 
     def reset_repo_canvas(self, repo_path: str, canvas_id: str | None = None) -> CanvasDocument:
         collection, document = self._load_canvas(repo_path, canvas_id)
@@ -284,6 +326,18 @@ class CanvasService:
     def _save_canvas(self, collection: CanvasCollection, document: CanvasDocument) -> None:
         collection.canvases = [document if canvas.id == document.id else canvas for canvas in collection.canvases]
         self.store.save_collection(collection)
+
+    def _dedupe_canvas_title(self, collection: CanvasCollection, requested_title: str) -> str:
+        normalized_titles = {canvas.title.strip().lower() for canvas in collection.canvases}
+        candidate = requested_title.strip() or "Canvas"
+        if candidate.lower() not in normalized_titles:
+            return candidate
+        suffix = 2
+        while True:
+            next_candidate = f"{candidate} {suffix}"
+            if next_candidate.lower() not in normalized_titles:
+                return next_candidate
+            suffix += 1
 
     def append_generated_map(
         self,

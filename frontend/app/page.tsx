@@ -20,6 +20,8 @@ import { CanvasBoard } from "@/components/canvas-board";
 import {
   applyCanvasEdits,
   createProjectCanvas,
+  deleteProjectCanvas,
+  duplicateProjectCanvas,
   createCanvasNode,
   createProjectCommit,
   pushProjectCommits,
@@ -39,6 +41,7 @@ import {
   generateCanvasFromPrompt,
   streamProjectRun,
   resetCanvas,
+  renameProjectCanvas,
   uploadProjectImage,
   updateProject,
   updateProjectConversation,
@@ -2120,6 +2123,120 @@ export default function Home() {
             openCanvasTab(response.document.id);
           }
           setComposerStatus(`Created ${response.document.title}.`);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
+  async function handleRenameProjectCanvas(canvas: CanvasSummary) {
+    if (!activeRepoPath) {
+      return;
+    }
+    const nextTitle = window.prompt("Rename canvas", canvas.title)?.trim();
+    if (!nextTitle || nextTitle === canvas.title) {
+      return;
+    }
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await renameProjectCanvas(activeRepoPath, canvas.id, nextTitle);
+          setProjectCanvases((current) =>
+            current.map((item) => (item.id === canvas.id ? { ...item, title: response.document.title } : item)),
+          );
+          if (canvasDocument?.id === canvas.id) {
+            setCanvasDocument(response.document);
+          }
+          await refreshProjectsTree();
+          setComposerStatus(`Renamed canvas to ${response.document.title}.`);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
+  async function handleDuplicateProjectCanvas(canvas: CanvasSummary) {
+    if (!activeRepoPath) {
+      return;
+    }
+    const requestedTitle = window.prompt("Duplicate canvas as", `${canvas.title} Copy`)?.trim() || undefined;
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await duplicateProjectCanvas(activeRepoPath, canvas.id, requestedTitle);
+          setProjectCanvases((current) => [
+            ...current,
+            { id: response.document.id ?? `canvas-${Date.now()}`, title: response.document.title, node_count: response.document.nodes.length },
+          ]);
+          await refreshProjectsTree();
+          if (response.document.id) {
+            openCanvasTab(response.document.id);
+          }
+          setComposerStatus(`Duplicated ${canvas.title} as ${response.document.title}.`);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+  }
+
+  async function handleDeleteProjectCanvas(canvas: CanvasSummary) {
+    if (!activeRepoPath) {
+      return;
+    }
+    const shouldDelete = window.confirm(`Delete canvas "${canvas.title}"?`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    startCanvasTransition(() => {
+      void (async () => {
+        try {
+          setErrorMessage(null);
+          const response = await deleteProjectCanvas(activeRepoPath, canvas.id);
+          const nextCanvases = response.canvases;
+          setProjectCanvases(nextCanvases);
+          setOpenTabs((current) =>
+            current.filter(
+              (tab) =>
+                !(
+                  (tab.type === "canvas" || tab.type === "note" || tab.type === "exploration") &&
+                  tab.canvasId === canvas.id
+                ),
+            ),
+          );
+          setOpenCanvasNodeIds([]);
+          setSelectedCanvasNodeId((current) => (current ? null : current));
+          setSelectedCanvasNodeIds([]);
+          setNotesExploration((current) => (current?.canvasId === canvas.id ? null : current));
+          setExplorationTabs((current) =>
+            Object.fromEntries(Object.entries(current).filter(([, branch]) => branch.canvasId !== canvas.id)),
+          );
+          setExplorationBranches((current) =>
+            Object.fromEntries(Object.entries(current).filter(([, branch]) => branch.canvasId !== canvas.id)),
+          );
+          if (activeCanvasId === canvas.id) {
+            const nextCanvasId = nextCanvases[0]?.id ?? null;
+            setActiveCanvasId(nextCanvasId);
+            setActiveTabId(nextCanvasId ? (`canvas:${nextCanvasId}` as const) : null);
+            if (nextCanvasId) {
+              setOpenTabs((current) =>
+                current.some((tab) => tab.type === "canvas" && tab.canvasId === nextCanvasId)
+                  ? current
+                  : [...current, { id: `canvas:${nextCanvasId}`, type: "canvas", canvasId: nextCanvasId }],
+              );
+            } else {
+              setCanvasDocument(null);
+            }
+          }
+          await refreshProjectsTree();
+          setComposerStatus(`Deleted ${canvas.title}.`);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -4996,21 +5113,57 @@ export default function Home() {
                 <p className={styles.railMeta}>No canvases yet.</p>
               ) : (
                 activeProjectCanvases.map((canvas) => (
-                  <button
-                    className={
-                      activeCanvasId === canvas.id
-                        ? styles.projectTreeConversationActive
-                        : styles.projectTreeConversation
-                    }
-                    key={canvas.id}
-                    onClick={() => openCanvasTab(canvas.id)}
-                    type="button"
-                  >
-                    <span className={styles.projectTreeConversationTitle}>{canvas.title}</span>
-                    <span className={styles.projectTreeConversationMeta}>
-                      {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
-                    </span>
-                  </button>
+                  <div className={styles.projectTreeCanvasRow} key={canvas.id}>
+                    <button
+                      className={
+                        activeCanvasId === canvas.id
+                          ? styles.projectTreeConversationActive
+                          : styles.projectTreeConversation
+                      }
+                      onClick={() => openCanvasTab(canvas.id)}
+                      type="button"
+                    >
+                      <span className={styles.projectTreeConversationTitle}>{canvas.title}</span>
+                      <span className={styles.projectTreeConversationMeta}>
+                        {canvas.node_count} note{canvas.node_count === 1 ? "" : "s"}
+                      </span>
+                    </button>
+                    <div className={styles.projectTreeCanvasActions}>
+                      <button
+                        className={styles.projectTreeCanvasAction}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleRenameProjectCanvas(canvas);
+                        }}
+                        title="Rename canvas"
+                        type="button"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        className={styles.projectTreeCanvasAction}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleDuplicateProjectCanvas(canvas);
+                        }}
+                        title="Duplicate canvas"
+                        type="button"
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        className={styles.projectTreeCanvasActionDanger}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleDeleteProjectCanvas(canvas);
+                        }}
+                        title="Delete canvas"
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 ))
               )}
             </div>
