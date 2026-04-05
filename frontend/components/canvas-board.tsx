@@ -19,7 +19,7 @@ import {
 } from "@xyflow/react";
 
 import styles from "@/app/page.module.css";
-import type { CanvasDocument, CanvasNode } from "@/lib/api";
+import type { CanvasDocument, CanvasNode, CanvasSummary } from "@/lib/api";
 
 interface CanvasBoardProps {
   document: CanvasDocument | null;
@@ -27,8 +27,10 @@ interface CanvasBoardProps {
   edgeNodeIds?: string[];
   expandedNodeId?: string | null;
   canCreateCanvasFromSelection?: boolean;
+  referenceCanvases?: CanvasSummary[];
   onCreateNodeAt: (x: number, y: number) => void;
   onCreateCanvasFromSelection?: () => void;
+  onInsertCanvasReference?: (canvasId: string, anchorNodeId?: string | null) => void;
   onDeleteNode: (nodeId: string) => void;
   onMoveNodeEnd: (nodeId: string, x: number, y: number) => void;
   onSelectNode: (nodeId: string) => void;
@@ -70,8 +72,10 @@ export function CanvasBoard({
   edgeNodeIds,
   expandedNodeId,
   canCreateCanvasFromSelection = false,
+  referenceCanvases = [],
   onCreateNodeAt,
   onCreateCanvasFromSelection,
+  onInsertCanvasReference,
   onDeleteNode,
   onMoveNodeEnd,
   onSelectNode,
@@ -451,6 +455,23 @@ export function CanvasBoard({
               Create canvas from selection
             </button>
           ) : null}
+          {referenceCanvases.length > 0 ? (
+            <>
+              {referenceCanvases.map((canvas) => (
+                <button
+                  className={styles.canvasContextItem}
+                  key={`reference:${canvas.id}`}
+                  onClick={() => {
+                    onInsertCanvasReference?.(canvas.id, contextMenu.nodeId);
+                    setContextMenu(null);
+                  }}
+                  type="button"
+                >
+                  Reference {canvas.title}
+                </button>
+              ))}
+            </>
+          ) : null}
           {contextMenu.nodeId ? (
             <>
               {canOpenCanvasNodeInTab(document, contextMenu.nodeId) ? (
@@ -607,6 +628,14 @@ function NoteFlowNode({ data, selected }: { data: NoteNodeData; selected?: boole
         ) : null}
         <>
           <strong className={styles.canvasNodeTitle}>{node.title}</strong>
+          {isCanvasReference ? (
+            <div className={styles.canvasReferenceHint}>
+              <span className={styles.canvasReferenceGlyph} aria-hidden="true">
+                ↗
+              </span>
+              <span>Canvas reference</span>
+            </div>
+          ) : null}
           {isExpanded ? (
             <div className={`${styles.canvasNodeExpandedBody} nodrag`}>
               <p className={styles.canvasNodeDescriptionExpanded}>{node.description || "No description yet."}</p>

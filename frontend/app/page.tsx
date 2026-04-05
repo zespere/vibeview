@@ -3533,7 +3533,7 @@ export default function Home() {
     });
   }
 
-  async function handleInsertCanvasReferenceNode(targetCanvas: CanvasSummary) {
+  async function handleInsertCanvasReferenceNode(targetCanvas: CanvasSummary, anchorNodeId?: string | null) {
     if (!activeRepoPath || !activeCanvasId || activeCanvasId === targetCanvas.id) {
       return;
     }
@@ -3542,6 +3542,9 @@ export default function Home() {
       void (async () => {
         try {
           const anchorNode =
+            (anchorNodeId
+              ? canvasDocument?.nodes.find((node) => node.id === anchorNodeId) ?? null
+              : null) ??
             (selectedCanvasNodeIds.length > 0
               ? canvasDocument?.nodes.find((node) => node.id === selectedCanvasNodeIds[0]) ?? null
               : null) ??
@@ -3639,6 +3642,15 @@ export default function Home() {
                     void handleCreateCanvasFromSelection();
                   });
                 }}
+                onInsertCanvasReference={(canvasId, anchorNodeId) => {
+                  const targetCanvas = projectCanvases.find((canvas) => canvas.id === canvasId);
+                  if (!targetCanvas) {
+                    return;
+                  }
+                  startCanvasTransition(() => {
+                    void handleInsertCanvasReferenceNode(targetCanvas, anchorNodeId);
+                  });
+                }}
                 onMoveNodeEnd={(nodeId, x, y) => {
                   startCanvasTransition(() => {
                     void handlePersistCanvasNodePosition(nodeId, x, y);
@@ -3648,6 +3660,7 @@ export default function Home() {
                 onRenameNode={handleRenameCanvasNode}
                 onSelectNode={(nodeId) => handleSelectCanvasNodes([nodeId])}
                 onSelectNodes={handleSelectCanvasNodes}
+                referenceCanvases={projectCanvases.filter((canvas) => canvas.id !== activeCanvasId)}
                 selectedNodeIds={selectedCanvasNodeIds}
               />
               {renderCanvasEditReview()}
