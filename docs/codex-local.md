@@ -12,7 +12,7 @@ Request body:
 
 ```json
 {
-  "repo_path": "/home/wniak/konceptura/repos/react-crud-app",
+  "repo_path": "repos/react-crud-app",
   "prompt": "Add a footer note to the UI.",
   "dry_run": true,
   "use_graph_context": true,
@@ -41,7 +41,7 @@ Confirm the binary path:
 npm prefix -g
 ```
 
-If needed, update [`konceptura.toml`](/home/wniak/konceptura/konceptura.toml):
+If needed, update [`konceptura.toml`](../konceptura.toml):
 
 ```toml
 [codex]

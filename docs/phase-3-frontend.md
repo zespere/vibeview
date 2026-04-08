@@ -20,7 +20,7 @@ This is the thinnest UI that proves the backend contract is usable from a browse
 ## Install
 
 ```bash
-cd /home/wniak/konceptura/frontend
+cd frontend
 cp .env.local.example .env.local
 pnpm install
 cd ..
@@ -31,14 +31,14 @@ cd ..
 Start the backend first:
 
 ```bash
-cd /home/wniak/konceptura
+cd konceptura
 ./scripts/run-backend.sh
 ```
 
 Then start the frontend:
 
 ```bash
-cd /home/wniak/konceptura
+cd konceptura
 ./scripts/run-frontend.sh
 ```
 
@@ -47,7 +47,7 @@ The frontend runs at `http://localhost:3001`.
 ## Verification
 
 ```bash
-cd /home/wniak/konceptura/frontend
+cd frontend
 pnpm lint
 pnpm build
 ```

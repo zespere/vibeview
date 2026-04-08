@@ -16,14 +16,14 @@ Self-hosted, local-first MVP for code graph inspection and graph-backed code ass
 Start infrastructure:
 
 ```bash
-cd /home/wniak/konceptura
+cd konceptura
 docker compose -f infra/docker-compose.yml up -d
 ```
 
 Install `code-graph-rag` with broad grammar support:
 
 ```bash
-cd /home/wniak/konceptura/vendor/code-graph-rag
+cd vendor/code-graph-rag
 export PATH="$HOME/.local/bin:$PATH"
 uv sync --no-dev --extra treesitter-full
 ```
@@ -31,7 +31,7 @@ uv sync --no-dev --extra treesitter-full
 Install backend dependencies:
 
 ```bash
-cd /home/wniak/konceptura/backend
+cd backend
 export PATH="$HOME/.local/bin:$PATH"
 uv sync
 ```
@@ -39,7 +39,7 @@ uv sync
 Install frontend dependencies:
 
 ```bash
-cd /home/wniak/konceptura/frontend
+cd frontend
 cp .env.local.example .env.local
 pnpm install
 ```
@@ -53,7 +53,7 @@ npm install -g @openai/codex
 Run the full local dev stack:
 
 ```bash
-cd /home/wniak/konceptura
+cd konceptura
 ./scripts/dev.sh
 ```
 
@@ -84,20 +84,20 @@ If you want to run services separately, the old scripts still exist:
 - Python sample: `repos/sample-app`
 - React CRUD sample: `repos/react-crud-app`
 
-The default repo in [`konceptura.toml`](/home/wniak/konceptura/konceptura.toml) is the React CRUD app.
+The default repo in [`konceptura.toml`](./konceptura.toml) is the React CRUD app.
 
 ## Smoke check
 
 With the backend running:
 
 ```bash
-cd /home/wniak/konceptura
+cd konceptura
 ./scripts/run-mvp-check.sh
 ```
 
 ## Config
 
-[`konceptura.toml`](/home/wniak/konceptura/konceptura.toml) controls:
+[`konceptura.toml`](./konceptura.toml) controls:
 
 - Memgraph connection
 - `code-graph-rag` binary path

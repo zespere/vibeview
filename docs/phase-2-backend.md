@@ -19,7 +19,7 @@ This gives the frontend a stable backend contract before we build UI screens.
 ## Install
 
 ```bash
-cd /home/wniak/konceptura/backend
+cd backend
 export PATH="$HOME/.local/bin:$PATH"
 uv sync
 cd ..
@@ -46,7 +46,7 @@ Trigger indexing:
 ```bash
 curl -X POST http://localhost:8000/index \
   -H 'Content-Type: application/json' \
-  -d '{"repo_path":"/home/wniak/konceptura/repos/sample-app","clean":true}' | python3 -m json.tool
+  -d '{"repo_path":"repos/sample-app","clean":true}' | python3 -m json.tool
 ```
 
 `clean=true` is safe here because the backend removes the Code-Graph-RAG hash cache before rebuilding.

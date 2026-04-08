@@ -22,7 +22,7 @@ build/
 backend/data/
 backend/data/*.log
 frontend/.next/
-frontend/.next.stale.*/
-frontend/.next.cleanup.*/
+frontend/.next*/
 frontend/node_modules/
 frontend/.env.local
+.konceptura/*.json

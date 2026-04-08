@@ -48,7 +48,7 @@ docker ps --filter name=konceptura-memgraph
 
 Memgraph Lab will be available at `http://localhost:3000`.
 
-If you are on ARM and Memgraph exits immediately, keep the explicit `platform: linux/arm64/v8` line in [`infra/docker-compose.yml`](/home/wniak/konceptura/infra/docker-compose.yml).
+If you are on ARM and Memgraph exits immediately, keep the explicit `platform: linux/arm64/v8` line in [`infra/docker-compose.yml`](../infra/docker-compose.yml).
 
 ### 3. Install Code-Graph-RAG
 
@@ -64,7 +64,7 @@ cd ../..
 ```bash
 rm -f repos/sample-app/.cgr-hash-cache.json
 vendor/code-graph-rag/.venv/bin/cgr start \
-  --repo-path /home/wniak/konceptura/repos/sample-app \
+  --repo-path repos/sample-app \
   --update-graph \
   --clean
 ```

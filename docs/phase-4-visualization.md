@@ -30,7 +30,7 @@ It uses the currently active indexed repository by default.
 Start both services:
 
 ```bash
-cd /home/wniak/konceptura
+cd konceptura
 ./scripts/run-backend.sh
 ./scripts/run-frontend.sh
 ```
@@ -44,11 +44,11 @@ http://localhost:3001
 ## Verification
 
 ```bash
-cd /home/wniak/konceptura/backend
+cd backend
 export PATH="$HOME/.local/bin:$PATH"
 uv run python -m compileall app
 
-cd /home/wniak/konceptura/frontend
+cd ../frontend
 pnpm lint
 pnpm build
 ```

@@ -6,12 +6,12 @@ The minimum operational polish needed for a local-first single-user MVP.
 
 This phase adds:
 
-- root config file: [`konceptura.toml`](/home/wniak/konceptura/konceptura.toml)
+- root config file: [`konceptura.toml`](../konceptura.toml)
 - backend file logging
 - dry-run support for `POST /index`
 - Codex CLI binary config
 - sample repo shortcuts surfaced through `GET /status`
-- smoke-check script: [`scripts/run-mvp-check.sh`](/home/wniak/konceptura/scripts/run-mvp-check.sh)
+- smoke-check script: [`scripts/run-mvp-check.sh`](../scripts/run-mvp-check.sh)
 
 ## Why now
 
@@ -24,19 +24,19 @@ Preview an index command without running it:
 ```bash
 curl -X POST http://127.0.0.1:8000/index \
   -H 'Content-Type: application/json' \
-  -d '{"repo_path":"/home/wniak/konceptura/repos/react-crud-app","clean":true,"dry_run":true}' \
+  -d '{"repo_path":"repos/react-crud-app","clean":true,"dry_run":true}' \
   | python3 -m json.tool
 ```
 
 Run the backend smoke check:
 
 ```bash
-cd /home/wniak/konceptura
+cd konceptura
 ./scripts/run-mvp-check.sh
 ```
 
 Inspect backend logs:
 
 ```bash
-tail -n 50 /home/wniak/konceptura/backend/data/konceptura.log
+tail -n 50 backend/data/konceptura.log
 ```

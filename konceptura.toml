@@ -14,7 +14,7 @@ password = ""
 binary = "vendor/code-graph-rag/.venv/bin/cgr"
 
 [codex]
-binary = "/home/wniak/.config/nvm/versions/node/v25.2.0/bin/codex"
+binary = "codex"
 bypass_sandbox_default = true
 
 [repos]
