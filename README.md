@@ -1,116 +1,35 @@
-# Vibeview MVP
+# Vibeview
 
-Self-hosted, local-first MVP for code graph inspection and graph-backed code assistance.
+Vibeview is a local-first visual interface for understanding and editing a codebase through canvases, notes, and conversation.
+Vibecoded using t3code&GPT 5.4
 
-## What it does
+Thanks you Vitali for making code graph rag
+https://github.com/vitali87
 
-- Runs Memgraph locally
-- Runs `code-graph-rag` locally
-- Indexes a repository into a code graph
-- Exposes a small Python REST backend
-- Exposes a Next.js frontend for indexing, structure browsing, search, and impact analysis
-- Can delegate local code changes to the Codex CLI and return diffs plus command traces
+## Run locally
 
-## Quick start
+Prerequisites:
 
-Start infrastructure:
+- `docker`
+- `uv`
+- `pnpm`
+- `@openai/codex`
 
-```bash
-cd vibeview
-docker compose -f infra/docker-compose.yml up -d
-```
-
-Install `code-graph-rag` with broad grammar support:
+Start everything:
 
 ```bash
-cd vendor/code-graph-rag
-export PATH="$HOME/.local/bin:$PATH"
-uv sync --no-dev --extra treesitter-full
-```
-
-Install backend dependencies:
-
-```bash
-cd backend
-export PATH="$HOME/.local/bin:$PATH"
-uv sync
-```
-
-Install frontend dependencies:
-
-```bash
-cd frontend
-cp .env.local.example .env.local
-pnpm install
-```
-
-Install Codex locally:
-
-```bash
-npm install -g @openai/codex
-```
-
-Run the full local dev stack:
-
-```bash
-cd vibeview
 ./scripts/dev.sh
 ```
 
-Open:
+Then open:
 
 ```text
 http://localhost:3001
 ```
 
-`./scripts/dev.sh`:
+## What `./scripts/dev.sh` does
 
 - starts Memgraph if needed
-- stops stale frontend/backend processes on `3001` and `8000`
 - starts the backend on `8000`
 - starts the frontend on `3001`
-- prefixes logs so both services can run in one terminal
-- stops backend and frontend together on `Ctrl-C`
-
-If you want to run services separately, the old scripts still exist:
-
-```bash
-./scripts/run-backend.sh
-./scripts/run-frontend.sh
-```
-
-## Sample repositories
-
-- Python sample: `repos/sample-app`
-- React CRUD sample: `repos/react-crud-app`
-
-The default repo in [`vibeview.toml`](./vibeview.toml) is the React CRUD app.
-
-## Smoke check
-
-With the backend running:
-
-```bash
-cd vibeview
-./scripts/run-mvp-check.sh
-```
-
-## Config
-
-[`vibeview.toml`](./vibeview.toml) controls:
-
-- Memgraph connection
-- `code-graph-rag` binary path
-- Codex CLI binary path
-- backend state path
-- backend log path
-- default repo path
-- frontend origins
-- sample repo shortcuts
-
-## Codex notes
-
-- The app now exposes `POST /codex/change` through the backend.
-- On this machine, Codex's built-in sandbox wrapper fails with `bwrap: Unknown option --argv0`.
-- Because of that, real Codex edit runs currently require bypass mode.
-- The UI surfaces that as a toggle so the behavior is explicit.
+- stops stale local processes on those ports first
