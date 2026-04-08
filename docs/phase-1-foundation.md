@@ -3,7 +3,7 @@
 ## Folder structure
 
 ```text
-konceptura/
+vibeview/
 ├── docs/
 ├── infra/
 │   └── docker-compose.yml
@@ -43,7 +43,7 @@ uv python install 3.12
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d
-docker ps --filter name=konceptura-memgraph
+docker ps --filter name=vibeview-memgraph
 ```
 
 Memgraph Lab will be available at `http://localhost:3000`.

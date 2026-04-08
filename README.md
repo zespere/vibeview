@@ -1,4 +1,4 @@
-# Konceptura MVP
+# Vibeview MVP
 
 Self-hosted, local-first MVP for code graph inspection and graph-backed code assistance.
 
@@ -16,7 +16,7 @@ Self-hosted, local-first MVP for code graph inspection and graph-backed code ass
 Start infrastructure:
 
 ```bash
-cd konceptura
+cd vibeview
 docker compose -f infra/docker-compose.yml up -d
 ```
 
@@ -53,7 +53,7 @@ npm install -g @openai/codex
 Run the full local dev stack:
 
 ```bash
-cd konceptura
+cd vibeview
 ./scripts/dev.sh
 ```
 
@@ -84,20 +84,20 @@ If you want to run services separately, the old scripts still exist:
 - Python sample: `repos/sample-app`
 - React CRUD sample: `repos/react-crud-app`
 
-The default repo in [`konceptura.toml`](./konceptura.toml) is the React CRUD app.
+The default repo in [`vibeview.toml`](./vibeview.toml) is the React CRUD app.
 
 ## Smoke check
 
 With the backend running:
 
 ```bash
-cd konceptura
+cd vibeview
 ./scripts/run-mvp-check.sh
 ```
 
 ## Config
 
-[`konceptura.toml`](./konceptura.toml) controls:
+[`vibeview.toml`](./vibeview.toml) controls:
 
 - Memgraph connection
 - `code-graph-rag` binary path

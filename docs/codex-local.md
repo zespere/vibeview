@@ -1,6 +1,6 @@
 # Local Codex integration
 
-Konceptura now exposes a minimal local change runner on top of the Codex CLI.
+Vibeview now exposes a minimal local change runner on top of the Codex CLI.
 
 ## Endpoint
 
@@ -41,7 +41,7 @@ Confirm the binary path:
 npm prefix -g
 ```
 
-If needed, update [`konceptura.toml`](../konceptura.toml):
+If needed, update [`vibeview.toml`](../vibeview.toml):
 
 ```toml
 [codex]
@@ -62,4 +62,4 @@ That means:
 - dry runs can still work if bypass mode is enabled
 - real code changes currently require bypass mode
 
-Konceptura surfaces that explicitly in the UI instead of hiding it.
+Vibeview surfaces that explicitly in the UI instead of hiding it.

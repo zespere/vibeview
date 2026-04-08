@@ -1458,14 +1458,14 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      const storedExpanded = window.localStorage.getItem("konceptura:rail:expanded");
+      const storedExpanded = readStoredPreference("rail:expanded");
       if (storedExpanded === "0") {
         setIsRailExpanded(false);
       } else if (storedExpanded === "1") {
         setIsRailExpanded(true);
       }
 
-      const storedWidth = window.localStorage.getItem("konceptura:rail:width");
+      const storedWidth = readStoredPreference("rail:width");
       if (storedWidth) {
         const parsedWidth = Number.parseInt(storedWidth, 10);
         if (Number.isFinite(parsedWidth)) {
@@ -1473,14 +1473,14 @@ export default function Home() {
         }
       }
 
-      const storedCanvasesExpanded = window.localStorage.getItem("konceptura:rail:canvases-expanded");
+      const storedCanvasesExpanded = readStoredPreference("rail:canvases-expanded");
       if (storedCanvasesExpanded === "0") {
         setIsCanvasesSectionExpanded(false);
       } else if (storedCanvasesExpanded === "1") {
         setIsCanvasesSectionExpanded(true);
       }
 
-      const storedEmptyCanvasGuide = window.localStorage.getItem("konceptura:canvas:empty-guide-dismissed");
+      const storedEmptyCanvasGuide = readStoredPreference("canvas:empty-guide-dismissed");
       if (storedEmptyCanvasGuide === "1") {
         setIsEmptyCanvasGuideDismissed(true);
       } else if (storedEmptyCanvasGuide === "0") {
@@ -1493,10 +1493,10 @@ export default function Home() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem("konceptura:rail:expanded", isRailExpanded ? "1" : "0");
-      window.localStorage.setItem("konceptura:rail:width", `${railWidth}`);
-      window.localStorage.setItem("konceptura:rail:canvases-expanded", isCanvasesSectionExpanded ? "1" : "0");
-      window.localStorage.setItem("konceptura:canvas:empty-guide-dismissed", isEmptyCanvasGuideDismissed ? "1" : "0");
+      writeStoredPreference("rail:expanded", isRailExpanded ? "1" : "0");
+      writeStoredPreference("rail:width", `${railWidth}`);
+      writeStoredPreference("rail:canvases-expanded", isCanvasesSectionExpanded ? "1" : "0");
+      writeStoredPreference("canvas:empty-guide-dismissed", isEmptyCanvasGuideDismissed ? "1" : "0");
     } catch {
       // Ignore localStorage failures and keep the rail usable.
     }
@@ -4170,7 +4170,7 @@ export default function Home() {
                         className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
                         key={message.id}
                       >
-                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Konceptura"}</span>
+                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Vibeview"}</span>
                         {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
                         <div className={styles.consoleMessageBody}>
                           {renderConsoleMessageContent(
@@ -5397,7 +5397,22 @@ function areExplorationSuggestionMapsEqual(
 }
 
 function buildExplorationStorageKey(repoPath: string) {
-  return `konceptura.explorations:${repoPath}`;
+  return `vibeview.explorations:${repoPath}`;
+}
+
+function readStoredPreference(key: string) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(`vibeview:${key}`);
+}
+
+function writeStoredPreference(key: string, value: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(`vibeview:${key}`, value);
 }
 
 function readStoredExplorationBranches(repoPath: string) {

@@ -15,8 +15,8 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Konceptura",
-  description: "Frontend for the Konceptura MVP codebase platform",
+  title: "Vibeview",
+  description: "Visual interface for understanding and editing a codebase",
 };
 
 export default function RootLayout({

@@ -469,7 +469,7 @@ class CanvasDocument(BaseModel):
         linked_files = [
             str(item).strip()
             for item in (files or [])
-            if isinstance(item, str) and str(item).strip() and not str(item).startswith(".konceptura/")
+            if isinstance(item, str) and str(item).strip() and not str(item).startswith(".vibeview/")
         ]
 
         nodes: list[dict[str, Any]] = [

@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG_PATH = WORKSPACE_ROOT / "konceptura.toml"
+DEFAULT_CONFIG_PATH = WORKSPACE_ROOT / "vibeview.toml"
 
 
 class Settings(BaseModel):
@@ -26,7 +26,7 @@ class Settings(BaseModel):
     state_path: Path = WORKSPACE_ROOT / "backend" / "data" / "state.json"
     canvas_path: Path = WORKSPACE_ROOT / "backend" / "data" / "canvas.json"
     project_path: Path = WORKSPACE_ROOT / "backend" / "data" / "project.json"
-    log_path: Path = WORKSPACE_ROOT / "backend" / "data" / "konceptura.log"
+    log_path: Path = WORKSPACE_ROOT / "backend" / "data" / "vibeview.log"
     log_level: str = "INFO"
     default_repo_path: Path = WORKSPACE_ROOT / "repos" / "react-crud-app"
     frontend_origins: list[str] = Field(
@@ -81,7 +81,7 @@ def _discover_codex_binary() -> Path | None:
 
 def load_settings() -> Settings:
     workspace_root = WORKSPACE_ROOT
-    config_path = Path(os.getenv("KONCEPTURA_CONFIG", DEFAULT_CONFIG_PATH))
+    config_path = Path(os.getenv("VIBEVIEW_CONFIG", DEFAULT_CONFIG_PATH))
     raw = _read_config_file(config_path)
 
     app_cfg = raw.get("app", {})
@@ -98,13 +98,13 @@ def load_settings() -> Settings:
     settings = Settings(
         workspace_root=workspace_root,
         config_path=config_path,
-        memgraph_uri=os.getenv("KONCEPTURA_MEMGRAPH_URI", memgraph_cfg.get("uri", "bolt://localhost:7687")),
+        memgraph_uri=os.getenv("VIBEVIEW_MEMGRAPH_URI", memgraph_cfg.get("uri", "bolt://localhost:7687")),
         memgraph_username=os.getenv(
-            "KONCEPTURA_MEMGRAPH_USERNAME",
+            "VIBEVIEW_MEMGRAPH_USERNAME",
             memgraph_cfg.get("username", ""),
         ),
         memgraph_password=os.getenv(
-            "KONCEPTURA_MEMGRAPH_PASSWORD",
+            "VIBEVIEW_MEMGRAPH_PASSWORD",
             memgraph_cfg.get("password", ""),
         ),
         cgr_binary=_resolve_path(
@@ -129,10 +129,13 @@ def load_settings() -> Settings:
             workspace_root,
         ),
         log_path=_resolve_path(
-            app_cfg.get("log_path", "backend/data/konceptura.log"),
+            app_cfg.get("log_path", "backend/data/vibeview.log"),
             workspace_root,
         ),
-        log_level=os.getenv("KONCEPTURA_LOG_LEVEL", app_cfg.get("log_level", "INFO")),
+        log_level=os.getenv(
+            "VIBEVIEW_LOG_LEVEL",
+            app_cfg.get("log_level", "INFO"),
+        ),
         default_repo_path=_resolve_path(
             app_cfg.get("default_repo_path", "repos/react-crud-app"),
             workspace_root,

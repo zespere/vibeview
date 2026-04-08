@@ -48,16 +48,19 @@ class CanvasStore:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
+    def _metadata_dir(self, repo_path: str) -> Path:
+        return Path(repo_path) / ".vibeview"
+
     def _project_canvas_path(self, repo_path: str) -> Path:
-        return Path(repo_path) / ".konceptura" / "canvas.json"
+        return self._metadata_dir(repo_path) / "canvas.json"
 
     def _project_canvases_path(self, repo_path: str) -> Path:
-        return Path(repo_path) / ".konceptura" / "canvases.json"
+        return self._metadata_dir(repo_path) / "canvases.json"
 
-    def _ensure_konceptura_gitignore(self, repo_path: str) -> None:
-        konceptura_dir = Path(repo_path) / ".konceptura"
-        konceptura_dir.mkdir(parents=True, exist_ok=True)
-        gitignore_path = konceptura_dir / ".gitignore"
+    def _ensure_metadata_gitignore(self, repo_path: str) -> None:
+        metadata_dir = self._metadata_dir(repo_path)
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        gitignore_path = metadata_dir / ".gitignore"
         desired = "*\n!.gitignore\n!canvas.json\n!canvases.json\n"
         current = gitignore_path.read_text() if gitignore_path.exists() else None
         if current != desired:
@@ -99,12 +102,6 @@ class CanvasStore:
             ]
             return collection
 
-        legacy_document = self._read_document(self._project_canvas_path(repo_path))
-        if legacy_document.nodes or legacy_document.edges or legacy_document.id or legacy_document.title != "Canvas":
-            canvas = self._normalize_canvas(repo_path, legacy_document, 0)
-            collection = CanvasCollection(repo_path=repo_path, canvases=[canvas])
-            self.save_collection(collection)
-            return collection
         return CanvasCollection(repo_path=repo_path, canvases=[])
 
     def get_default_for_repo(self, repo_path: str) -> CanvasDocument:
@@ -117,7 +114,7 @@ class CanvasStore:
         if not collection.repo_path:
             return collection
         repo_path = collection.repo_path
-        self._ensure_konceptura_gitignore(repo_path)
+        self._ensure_metadata_gitignore(repo_path)
         collection.canvases = [
             self._normalize_canvas(repo_path, canvas, index)
             for index, canvas in enumerate(collection.canvases)
@@ -127,22 +124,15 @@ class CanvasStore:
 
         pointer_document = collection.canvases[0] if collection.canvases else CanvasDocument(repo_path=repo_path, title="Canvas")
         self.path.write_text(json.dumps(pointer_document.model_dump(mode="json"), indent=2, sort_keys=True))
-        legacy_path = self._project_canvas_path(repo_path)
-        if collection.canvases:
-            legacy_path.write_text(
-                json.dumps(collection.canvases[0].model_dump(mode="json"), indent=2, sort_keys=True)
-            )
-        elif legacy_path.exists():
-            legacy_path.unlink()
         return collection
 
     def delete_for_repo(self, repo_path: str) -> None:
         for project_path in [self._project_canvas_path(repo_path), self._project_canvases_path(repo_path)]:
             if project_path.exists():
                 project_path.unlink()
-        kon_path = self._project_canvas_path(repo_path).parent
-        if kon_path.exists() and not any(kon_path.iterdir()):
-            kon_path.rmdir()
+        metadata_path = self._metadata_dir(repo_path)
+        if metadata_path.exists() and not any(metadata_path.iterdir()):
+            metadata_path.rmdir()
 
 
 class CanvasService:

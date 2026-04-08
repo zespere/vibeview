@@ -1,1 +1,1 @@
-"""Konceptura backend package."""
+"""Vibeview backend package."""

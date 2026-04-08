@@ -31,14 +31,14 @@ cd ..
 Start the backend first:
 
 ```bash
-cd konceptura
+cd vibeview
 ./scripts/run-backend.sh
 ```
 
 Then start the frontend:
 
 ```bash
-cd konceptura
+cd vibeview
 ./scripts/run-frontend.sh
 ```
 

@@ -1,7 +1,7 @@
 [project]
-name = "konceptura-backend"
+name = "vibeview-backend"
 version = "0.1.0"
-description = "Minimal orchestration backend for the Konceptura MVP"
+description = "Minimal orchestration backend for the Vibeview MVP"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.116.1",

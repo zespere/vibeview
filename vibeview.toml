@@ -1,7 +1,7 @@
 [app]
 default_repo_path = "repos/react-crud-app"
 state_path = "backend/data/state.json"
-log_path = "backend/data/konceptura.log"
+log_path = "backend/data/vibeview.log"
 log_level = "INFO"
 frontend_origins = ["http://localhost:3001", "http://127.0.0.1:3001"]
 

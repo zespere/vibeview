@@ -6,7 +6,7 @@ The minimum operational polish needed for a local-first single-user MVP.
 
 This phase adds:
 
-- root config file: [`konceptura.toml`](../konceptura.toml)
+- root config file: [`vibeview.toml`](../vibeview.toml)
 - backend file logging
 - dry-run support for `POST /index`
 - Codex CLI binary config
@@ -31,12 +31,12 @@ curl -X POST http://127.0.0.1:8000/index \
 Run the backend smoke check:
 
 ```bash
-cd konceptura
+cd vibeview
 ./scripts/run-mvp-check.sh
 ```
 
 Inspect backend logs:
 
 ```bash
-tail -n 50 backend/data/konceptura.log
+tail -n 50 backend/data/vibeview.log
 ```

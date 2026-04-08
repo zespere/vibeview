@@ -30,7 +30,7 @@ It uses the currently active indexed repository by default.
 Start both services:
 
 ```bash
-cd konceptura
+cd vibeview
 ./scripts/run-backend.sh
 ./scripts/run-frontend.sh
 ```

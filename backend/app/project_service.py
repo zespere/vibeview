@@ -87,7 +87,7 @@ class ProjectService:
             recent_projects=recent_projects[:8],
         )
         if repo_path:
-            self._ensure_konceptura_gitignore(repo_path)
+            self._ensure_metadata_gitignore(repo_path)
         return self.store.save(project)
 
     def list_project_items(self) -> tuple[str | None, list[ProjectTreeItem]]:
@@ -177,7 +177,7 @@ class ProjectService:
 
         repo_root = Path(resolved_repo_path)
         repo_root.mkdir(parents=True, exist_ok=True)
-        self._ensure_konceptura_gitignore(str(repo_root))
+        self._ensure_metadata_gitignore(str(repo_root))
         agents_path = repo_root / "AGENTS.md"
         normalized = content.rstrip() + ("\n" if content.strip() else "")
         agents_path.write_text(normalized)
@@ -294,11 +294,11 @@ class ProjectService:
             raise ValueError("No project repository is configured.")
         return str(Path(normalized).resolve())
 
-    def _konceptura_dir(self, repo_path: str) -> Path:
-        return Path(repo_path) / ".konceptura"
+    def _metadata_dir(self, repo_path: str) -> Path:
+        return Path(repo_path) / ".vibeview"
 
     def _conversation_path(self, repo_path: str) -> Path:
-        return self._konceptura_dir(repo_path) / "conversations.json"
+        return self._metadata_dir(repo_path) / "conversations.json"
 
     def _load_conversation_document(self, repo_path: str) -> ConversationDocument:
         path = self._conversation_path(repo_path)
@@ -311,7 +311,7 @@ class ProjectService:
     def _save_conversation_document(self, repo_path: str, document: ConversationDocument) -> ConversationDocument:
         path = self._conversation_path(repo_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_konceptura_gitignore(repo_path)
+        self._ensure_metadata_gitignore(repo_path)
         path.write_text(json.dumps(document.model_dump(mode="json"), indent=2, sort_keys=True))
         return document
 
@@ -378,7 +378,7 @@ class ProjectService:
         return Path(resolved) if resolved else None
 
     def _count_visible_project_files(self, repo_root: Path) -> int:
-        ignored_dir_names = {".git", ".konceptura", "node_modules", ".next", "dist", "build", ".venv", "__pycache__"}
+        ignored_dir_names = {".git", ".vibeview", "node_modules", ".next", "dist", "build", ".venv", "__pycache__"}
         count = 0
         for path in repo_root.rglob("*"):
             if not path.is_file():
@@ -392,10 +392,10 @@ class ProjectService:
             count += 1
         return count
 
-    def _ensure_konceptura_gitignore(self, repo_path: str) -> None:
-        konceptura_dir = self._konceptura_dir(self._normalize_repo_path(repo_path))
-        konceptura_dir.mkdir(parents=True, exist_ok=True)
-        gitignore_path = konceptura_dir / ".gitignore"
+    def _ensure_metadata_gitignore(self, repo_path: str) -> None:
+        metadata_dir = self._metadata_dir(self._normalize_repo_path(repo_path))
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+        gitignore_path = metadata_dir / ".gitignore"
         desired = "*\n!.gitignore\n!canvas.json\n"
         current = gitignore_path.read_text() if gitignore_path.exists() else None
         if current != desired:

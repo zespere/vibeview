@@ -76,7 +76,7 @@ from .services import GraphService, IndexService, SEARCHABLE_SYMBOL_LABELS, Stat
 configure_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Konceptura Backend", version="0.1.0")
+app = FastAPI(title="Vibeview Backend", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.frontend_origins,
@@ -98,7 +98,7 @@ codex_service = CodexService(graph_service)
 @app.get("/")
 def root() -> dict[str, object]:
     return {
-        "name": "konceptura-backend",
+        "name": "vibeview-backend",
         "version": "0.1.0",
         "endpoints": [
             "/index",

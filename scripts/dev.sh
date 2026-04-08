@@ -83,7 +83,7 @@ echo "Starting frontend on http://127.0.0.1:$FRONTEND_PORT"
 start_prefixed "frontend" "$ROOT_DIR/scripts/run-frontend.sh"
 
 echo
-echo "Konceptura dev is starting:"
+echo "Vibeview dev is starting:"
 echo "  frontend: http://127.0.0.1:$FRONTEND_PORT"
 echo "  backend:  http://127.0.0.1:$BACKEND_PORT"
 echo "  memgraph: bolt://127.0.0.1:7687"

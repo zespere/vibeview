@@ -6,4 +6,4 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-printf '%s\n' "$1" | docker exec -i konceptura-memgraph mgconsole --output_format=csv
+printf '%s\n' "$1" | docker exec -i vibeview-memgraph mgconsole --output_format=csv

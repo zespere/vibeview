@@ -718,7 +718,7 @@ function resolveHandleSide(from: CanvasNode, to: CanvasNode) {
 }
 
 function buildViewportStorageKey(repoPath: string) {
-  return `konceptura.viewport:${repoPath}`;
+  return `vibeview.viewport:${repoPath}`;
 }
 
 function readStoredViewport(repoPath: string): Viewport | null {

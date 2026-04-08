@@ -2,7 +2,7 @@ services:
   memgraph:
     image: memgraph/memgraph:latest
     platform: linux/arm64/v8
-    container_name: konceptura-memgraph
+    container_name: vibeview-memgraph
     command:
       - "--also-log-to-stderr=true"
     ports:
@@ -13,7 +13,7 @@ services:
 
   memgraph-lab:
     image: memgraph/lab:latest
-    container_name: konceptura-memgraph-lab
+    container_name: vibeview-memgraph-lab
     depends_on:
       - memgraph
     ports:

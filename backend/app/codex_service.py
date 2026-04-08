@@ -78,7 +78,7 @@ class CodexService:
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> CodexChangeResponse:
         if not self.is_available():
-            raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
+            raise RuntimeError("Codex CLI is not available. Check codex.binary in vibeview.toml.")
 
         repo_dir = Path(repo_path)
         before = self._snapshot_repo(repo_dir)
@@ -172,7 +172,7 @@ class CodexService:
             "Make real file changes when they are needed.\n"
             "If the repository is empty or effectively empty, scaffold the smallest practical web app that satisfies the request.\n"
             "Prefer a simple local-first web stack already implied by the repository. If there is no stack yet, choose the minimum practical setup.\n"
-            "Do not modify files inside .konceptura/. The system manages that workspace metadata.\n"
+            "Do not modify files inside .vibeview/. The system manages that workspace metadata.\n"
             "Do not stop at a plan. Write the code.\n\n"
             f"User request:\n{prompt.strip()}"
         )
@@ -202,7 +202,7 @@ class CodexService:
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> tuple[str, str]:
         if not self.is_available():
-            raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
+            raise RuntimeError("Codex CLI is not available. Check codex.binary in vibeview.toml.")
 
         repo_dir = Path(repo_path)
         context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
@@ -305,7 +305,7 @@ class CodexService:
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> tuple[str, str]:
         if not self.is_available():
-            raise RuntimeError("Codex CLI is not available. Check codex.binary in konceptura.toml.")
+            raise RuntimeError("Codex CLI is not available. Check codex.binary in vibeview.toml.")
 
         repo_dir = Path(repo_path)
         context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
