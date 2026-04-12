@@ -1812,6 +1812,88 @@
   pointer-events: auto;
 }
 
+.consoleAuthStage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 104px;
+  padding: 10px 14px 8px;
+}
+
+.consoleAuthInline {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: min(760px, 100%);
+}
+
+.consoleAuthSelect,
+.consoleAuthInput {
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #d8ccbd;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #241d17;
+  font: inherit;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.consoleAuthSelect {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 12px;
+}
+
+.consoleAuthInput {
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 0 13px;
+}
+
+.consoleAuthInput::placeholder {
+  color: #7d7062;
+}
+
+.consoleAuthSelect:focus,
+.consoleAuthInput:focus {
+  outline: none;
+  border-color: #b79268;
+  box-shadow: 0 0 0 3px rgba(183, 146, 104, 0.1);
+}
+
+.consoleAuthSubmit {
+  display: inline-flex;
+  min-width: 104px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #5a422b;
+  border-radius: 8px;
+  background: #5a422b;
+  color: #fff9f1;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 14px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.consoleAuthSubmit:hover:not(:disabled) {
+  background: #493521;
+  border-color: #493521;
+}
+
+.consoleAuthSubmit:disabled {
+  border-color: #d8cec2;
+  background: #ece5dc;
+  color: #978776;
+  cursor: default;
+}
 .consoleComposerInput {
   appearance: none;
   -webkit-appearance: none;
@@ -2173,87 +2255,6 @@
   font-weight: 700;
   color: #866342;
 }
-
-.agentAuthCallout {
-  position: fixed;
-  right: 28px;
-  bottom: 120px;
-  z-index: 24;
-  display: flex;
-  width: min(360px, calc(100vw - 32px));
-  flex-direction: column;
-  gap: 12px;
-  border: 1px solid #d8cebf;
-  border-radius: 12px;
-  background: rgba(255, 252, 246, 0.98);
-  padding: 14px;
-  box-shadow: 0 12px 28px rgba(43, 32, 23, 0.14);
-}
-
-.agentAuthCalloutHeader {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.agentAuthCalloutTitle {
-  font-size: 14px;
-  font-weight: 700;
-  color: #2f251d;
-}
-
-.agentAuthCalloutMeta,
-.agentAuthHint,
-.agentAuthFieldLabel {
-  font-size: 12px;
-  color: #6c5e50;
-}
-
-.agentAuthCalloutText {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.45;
-  color: #43362a;
-}
-
-.agentAuthCalloutFields {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.agentAuthField {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.agentAuthSelect,
-.agentAuthInput {
-  min-height: 38px;
-  width: 100%;
-  border: 1px solid #d7ccbd;
-  border-radius: 9px;
-  background: #fffdfa;
-  color: #2e241c;
-  font: inherit;
-  font-size: 13px;
-  padding: 0 11px;
-}
-
-.agentAuthSelect:focus,
-.agentAuthInput:focus {
-  outline: none;
-  border-color: #bc9a74;
-}
-
-.agentAuthCalloutActions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 
 .commitButton {
   min-height: 36px;
@@ -3619,6 +3620,21 @@
 .errorText {
   margin: 14px 28px 0;
   color: #b42318;
+}
+
+@media (max-width: 720px) {
+  .consoleAuthStage {
+    min-height: 120px;
+    padding-inline: 10px;
+  }
+
+  .consoleAuthInline {
+    grid-template-columns: 1fr;
+  }
+
+  .consoleAuthSubmit {
+    width: 100%;
+  }
 }
 
 @media (max-width: 1180px) {

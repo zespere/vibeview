@@ -1842,6 +1842,9 @@ export default function Home() {
   const canSaveAgentAuth =
     agentAuthProvider.trim().length > 0 &&
     (agentApiKeyInput.trim().length > 0 || agentAuthStatus?.configured_providers.includes(agentAuthProvider));
+  const composerInputPlaceholder = isAgentAuthPromptVisible
+    ? "Pass an API key"
+    : "Ask about the project, describe a change, paste an image, or type / for commands.";
 
   async function handleSaveAgentAuth() {
     if (!canSaveAgentAuth || isSavingAgentAuth) {
@@ -3937,343 +3940,388 @@ ${prompt}` : prompt,
       <div className={isEmbedded ? styles.notesConsoleShellEmbedded : styles.notesConsoleShell} style={floatingShellStyle}>
         <div className={isEmbedded ? styles.notesConsoleDockEmbedded : styles.notesConsoleFloatingWrap}>
           <div className={isEmbedded ? styles.notesConsoleDockEmbedded : styles.notesConsoleDock}>
-          {isDockExpanded ? (
-            <div className={styles.notesConsolePanel}>
-              {isSlashCommandMode ? (
-                <div className={styles.commandResults}>
-                  {composerResults.length === 0 ? (
-                    <p className={styles.helperText}>Type a slash command, or search notes, projects, conversations, and canvases with `/`.</p>
-                  ) : (
-                    composerResults.map((item, index) => (
-                      <button
-                        className={
-                          item.disabled
-                            ? styles.commandResultDisabled
-                            : index === commandSelectedIndex
-                              ? styles.commandResultActive
-                              : styles.commandResult
-                        }
-                        disabled={item.disabled}
-                        key={item.id}
-                        ref={(node) => {
-                          commandResultRefs.current[item.id] = node;
-                        }}
-                        onClick={() => runCommandItem(item)}
-                        type="button"
-                      >
-                        <span className={styles.commandResultTitle}>{item.title}</span>
-                        {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
-                      </button>
-                    ))
-                  )}
-                </div>
-              ) : isNoteMentionMode ? (
-                <div className={styles.commandResults}>
-                  {composerResults.length === 0 ? (
-                    <p className={styles.helperText}>No matching notes. Keep typing after `@` to refine the mention.</p>
-                  ) : (
-                    composerResults.map((item, index) => (
-                      <button
-                        className={
-                          item.disabled
-                            ? styles.commandResultDisabled
-                            : index === commandSelectedIndex
-                              ? styles.commandResultActive
-                              : styles.commandResult
-                        }
-                        disabled={item.disabled}
-                        key={item.id}
-                        ref={(node) => {
-                          commandResultRefs.current[item.id] = node;
-                        }}
-                        onClick={() => runCommandItem(item)}
-                        type="button"
-                      >
-                        <span className={styles.commandResultTitle}>{item.title}</span>
-                        {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
-                      </button>
-                    ))
-                  )}
-                </div>
-              ) : (
-                <div className={styles.notesConsoleMessages} ref={consoleMessagesRef}>
-                  {consoleMessages.length === 0 ? (
-                    <p className={styles.helperText}>Ask about the project, describe a change, or type `/` for commands.</p>
-                  ) : (
-                    consoleMessages.map((message) => (
-                      <article
-                        className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
-                        key={message.id}
-                      >
-                        <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Vibeview"}</span>
-                        {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
-                        {message.role === "assistant" && message.run_state ? (
-                          <div className={styles.consoleRunMeta}>
-                            {message.run_state.provider ? (
-                              <span className={styles.consoleRunMetaItem}>{message.run_state.provider}</span>
-                            ) : null}
-                            {message.run_state.model ? (
-                              <span className={styles.consoleRunMetaItem}>{message.run_state.model}</span>
-                            ) : null}
-                            {message.run_state.reasoning ? (
-                              <span className={styles.consoleRunMetaItem}>{message.run_state.reasoning}</span>
-                            ) : null}
-                            {message.run_state.phase_label ? (
-                              <span className={styles.consoleRunMetaActive}>{message.run_state.phase_label}</span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {message.role === "assistant" && message.run_state?.tools?.length ? (
-                          <div className={styles.consoleRunTools}>
-                            {message.run_state.tools.slice(-4).map((tool) => (
-                              <div className={styles.consoleRunTool} key={tool.id}>
-                                <span
-                                  className={
-                                    tool.status === "error"
-                                      ? styles.consoleRunToolDotError
-                                      : tool.status === "success"
-                                        ? styles.consoleRunToolDotSuccess
-                                        : styles.consoleRunToolDotRunning
-                                  }
-                                />
-                                <span className={styles.consoleRunToolLabel}>{tool.label}</span>
-                                <span className={styles.consoleRunToolState}>
-                                  {tool.status === "running" ? "Running" : tool.status === "error" ? "Failed" : "Done"}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                        <div className={styles.consoleMessageBody}>
-                          {renderConsoleMessageContent(
-                            message.content,
-                            message.role === "assistant" ? activeContextDocument : null,
-                            handleOpenContextNode,
-                            copiedConsoleLinkKey,
-                            handleCopyConsoleFileLink,
-                          )}
-                        </div>
-                      </article>
-                    ))
-                  )}
-                </div>
-              )}
+          {isAgentAuthPromptVisible ? (
+            <div className={styles.consoleAuthStage}>
+              <div className={styles.consoleAuthInline}>
+                <select
+                  className={styles.consoleAuthSelect}
+                  disabled={isSavingAgentAuth}
+                  onChange={(event) => setAgentAuthProvider(event.target.value)}
+                  value={agentAuthProvider}
+                >
+                  {agentAuthStatus?.providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={styles.consoleAuthInput}
+                  disabled={isSavingAgentAuth}
+                  onChange={(event) => setAgentApiKeyInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleSaveAgentAuth();
+                    }
+                  }}
+                  placeholder={composerInputPlaceholder}
+                  type="password"
+                  value={agentApiKeyInput}
+                />
+                <button
+                  className={styles.consoleAuthSubmit}
+                  disabled={!canSaveAgentAuth || isSavingAgentAuth}
+                  onClick={() => void handleSaveAgentAuth()}
+                  type="button"
+                >
+                  {isSavingAgentAuth ? "Saving..." : "Save key"}
+                </button>
+              </div>
             </div>
-          ) : null}
+          ) : (
+            <>
+              {isDockExpanded ? (
+                <div className={styles.notesConsolePanel}>
+                  {isSlashCommandMode ? (
+                    <div className={styles.commandResults}>
+                      {composerResults.length === 0 ? (
+                        <p className={styles.helperText}>Type a slash command, or search notes, projects, conversations, and canvases with `/`.</p>
+                      ) : (
+                        composerResults.map((item, index) => (
+                          <button
+                            className={
+                              item.disabled
+                                ? styles.commandResultDisabled
+                                : index === commandSelectedIndex
+                                  ? styles.commandResultActive
+                                  : styles.commandResult
+                            }
+                            disabled={item.disabled}
+                            key={item.id}
+                            ref={(node) => {
+                              commandResultRefs.current[item.id] = node;
+                            }}
+                            onClick={() => runCommandItem(item)}
+                            type="button"
+                          >
+                            <span className={styles.commandResultTitle}>{item.title}</span>
+                            {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : isNoteMentionMode ? (
+                    <div className={styles.commandResults}>
+                      {composerResults.length === 0 ? (
+                        <p className={styles.helperText}>No matching notes. Keep typing after `@` to refine the mention.</p>
+                      ) : (
+                        composerResults.map((item, index) => (
+                          <button
+                            className={
+                              item.disabled
+                                ? styles.commandResultDisabled
+                                : index === commandSelectedIndex
+                                  ? styles.commandResultActive
+                                  : styles.commandResult
+                            }
+                            disabled={item.disabled}
+                            key={item.id}
+                            ref={(node) => {
+                              commandResultRefs.current[item.id] = node;
+                            }}
+                            onClick={() => runCommandItem(item)}
+                            type="button"
+                          >
+                            <span className={styles.commandResultTitle}>{item.title}</span>
+                            {item.subtitle ? <span className={styles.commandResultMeta}>{item.subtitle}</span> : null}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <div className={styles.notesConsoleMessages} ref={consoleMessagesRef}>
+                      {consoleMessages.length === 0 ? (
+                        <p className={styles.helperText}>Ask about the project, describe a change, or type `/` for commands.</p>
+                      ) : (
+                        consoleMessages.map((message) => (
+                          <article
+                            className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
+                            key={message.id}
+                          >
+                            <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Vibeview"}</span>
+                            {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                            {message.role === "assistant" && message.run_state ? (
+                              <div className={styles.consoleRunMeta}>
+                                {message.run_state.provider ? (
+                                  <span className={styles.consoleRunMetaItem}>{message.run_state.provider}</span>
+                                ) : null}
+                                {message.run_state.model ? (
+                                  <span className={styles.consoleRunMetaItem}>{message.run_state.model}</span>
+                                ) : null}
+                                {message.run_state.reasoning ? (
+                                  <span className={styles.consoleRunMetaItem}>{message.run_state.reasoning}</span>
+                                ) : null}
+                                {message.run_state.phase_label ? (
+                                  <span className={styles.consoleRunMetaActive}>{message.run_state.phase_label}</span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {message.role === "assistant" && message.run_state?.tools?.length ? (
+                              <div className={styles.consoleRunTools}>
+                                {message.run_state.tools.slice(-4).map((tool) => (
+                                  <div className={styles.consoleRunTool} key={tool.id}>
+                                    <span
+                                      className={
+                                        tool.status === "error"
+                                          ? styles.consoleRunToolDotError
+                                          : tool.status === "success"
+                                            ? styles.consoleRunToolDotSuccess
+                                            : styles.consoleRunToolDotRunning
+                                      }
+                                    />
+                                    <span className={styles.consoleRunToolLabel}>{tool.label}</span>
+                                    <span className={styles.consoleRunToolState}>
+                                      {tool.status === "running" ? "Running" : tool.status === "error" ? "Failed" : "Done"}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                            <div className={styles.consoleMessageBody}>
+                              {renderConsoleMessageContent(
+                                message.content,
+                                message.role === "assistant" ? activeContextDocument : null,
+                                handleOpenContextNode,
+                                copiedConsoleLinkKey,
+                                handleCopyConsoleFileLink,
+                              )}
+                            </div>
+                          </article>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : null}
 
-          <div className={isDockExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}>
-            <button
-              className={styles.notesConsoleBarMain}
-              onClick={() => setConsoleVisibility((current) => (current === "expanded" ? "collapsed" : "expanded"))}
-              type="button"
-            >
-              <span className={styles.notesConsoleBarLabel}>
-                {isSlashCommandMode ? "Commands" : isNoteMentionMode ? "Mention notes" : "Conversation"}
-              </span>
-              <span className={styles.notesConsoleBarSummary}>
-                {(isSlashCommandMode || isNoteMentionMode) && selectedCommandResult
-                  ? selectedCommandResult.title
-                  : latestConsoleSummary}
-              </span>
-            </button>
-          </div>
+              <div className={isDockExpanded ? styles.notesConsoleBarExpanded : styles.notesConsoleBar}>
+                <button
+                  className={styles.notesConsoleBarMain}
+                  onClick={() => setConsoleVisibility((current) => (current === "expanded" ? "collapsed" : "expanded"))}
+                  type="button"
+                >
+                  <span className={styles.notesConsoleBarLabel}>
+                    {isSlashCommandMode ? "Commands" : isNoteMentionMode ? "Mention notes" : "Conversation"}
+                  </span>
+                  <span className={styles.notesConsoleBarSummary}>
+                    {(isSlashCommandMode || isNoteMentionMode) && selectedCommandResult
+                      ? selectedCommandResult.title
+                      : latestConsoleSummary}
+                  </span>
+                </button>
+              </div>
 
-          <label className={styles.consoleComposer}>
-            <textarea
-              className={styles.consoleComposerInput}
-              disabled={isComposerBusy}
-              onChange={(event) => handleComposerChange(event.target.value)}
-              onClick={handleComposerSelectionChange}
-              onKeyDown={handleComposerKeyDown}
-              onKeyUp={handleComposerSelectionChange}
-              onPaste={handleComposerPaste}
-              onSelect={handleComposerSelectionChange}
-              placeholder="Ask about the project, describe a change, paste an image, or type / for commands."
-              ref={composerInputRef}
-              rows={2}
-              value={composerInputValue}
-            />
-            {composerImageAttachments.length > 0 ? (
-              <div className={styles.consoleComposerAttachments}>
-                {composerImageAttachments.map((attachment) => (
-                  <div className={styles.consoleComposerAttachment} key={attachment.id}>
+              <label className={styles.consoleComposer}>
+                <textarea
+                  className={styles.consoleComposerInput}
+                  disabled={isComposerBusy}
+                  onChange={(event) => handleComposerChange(event.target.value)}
+                  onClick={handleComposerSelectionChange}
+                  onKeyDown={handleComposerKeyDown}
+                  onKeyUp={handleComposerSelectionChange}
+                  onPaste={handleComposerPaste}
+                  onSelect={handleComposerSelectionChange}
+                  placeholder={composerInputPlaceholder}
+                  ref={composerInputRef}
+                  rows={2}
+                  value={composerInputValue}
+                />
+                {composerImageAttachments.length > 0 ? (
+                  <div className={styles.consoleComposerAttachments}>
+                    {composerImageAttachments.map((attachment) => (
+                      <div className={styles.consoleComposerAttachment} key={attachment.id}>
+                        <button
+                          className={styles.consoleComposerAttachmentPreviewButton}
+                          onClick={() => setInspectedComposerImageId(attachment.id)}
+                          type="button"
+                        >
+                          <Image
+                            alt={attachment.fileName}
+                            className={styles.consoleComposerAttachmentPreview}
+                            height={42}
+                            src={attachment.previewUrl}
+                            unoptimized
+                            width={42}
+                          />
+                        </button>
+                        <div className={styles.consoleComposerAttachmentMeta}>
+                          <span className={styles.consoleComposerAttachmentName}>{attachment.fileName}</span>
+                          <span className={styles.consoleComposerAttachmentStatus}>
+                            {attachment.status === "uploading"
+                              ? "Uploading image..."
+                              : attachment.status === "error"
+                                ? attachment.errorMessage || "Upload failed"
+                                : `Attached image · ${formatBytes(attachment.sizeBytes)}`}
+                          </span>
+                        </div>
+                        <button
+                          className={styles.consoleComposerAttachmentRemove}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeComposerImageAttachment(attachment.id);
+                          }}
+                          type="button"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className={styles.consoleComposerActions}>
+                  <div className={styles.consoleComposerLeft}>
+                    <div className={styles.consoleControlCluster} ref={composerModelMenuRef}>
+                      <button
+                        aria-haspopup="menu"
+                        aria-expanded={isComposerModelMenuOpen}
+                        className={isComposerModelMenuOpen ? styles.consoleModelButtonActive : styles.consoleModelButton}
+                        disabled={isComposerBusy}
+                        onClick={() => setIsComposerModelMenuOpen((current) => !current)}
+                        type="button"
+                      >
+                        <span className={styles.consoleModelButtonLabel}>Model</span>
+                        <span className={styles.consoleModelButtonValue}>
+                          {composerModel} · {composerReasoningLabel}
+                        </span>
+                      </button>
+                      {isComposerModelMenuOpen ? (
+                        <div className={styles.consoleModelMenu} role="menu">
+                          <div className={styles.consoleModelMenuSection}>
+                            <div className={styles.consoleModelMenuHeading}>Model</div>
+                            <div className={styles.consoleModelMenuList}>
+                              {availableComposerModels.map((model) => (
+                                <button
+                                  aria-checked={model === composerModel}
+                                  className={
+                                    model === composerModel
+                                      ? styles.consoleModelMenuItemActive
+                                      : styles.consoleModelMenuItem
+                                  }
+                                  key={model}
+                                  onClick={() => {
+                                    setComposerModel(model);
+                                    setComposerStatus(`Composer model set to ${model}.`);
+                                    setIsComposerModelMenuOpen(false);
+                                  }}
+                                  role="menuitemradio"
+                                  type="button"
+                                >
+                                  <span>{model}</span>
+                                  {model === composerModel ? (
+                                    <span className={styles.consoleModelMenuCheck}>Current</span>
+                                  ) : null}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className={styles.consoleModelMenuSection}>
+                            <div className={styles.consoleModelMenuHeading}>Thinking</div>
+                            <div className={styles.consoleModelMenuList}>
+                              {COMPOSER_REASONING_OPTIONS.map((item) => (
+                                <button
+                                  aria-checked={item.value === composerReasoning}
+                                  className={
+                                    item.value === composerReasoning
+                                      ? styles.consoleModelMenuItemActive
+                                      : styles.consoleModelMenuItem
+                                  }
+                                  key={item.value}
+                                  onClick={() => {
+                                    setComposerReasoning(item.value);
+                                    setComposerStatus(`Reasoning set to ${item.label}.`);
+                                    setIsComposerModelMenuOpen(false);
+                                  }}
+                                  role="menuitemradio"
+                                  type="button"
+                                >
+                                  <span>{item.label}</span>
+                                  {item.value === composerReasoning ? (
+                                    <span className={styles.consoleModelMenuCheck}>Current</span>
+                                  ) : null}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className={styles.consoleComposerRight}>
                     <button
-                      className={styles.consoleComposerAttachmentPreviewButton}
-                      onClick={() => setInspectedComposerImageId(attachment.id)}
+                      className={styles.commitButton}
+                      disabled={isCommitting || isPushing || !commitStatus?.has_changes}
+                      onClick={handleCommitClick}
+                      title={
+                        !commitStatus?.is_git_repo
+                          ? "Repository is not a git repository"
+                          : !commitStatus?.has_changes
+                            ? "Nothing to commit"
+                            : commitStatus.suggested_message ?? "Create commit"
+                      }
                       type="button"
                     >
-                      <Image
-                        alt={attachment.fileName}
-                        className={styles.consoleComposerAttachmentPreview}
-                        height={42}
-                        src={attachment.previewUrl}
-                        unoptimized
-                        width={42}
-                      />
+                      Commit
                     </button>
-                    <div className={styles.consoleComposerAttachmentMeta}>
-                      <span className={styles.consoleComposerAttachmentName}>{attachment.fileName}</span>
-                      <span className={styles.consoleComposerAttachmentStatus}>
-                        {attachment.status === "uploading"
-                          ? "Uploading image..."
-                          : attachment.status === "error"
-                            ? attachment.errorMessage || "Upload failed"
-                            : `Attached image · ${formatBytes(attachment.sizeBytes)}`}
-                      </span>
-                    </div>
                     <button
-                      className={styles.consoleComposerAttachmentRemove}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        removeComposerImageAttachment(attachment.id);
+                      className={styles.commitButton}
+                      disabled={isPushing || isCommitting || !commitStatus?.can_push}
+                      onClick={handlePushClick}
+                      title={
+                        !commitStatus?.is_git_repo
+                          ? "Repository is not a git repository"
+                          : !commitStatus?.upstream_name
+                            ? "Current branch has no upstream configured"
+                            : !commitStatus?.can_push
+                              ? "Nothing to push"
+                              : `Push ${commitStatus.ahead_count} commit${commitStatus.ahead_count === 1 ? "" : "s"} to ${commitStatus.upstream_name}`
+                      }
+                      type="button"
+                    >
+                      Push
+                    </button>
+                    <button
+                      className={styles.primaryButton}
+                      disabled={
+                        isComposerBusy ||
+                        hasComposerImageErrors ||
+                        !composerInputValue.trim() ||
+                        (!isSlashCommandMode && !activeRepoPath)
+                      }
+                      onClick={() => {
+                        handleSubmitOmnibox();
                       }}
                       type="button"
                     >
-                      Remove
+                      {isRunning ? (
+                        <>
+                          <span aria-hidden="true" className={styles.buttonSpinner} />
+                          <span>Working...</span>
+                        </>
+                      ) : isPushing ? (
+                        <>
+                          <span aria-hidden="true" className={styles.buttonSpinner} />
+                          <span>Pushing...</span>
+                        </>
+                      ) : (
+                        <span>Run</span>
+                      )}
                     </button>
                   </div>
-                ))}
-              </div>
-            ) : null}
-            <div className={styles.consoleComposerActions}>
-              <div className={styles.consoleComposerLeft}>
-                <div className={styles.consoleControlCluster} ref={composerModelMenuRef}>
-                  <button
-                    aria-haspopup="menu"
-                    aria-expanded={isComposerModelMenuOpen}
-                    className={isComposerModelMenuOpen ? styles.consoleModelButtonActive : styles.consoleModelButton}
-                    disabled={isComposerBusy}
-                    onClick={() => setIsComposerModelMenuOpen((current) => !current)}
-                    type="button"
-                  >
-                    <span className={styles.consoleModelButtonLabel}>Model</span>
-                    <span className={styles.consoleModelButtonValue}>
-                      {composerModel} · {composerReasoningLabel}
-                    </span>
-                  </button>
-                  {isComposerModelMenuOpen ? (
-                    <div className={styles.consoleModelMenu} role="menu">
-                      <div className={styles.consoleModelMenuSection}>
-                        <div className={styles.consoleModelMenuHeading}>Model</div>
-                        <div className={styles.consoleModelMenuList}>
-                          {availableComposerModels.map((model) => (
-                            <button
-                              aria-checked={model === composerModel}
-                              className={
-                                model === composerModel
-                                  ? styles.consoleModelMenuItemActive
-                                  : styles.consoleModelMenuItem
-                              }
-                              key={model}
-                              onClick={() => {
-                                setComposerModel(model);
-                                setComposerStatus(`Composer model set to ${model}.`);
-                                setIsComposerModelMenuOpen(false);
-                              }}
-                              role="menuitemradio"
-                              type="button"
-                            >
-                              <span>{model}</span>
-                              {model === composerModel ? (
-                                <span className={styles.consoleModelMenuCheck}>Current</span>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className={styles.consoleModelMenuSection}>
-                        <div className={styles.consoleModelMenuHeading}>Thinking</div>
-                        <div className={styles.consoleModelMenuList}>
-                          {COMPOSER_REASONING_OPTIONS.map((item) => (
-                            <button
-                              aria-checked={item.value === composerReasoning}
-                              className={
-                                item.value === composerReasoning
-                                  ? styles.consoleModelMenuItemActive
-                                  : styles.consoleModelMenuItem
-                              }
-                              key={item.value}
-                              onClick={() => {
-                                setComposerReasoning(item.value);
-                                setComposerStatus(`Reasoning set to ${item.label}.`);
-                                setIsComposerModelMenuOpen(false);
-                              }}
-                              role="menuitemradio"
-                              type="button"
-                            >
-                              <span>{item.label}</span>
-                              {item.value === composerReasoning ? (
-                                <span className={styles.consoleModelMenuCheck}>Current</span>
-                              ) : null}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
-              </div>
-              <div className={styles.consoleComposerRight}>
-                <button
-                  className={styles.commitButton}
-                  disabled={isCommitting || isPushing || !commitStatus?.has_changes}
-                  onClick={handleCommitClick}
-                  title={
-                    !commitStatus?.is_git_repo
-                      ? "Repository is not a git repository"
-                      : !commitStatus?.has_changes
-                        ? "Nothing to commit"
-                        : commitStatus.suggested_message ?? "Create commit"
-                  }
-                  type="button"
-                >
-                  Commit
-                </button>
-                <button
-                  className={styles.commitButton}
-                  disabled={isPushing || isCommitting || !commitStatus?.can_push}
-                  onClick={handlePushClick}
-                  title={
-                    !commitStatus?.is_git_repo
-                      ? "Repository is not a git repository"
-                      : !commitStatus?.upstream_name
-                        ? "Current branch has no upstream configured"
-                        : !commitStatus?.can_push
-                          ? "Nothing to push"
-                          : `Push ${commitStatus.ahead_count} commit${commitStatus.ahead_count === 1 ? "" : "s"} to ${commitStatus.upstream_name}`
-                  }
-                  type="button"
-                >
-                  Push
-                </button>
-                <button
-                  className={styles.primaryButton}
-                  disabled={
-                    isComposerBusy ||
-                    hasComposerImageErrors ||
-                    !composerInputValue.trim() ||
-                    (!isSlashCommandMode && !activeRepoPath)
-                  }
-                  onClick={handleSubmitOmnibox}
-                  type="button"
-                >
-                  {isRunning ? (
-                    <>
-                      <span aria-hidden="true" className={styles.buttonSpinner} />
-                      <span>Working...</span>
-                    </>
-                  ) : isPushing ? (
-                    <>
-                      <span aria-hidden="true" className={styles.buttonSpinner} />
-                      <span>Pushing...</span>
-                    </>
-                  ) : (
-<span>Run</span>
-                  )}
-                </button>
-              </div>
-            </div>
-          </label>
+              </label>
+            </>
+          )}
           </div>
           {inspectedComposerImage && typeof document !== "undefined"
             ? createPortal(
@@ -4758,73 +4806,6 @@ ${prompt}` : prompt,
           >
             {renderActiveView()}
           </section>
-
-          {isAgentAuthPromptVisible ? (
-            <aside className={styles.agentAuthCallout}>
-              <div className={styles.agentAuthCalloutHeader}>
-                <strong className={styles.agentAuthCalloutTitle}>Connect Pi to a provider</strong>
-                <span className={styles.agentAuthCalloutMeta}>
-                  {agentAuthStatus?.active_provider ? `Active: ${agentAuthStatus.active_provider}` : "No provider selected"}
-                </span>
-              </div>
-              <p className={styles.agentAuthCalloutText}>
-                Add an API key for a Pi-supported provider. The key is stored locally in `~/.pi/agent/auth.json`.
-              </p>
-              <div className={styles.agentAuthCalloutFields}>
-                <label className={styles.agentAuthField}>
-                  <span className={styles.agentAuthFieldLabel}>Provider</span>
-                  <select
-                    className={styles.agentAuthSelect}
-                    onChange={(event) => setAgentAuthProvider(event.target.value)}
-                    value={agentAuthProvider}
-                  >
-                    {agentAuthStatus?.providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={styles.agentAuthField}>
-                  <span className={styles.agentAuthFieldLabel}>API key</span>
-                  <input
-                    className={styles.agentAuthInput}
-                    onChange={(event) => setAgentApiKeyInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void handleSaveAgentAuth();
-                      }
-                    }}
-                    placeholder={
-                      agentAuthStatus?.configured_providers.includes(agentAuthProvider)
-                        ? "Leave empty to keep the saved key"
-                        : "Paste provider API key"
-                    }
-                    type="password"
-                    value={agentApiKeyInput}
-                  />
-                </label>
-              </div>
-              <div className={styles.agentAuthCalloutActions}>
-                <span className={styles.agentAuthHint}>
-                  {agentAuthStatus?.configured_providers.includes(agentAuthProvider)
-                    ? "This provider is already configured."
-                    : "Use a key-based provider such as OpenRouter or OpenAI."}
-                </span>
-                <button
-                  className={styles.primaryButton}
-                  disabled={!canSaveAgentAuth || isSavingAgentAuth}
-                  onClick={() => {
-                    void handleSaveAgentAuth();
-                  }}
-                  type="button"
-                >
-                  {isSavingAgentAuth ? "Saving..." : "Save key"}
-                </button>
-              </div>
-            </aside>
-          ) : null}
 
           {activeTab?.type === "note" ? null : renderUnifiedDock()}
         </main>
