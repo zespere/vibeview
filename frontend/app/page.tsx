@@ -2422,13 +2422,15 @@ ${prompt}` : prompt,
       let assistantContent = "";
       const assistantId = `assistant-${Date.now()}`;
       let latestRunState: ConversationRunState = buildInitialRunState("Preparing request...");
+      let finalModifiedFiles: string[] = [];
+      let finalAssistantContent = "Working...";
       setConsoleMessages([
         ...pendingMessages,
         {
           id: assistantId,
           role: "assistant",
-          title: "Working...",
-          content: "",
+          title: null,
+          content: "Working...",
           created_at: new Date().toISOString(),
           run_state: latestRunState,
         },
@@ -2449,6 +2451,7 @@ ${prompt}` : prompt,
             assistantId,
             onChunk: (chunkText) => {
               assistantContent += chunkText;
+              finalAssistantContent = assistantContent;
               setConsoleMessages((current) =>
                 current.map((message) =>
                   message.id === assistantId ? { ...message, content: assistantContent } : message,
@@ -2461,6 +2464,8 @@ ${prompt}` : prompt,
             },
             onCompleted: (completedEvent) => {
               finalSummary = completedEvent.summary ?? finalSummary;
+              finalModifiedFiles = completedEvent.modified_files ?? [];
+              finalAssistantContent = assistantContent || completedEvent.code_summary || completedEvent.summary || "";
               if (completedEvent.document) {
                 setCanvasDocument(completedEvent.document);
                 if (completedEvent.document.id) {
@@ -2479,8 +2484,8 @@ ${prompt}` : prompt,
                   message.id === assistantId
                     ? {
                         ...message,
-                        title: finalSummary,
-                        content: assistantContent || completedEvent.code_summary || completedEvent.summary || "",
+                        title: finalModifiedFiles.length > 0 ? finalSummary : null,
+                        content: finalAssistantContent,
                         run_state: latestRunState,
                       }
                     : message,
@@ -2496,8 +2501,8 @@ ${prompt}` : prompt,
         {
           id: assistantId,
           role: "assistant" as const,
-          title: finalSummary,
-          content: assistantContent,
+          title: finalModifiedFiles.length > 0 ? finalSummary : null,
+          content: finalAssistantContent,
           created_at: new Date().toISOString(),
           run_state: latestRunState,
         },
