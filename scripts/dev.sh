@@ -6,12 +6,63 @@ FRONTEND_ENV="$ROOT_DIR/frontend/.env.local"
 FRONTEND_ENV_EXAMPLE="$ROOT_DIR/frontend/.env.local.example"
 BACKEND_PORT=8000
 FRONTEND_PORT=3001
+MEMGRAPH_CONTAINER="vibeview-memgraph"
+MEMGRAPH_IMAGE="memgraph/memgraph:latest"
+MEMGRAPH_VOLUME="vibeview-memgraph-data"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Missing required command: $1" >&2
     exit 1
   fi
+}
+
+check_docker_ready() {
+  if timeout 8s docker version >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "Docker daemon is not responding." >&2
+  if command -v systemctl >/dev/null 2>&1; then
+    if ! systemctl is-active snapd >/dev/null 2>&1; then
+      echo "snapd is not running, so snap-installed Docker cannot work." >&2
+      echo "Try:" >&2
+      echo "  sudo systemctl restart snapd" >&2
+      echo "  sudo systemctl restart snap.docker.dockerd" >&2
+      echo "  docker version" >&2
+      exit 1
+    fi
+
+    if systemctl is-active docker >/dev/null 2>&1; then
+      echo "systemd service 'docker' reports active, but the Docker CLI still timed out." >&2
+    elif systemctl is-active snap.docker.dockerd >/dev/null 2>&1; then
+      echo "Snap Docker service is active, but the Docker CLI still timed out." >&2
+    else
+      echo "No active Docker daemon service was detected." >&2
+      echo "Try one of:" >&2
+      echo "  sudo systemctl start docker" >&2
+      echo "  sudo systemctl start snap.docker.dockerd" >&2
+    fi
+  fi
+  exit 1
+}
+
+start_memgraph() {
+  echo "Starting Memgraph..."
+
+  if timeout 10s docker inspect "$MEMGRAPH_CONTAINER" >/dev/null 2>&1; then
+    timeout 20s docker start "$MEMGRAPH_CONTAINER" >/dev/null
+    return
+  fi
+
+  timeout 30s docker run -d \
+    --name "$MEMGRAPH_CONTAINER" \
+    --platform linux/arm64/v8 \
+    -p 7687:7687 \
+    -p 7444:7444 \
+    -v "$MEMGRAPH_VOLUME:/var/lib/memgraph" \
+    "$MEMGRAPH_IMAGE" \
+    --also-log-to-stderr=true >/dev/null
 }
 
 start_prefixed() {
@@ -62,6 +113,7 @@ require_command docker
 require_command pnpm
 require_command uv
 require_command ss
+require_command timeout
 
 if [[ ! -f "$FRONTEND_ENV" && -f "$FRONTEND_ENV_EXAMPLE" ]]; then
   cp "$FRONTEND_ENV_EXAMPLE" "$FRONTEND_ENV"
@@ -70,8 +122,8 @@ fi
 stop_port "$BACKEND_PORT"
 stop_port "$FRONTEND_PORT"
 
-echo "Starting Memgraph..."
-docker compose -f "$ROOT_DIR/infra/docker-compose.yml" up -d memgraph >/dev/null
+check_docker_ready
+start_memgraph
 
 declare -a PIDS=()
 trap cleanup EXIT INT TERM
