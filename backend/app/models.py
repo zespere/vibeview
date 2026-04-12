@@ -429,6 +429,8 @@ class CanvasNode(BaseModel):
             return value
 
         payload = dict(value)
+        if "description" not in payload and isinstance(payload.get("body"), str):
+            payload["description"] = payload.get("body", "")
         tags = payload.get("tags")
         if isinstance(tags, list):
             payload["tags"] = [str(item).strip() for item in tags if str(item).strip()]
@@ -447,6 +449,18 @@ class CanvasEdge(BaseModel):
     source_node_id: str
     target_node_id: str
     label: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_edge_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        if "source_node_id" not in payload and "source" in payload:
+            payload["source_node_id"] = payload.get("source")
+        if "target_node_id" not in payload and "target" in payload:
+            payload["target_node_id"] = payload.get("target")
+        return payload
 
 
 class CanvasDocument(BaseModel):

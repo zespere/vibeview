@@ -702,6 +702,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     canvas_id=request.canvas_id,
                     canvas_title=active_canvas.title if active_canvas else None,
                     canvas_file_path=str(collection_path),
+                    canvas_snapshot=active_canvas.model_dump(mode="json") if active_canvas else None,
                 )
             )
 
@@ -762,6 +763,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                 {
                     "type": "completed",
                     "summary": summary,
+                    "answer_text": change_response.summary,
                     "code_summary": change_response.summary,
                     "modified_files": modified_files,
                     "document": document_payload,
