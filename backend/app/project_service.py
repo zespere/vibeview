@@ -85,10 +85,16 @@ class ProjectService:
             name=request.name.strip() or derived_name,
             repo_path=repo_path,
             recent_projects=recent_projects[:8],
+            agent_provider=current.agent_provider,
         )
         if repo_path:
             self._ensure_metadata_gitignore(repo_path)
         return self.store.save(project)
+
+    def set_agent_provider(self, provider: str | None) -> ProjectProfile:
+        current = self.store.load()
+        updated = current.model_copy(update={"agent_provider": provider.strip() if provider else None})
+        return self.store.save(updated)
 
     def list_project_items(self) -> tuple[str | None, list[ProjectTreeItem]]:
         project = self.store.load()

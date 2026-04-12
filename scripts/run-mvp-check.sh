@@ -24,9 +24,9 @@ curl -fsS \
 echo
 
 echo
-echo "== codex:dry-run =="
+echo "== agent:dry-run =="
 curl -fsS \
-  -X POST "$BASE_URL/codex/change" \
+  -X POST "$BASE_URL/agent/change" \
   -H 'Content-Type: application/json' \
-  -d "{\"repo_path\":\"$TARGET_REPO\",\"prompt\":\"Describe the smallest safe change to add a footer note to the UI.\",\"dry_run\":true,\"use_graph_context\":true,\"bypass_sandbox\":true}"
+  -d "{\"repo_path\":\"$TARGET_REPO\",\"prompt\":\"Describe the smallest safe change to add a footer note to the UI.\",\"dry_run\":true,\"use_graph_context\":true}"
 echo

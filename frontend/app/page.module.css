@@ -1620,6 +1620,85 @@
   color: #2d241c;
 }
 
+.consoleRunMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.consoleRunMetaItem,
+.consoleRunMetaActive {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border: 1px solid #e1d8cc;
+  border-radius: 7px;
+  background: #fbf8f2;
+  color: #756758;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 7px;
+}
+
+.consoleRunMetaActive {
+  border-color: #d7c7b3;
+  background: #f3eadf;
+  color: #4a392a;
+}
+
+.consoleRunTools {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.consoleRunTool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  color: #5b4e42;
+  font-size: 12px;
+}
+
+.consoleRunToolDotRunning,
+.consoleRunToolDotSuccess,
+.consoleRunToolDotError {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.consoleRunToolDotRunning {
+  background: #b78949;
+}
+
+.consoleRunToolDotSuccess {
+  background: #6a8a4a;
+}
+
+.consoleRunToolDotError {
+  background: #b35a4b;
+}
+
+.consoleRunToolLabel {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consoleRunToolState {
+  flex: 0 0 auto;
+  color: #897968;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .consoleMessageBody {
   margin: 0;
   white-space: pre-wrap;
@@ -1970,6 +2049,7 @@
 }
 
 .consoleControlCluster {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -1978,87 +2058,202 @@
   padding-right: 0;
 }
 
-.consoleInlineControl {
+.consoleModelButton,
+.consoleModelButtonActive {
   display: inline-flex;
-  align-items: center;
-  min-width: 0;
+  min-width: 188px;
   min-height: 38px;
-  padding: 0;
-}
-
-.consoleInlineControl + .consoleInlineControl {
-  margin-left: 0;
-  padding-left: 0;
-  border-left: 0;
-}
-
-.consoleInlineSelect {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
   border: 1px solid rgba(222, 212, 200, 0.92);
+  border-radius: 11px;
   background: rgba(255, 253, 249, 0.82);
   color: #4a3d31;
   font: inherit;
-  font-size: 13px;
-  font-weight: 500;
-  min-width: 0;
-  min-height: 38px;
-  border-radius: 11px;
-}
-
-.consoleInlineSelect:focus {
-  outline: none;
-  border-color: #bf9e78;
-  background: #fffdfa;
-}
-
-.consoleInlineSelect {
-  appearance: none;
-  -webkit-appearance: none;
-  padding: 0 36px 0 12px;
+  padding: 7px 12px 6px;
+  text-align: left;
   cursor: pointer;
-  background-image:
-    linear-gradient(45deg, transparent 50%, #8b7a67 50%),
-    linear-gradient(135deg, #8b7a67 50%, transparent 50%);
-  background-position:
-    calc(100% - 18px) 16px,
-    calc(100% - 13px) 16px;
-  background-size: 5px 5px, 5px 5px;
-  background-repeat: no-repeat;
 }
 
-.consoleInlineControl:first-child .consoleInlineSelect {
-  min-width: 164px;
+.consoleModelButtonActive {
+  background: #fffdfa;
+  border-color: #bf9e78;
 }
 
-.consoleModeSwitch {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: 2px;
-  min-width: 0;
-  border: 1px solid rgba(222, 212, 200, 0.92);
-  border-radius: 11px;
-  background: rgba(255, 253, 249, 0.82);
-  padding: 3px;
+.consoleModelButton:disabled,
+.consoleModelButtonActive:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
-.consoleModeButton,
-.consoleModeButtonActive {
-  min-height: 32px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #6d6153;
-  font: inherit;
+.consoleModelButtonLabel {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #7b6d5f;
+}
+
+.consoleModelButtonValue {
+  max-width: 100%;
+  overflow: hidden;
   font-size: 13px;
   font-weight: 600;
-  padding: 0 12px;
+  line-height: 1.2;
+  color: #3d3127;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.consoleModelMenu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  z-index: 30;
+  display: flex;
+  min-width: 250px;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid #d8cebf;
+  border-radius: 12px;
+  background: #fffdf9;
+  padding: 12px;
+  box-shadow: 0 12px 26px rgba(38, 28, 20, 0.12);
+}
+
+.consoleModelMenuSection {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.consoleModelMenuHeading {
+  font-size: 12px;
+  font-weight: 700;
+  color: #6b5b4c;
+}
+
+.consoleModelMenuList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.consoleModelMenuItem,
+.consoleModelMenuItemActive {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #33271d;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 10px;
   cursor: pointer;
 }
 
-.consoleModeButtonActive {
-  background: #efe1d0;
-  color: #2d241d;
+.consoleModelMenuItem:hover {
+  background: #f6efe5;
 }
+
+.consoleModelMenuItemActive {
+  border-color: #dcc9b2;
+  background: #f7efe3;
+  color: #2a2119;
+}
+
+.consoleModelMenuCheck {
+  font-size: 11px;
+  font-weight: 700;
+  color: #866342;
+}
+
+.agentAuthCallout {
+  position: fixed;
+  right: 28px;
+  bottom: 120px;
+  z-index: 24;
+  display: flex;
+  width: min(360px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid #d8cebf;
+  border-radius: 12px;
+  background: rgba(255, 252, 246, 0.98);
+  padding: 14px;
+  box-shadow: 0 12px 28px rgba(43, 32, 23, 0.14);
+}
+
+.agentAuthCalloutHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agentAuthCalloutTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #2f251d;
+}
+
+.agentAuthCalloutMeta,
+.agentAuthHint,
+.agentAuthFieldLabel {
+  font-size: 12px;
+  color: #6c5e50;
+}
+
+.agentAuthCalloutText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #43362a;
+}
+
+.agentAuthCalloutFields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.agentAuthField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agentAuthSelect,
+.agentAuthInput {
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid #d7ccbd;
+  border-radius: 9px;
+  background: #fffdfa;
+  color: #2e241c;
+  font: inherit;
+  font-size: 13px;
+  padding: 0 11px;
+}
+
+.agentAuthSelect:focus,
+.agentAuthInput:focus {
+  outline: none;
+  border-color: #bc9a74;
+}
+
+.agentAuthCalloutActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 
 .commitButton {
   min-height: 36px;

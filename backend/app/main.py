@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import mimetypes
+import queue
+import threading
 from pathlib import Path
 from uuid import uuid4
 
@@ -10,11 +12,16 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from .agent_service import AgentService
+from .agent_auth_service import AgentAuthService
 from .config import settings
 from .canvas_service import CanvasService, CanvasStore
-from .codex_service import CodexService
 from .logging_utils import configure_logging
 from .models import (
+    AgentChangeRequest,
+    AgentChangeResponse,
+    AgentAuthStatusResponse,
+    AgentAuthUpdateRequest,
     AgentsDocumentResponse,
     AgentsDocumentUpdateRequest,
     AssistImpactRequest,
@@ -36,8 +43,6 @@ from .models import (
     CanvasNodeCreateRequest,
     CanvasNodeUpdateRequest,
     CanvasUpdateRequest,
-    CodexChangeRequest,
-    CodexChangeResponse,
     CommitCreateRequest,
     CommitCreateResponse,
     CommitStatusResponse,
@@ -48,15 +53,11 @@ from .models import (
     ExplorationSuggestionRequest,
     ExplorationSuggestionResponse,
     IndexRequest,
-    ProjectBuildRequest,
-    ProjectBuildResponse,
     ProjectAskRequest,
     ProjectAskResponse,
     ProjectFolderPickResponse,
     ProjectImageUploadResponse,
     ProjectRunStreamRequest,
-    ProjectPlanRequest,
-    ProjectPlanResponse,
     ProjectProfileResponse,
     ProjectTreeResponse,
     ProjectProfileUpdateRequest,
@@ -70,6 +71,7 @@ from .models import (
     StructureResponse,
     SymbolsResponse,
 )
+from .pi_client import PiClient
 from .project_service import ProjectService, ProjectStore
 from .services import GraphService, IndexService, SEARCHABLE_SYMBOL_LABELS, StateStore
 
@@ -92,7 +94,12 @@ graph_service = GraphService()
 index_service = IndexService(state_store)
 canvas_service = CanvasService(canvas_store)
 project_service = ProjectService(project_store)
-codex_service = CodexService(graph_service)
+agent_auth_service = AgentAuthService()
+agent_service = AgentService(
+    graph_service,
+    PiClient(),
+    provider_resolver=lambda: project_service.get_project().agent_provider or settings.agent_provider,
+)
 
 
 @app.get("/")
@@ -110,8 +117,7 @@ def root() -> dict[str, object]:
             "/structure",
             "/query",
             "/assist/impact",
-            "/codex/change",
-            "/project/build",
+            "/agent/change",
             "/canvas",
             "/project",
         ],
@@ -140,6 +146,22 @@ async def index_repo(request: IndexRequest) -> StatusResponse:
 @app.get("/status", response_model=StatusResponse)
 def get_status() -> StatusResponse:
     return build_status()
+
+
+@app.get("/agent/auth", response_model=AgentAuthStatusResponse)
+def get_agent_auth_status() -> AgentAuthStatusResponse:
+    project = project_service.get_project()
+    return agent_auth_service.get_status(project.agent_provider or settings.agent_provider)
+
+
+@app.put("/agent/auth", response_model=AgentAuthStatusResponse)
+def update_agent_auth(request: AgentAuthUpdateRequest) -> AgentAuthStatusResponse:
+    if request.api_key and request.api_key.strip():
+        agent_auth_service.save_api_key(request.provider, request.api_key)
+    if request.set_active:
+        project_service.set_agent_provider(request.provider)
+    project = project_service.get_project()
+    return agent_auth_service.get_status(project.agent_provider or settings.agent_provider)
 
 
 @app.get("/project", response_model=ProjectProfileResponse)
@@ -276,7 +298,7 @@ def get_project_commit_status(repo_path: str) -> CommitStatusResponse:
     status = project_service.get_commit_status(resolved_repo_path)
     if status.is_git_repo and status.has_changes:
         diff_result = project_service._run_git(Path(resolved_repo_path), ["diff", "--stat"])
-        suggested_message = codex_service.suggest_commit_message(
+        suggested_message = agent_service.suggest_commit_message(
             resolved_repo_path,
             "\n".join(status.changed_files),
             diff_result.stdout,
@@ -299,7 +321,7 @@ def create_project_commit(request: CommitCreateRequest) -> CommitCreateResponse:
         message = (
             request.message.strip()
             if request.message and request.message.strip()
-            else codex_service.suggest_commit_message(
+            else agent_service.suggest_commit_message(
                 resolved_repo_path,
                 "\n".join(status.changed_files),
                 diff_result.stdout,
@@ -391,8 +413,8 @@ def assist_impact(request: AssistImpactRequest) -> AssistImpactResponse:
     return graph_service.analyze_impact(request.prompt, request.limit)
 
 
-@app.post("/codex/change", response_model=CodexChangeResponse)
-def codex_change(request: CodexChangeRequest) -> CodexChangeResponse:
+@app.post("/agent/change", response_model=AgentChangeResponse)
+def agent_change(request: AgentChangeRequest) -> AgentChangeResponse:
     repo_path = Path(request.repo_path)
     if not repo_path.exists():
         raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
@@ -400,104 +422,17 @@ def codex_change(request: CodexChangeRequest) -> CodexChangeResponse:
         raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
 
     try:
-        response = codex_service.run_change(
+        response = agent_service.run_change(
             repo_path=str(repo_path.resolve()),
             prompt=request.prompt,
             dry_run=request.dry_run,
             use_graph_context=request.use_graph_context,
-            bypass_sandbox=request.bypass_sandbox,
             semantic_context=request.semantic_context,
         )
     except RuntimeError as error:
         raise HTTPException(status_code=500, detail=str(error)) from error
 
     return response
-
-
-@app.post("/project/build", response_model=ProjectBuildResponse)
-def build_project(request: ProjectBuildRequest) -> ProjectBuildResponse:
-    repo_path = Path(request.repo_path)
-    if not repo_path.exists():
-        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
-    if not repo_path.is_dir():
-        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
-
-    resolved_repo_path = str(repo_path.resolve())
-    canvas_service.set_repo_path(resolved_repo_path)
-
-    try:
-        change_response = codex_service.build_project(
-            repo_path=resolved_repo_path,
-            prompt=request.prompt,
-            semantic_context=request.semantic_context,
-            conversation_context=request.conversation_context,
-        )
-        generated_nodes, generated_edges, note_summary = codex_service.generate_architecture_notes(
-            repo_path=resolved_repo_path,
-            prompt=request.prompt,
-        )
-        document, notes_created, note_changes = canvas_service.append_generated_map(
-            resolved_repo_path,
-            None,
-            generated_nodes,
-            generated_edges,
-        )
-    except RuntimeError as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
-
-    modified_files = [item.path for item in change_response.changed_files]
-    file_count = len(modified_files)
-    if file_count > 0:
-        summary_parts = [
-            f"Updated {file_count} file{'s' if file_count != 1 else ''} in {resolved_repo_path}."
-        ]
-    else:
-        summary_parts = [f"No project files were modified in {resolved_repo_path}."]
-    if notes_created > 0:
-        summary_parts.append(f"Added {notes_created} architecture note{'s' if notes_created != 1 else ''}.")
-    else:
-        summary_parts.append("Architecture notes refreshed with no new nodes added.")
-
-    return ProjectBuildResponse(
-        repo_path=resolved_repo_path,
-        prompt=request.prompt,
-        summary=" ".join(summary_parts),
-        code_summary=change_response.summary,
-        note_summary=note_summary,
-        note_changes_summary=note_changes.summary,
-        modified_files=modified_files,
-        notes_created=notes_created,
-        document=document,
-    )
-
-
-@app.post("/project/plan", response_model=ProjectPlanResponse)
-def plan_project(request: ProjectPlanRequest) -> ProjectPlanResponse:
-    repo_path = Path(request.repo_path)
-    if not repo_path.exists():
-        raise HTTPException(status_code=404, detail=f"Repository path does not exist: {repo_path}")
-    if not repo_path.is_dir():
-        raise HTTPException(status_code=400, detail=f"Repository path is not a directory: {repo_path}")
-
-    resolved_repo_path = str(repo_path.resolve())
-    canvas_service.set_repo_path(resolved_repo_path)
-
-    try:
-        summary, plan_text = codex_service.plan_project(
-            repo_path=resolved_repo_path,
-            prompt=request.prompt,
-            semantic_context=request.semantic_context,
-            conversation_context=request.conversation_context,
-        )
-    except RuntimeError as error:
-        raise HTTPException(status_code=500, detail=str(error)) from error
-
-    return ProjectPlanResponse(
-        repo_path=resolved_repo_path,
-        prompt=request.prompt,
-        summary=summary,
-        plan_text=plan_text,
-    )
 
 
 @app.post("/project/ask", response_model=ProjectAskResponse)
@@ -510,7 +445,7 @@ def ask_project(request: ProjectAskRequest) -> ProjectAskResponse:
 
     resolved_repo_path = str(repo_path.resolve())
     try:
-        summary, answer_text = codex_service.ask_project(
+        summary, answer_text = agent_service.ask_project(
             resolved_repo_path,
             request.prompt,
             request.semantic_context,
@@ -537,7 +472,7 @@ def project_exploration_suggestions(request: ExplorationSuggestionRequest) -> Ex
 
     resolved_repo_path = str(repo_path.resolve())
     try:
-        suggestions = codex_service.generate_exploration_suggestions(
+        suggestions = agent_service.generate_exploration_suggestions(
             resolved_repo_path,
             active_node=request.active_node,
             path_titles=request.path_titles,
@@ -565,66 +500,174 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
 
     resolved_repo_path = str(repo_path.resolve())
     canvas_service.set_repo_path(resolved_repo_path)
+    active_canvas = canvas_service.get_document_for_repo(resolved_repo_path, request.canvas_id) if request.canvas_id else None
+    collection_path = canvas_store.collection_path_for_repo(resolved_repo_path)
+    pointer_path = canvas_store.pointer_path_for_repo(resolved_repo_path)
+    backup_path = collection_path.with_suffix(f"{collection_path.suffix}.vibeview.bak")
 
     def emit(event: dict[str, object]) -> bytes:
         return (json.dumps(event) + "\n").encode("utf-8")
 
-    def stream_text_chunks(text: str) -> list[bytes]:
-        chunk_size = 120
-        chunks: list[bytes] = []
-        for start in range(0, len(text), chunk_size):
-            chunks.append(
-                emit(
-                    {
-                        "type": "assistant.chunk",
-                        "text": text[start : start + chunk_size],
-                    }
-                )
+    def format_tool_label(tool_name: str, args: object) -> str:
+        if tool_name == "bash" and isinstance(args, dict):
+            command = str(args.get("command") or "").strip()
+            if command:
+                return command
+        if tool_name in {"read", "write", "edit", "grep", "find", "ls"} and isinstance(args, dict):
+            for key in ("path", "filePath", "pattern", "query"):
+                value = str(args.get(key) or "").strip()
+                if value:
+                    return f"{tool_name} {value}"[:120]
+        return tool_name or "tool"
+
+    def extract_tool_summary(result: object) -> str | None:
+        if not isinstance(result, dict):
+            return None
+        content = result.get("content")
+        if not isinstance(content, list):
+            return None
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "text":
+                continue
+            text = str(block.get("text") or "").strip()
+            if text:
+                parts.append(text)
+        if not parts:
+            return None
+        cleaned = " ".join(part.replace("\n", " ").strip() for part in parts).strip()
+        return cleaned[:160] if cleaned else None
+
+    def translate_pi_event(pi_event: dict[str, object]) -> list[dict[str, object]]:
+        translated: list[dict[str, object]] = []
+        event_type = str(pi_event.get("type") or "").strip()
+        if event_type == "message_update":
+            assistant_event = pi_event.get("assistantMessageEvent")
+            if isinstance(assistant_event, dict) and assistant_event.get("type") == "text_delta":
+                delta = str(assistant_event.get("delta") or "")
+                if delta:
+                    translated.append({"type": "assistant.chunk", "text": delta})
+        elif event_type == "tool_execution_start":
+            tool_name = str(pi_event.get("toolName") or "").strip() or "tool"
+            translated.append(
+                {
+                    "type": "tool.start",
+                    "tool_call_id": str(pi_event.get("toolCallId") or "").strip(),
+                    "tool_name": tool_name,
+                    "tool_label": format_tool_label(tool_name, pi_event.get("args")),
+                }
             )
-        return chunks
+        elif event_type == "tool_execution_end":
+            tool_name = str(pi_event.get("toolName") or "").strip() or "tool"
+            translated.append(
+                {
+                    "type": "tool.end",
+                    "tool_call_id": str(pi_event.get("toolCallId") or "").strip(),
+                    "tool_name": tool_name,
+                    "tool_label": format_tool_label(tool_name, pi_event.get("args")),
+                    "tool_status": "error" if pi_event.get("isError") else "success",
+                    "tool_summary": extract_tool_summary(pi_event.get("result")),
+                }
+            )
+        elif event_type == "auto_retry_start":
+            attempt = int(pi_event.get("attempt") or 1)
+            max_attempts = int(pi_event.get("maxAttempts") or attempt)
+            translated.append(
+                {
+                    "type": "retry.start",
+                    "label": f"Retrying request ({attempt}/{max_attempts})...",
+                }
+            )
+        elif event_type == "auto_retry_end":
+            translated.append(
+                {
+                    "type": "retry.end",
+                    "label": "Retry complete." if pi_event.get("success") else "Retry failed.",
+                }
+            )
+        return translated
+
+    def stream_agent_run(worker):
+        event_queue: queue.Queue[dict[str, object] | None] = queue.Queue()
+        outcome: dict[str, object] = {}
+
+        def on_agent_event(event: dict[str, object]) -> None:
+            for translated in translate_pi_event(event):
+                event_queue.put(translated)
+
+        def run_worker() -> None:
+            try:
+                outcome["result"] = worker(on_agent_event)
+            except Exception as error:  # pragma: no cover - propagated into stream
+                outcome["error"] = error
+            finally:
+                event_queue.put(None)
+
+        thread = threading.Thread(target=run_worker, daemon=True)
+        thread.start()
+        while True:
+            item = event_queue.get()
+            if item is None:
+                break
+            yield emit(item)
+        thread.join()
+        error = outcome.get("error")
+        if isinstance(error, Exception):
+            raise error
+        return outcome.get("result")
+
+    def read_optional(path: Path) -> str | None:
+        if not path.exists():
+            return None
+        return path.read_text(encoding="utf-8")
+
+    def snapshot_canvas_files() -> dict[str, str | None]:
+        return {
+            "collection": read_optional(collection_path),
+            "pointer": read_optional(pointer_path),
+        }
+
+    def restore_canvas_files(snapshot: dict[str, str | None]) -> None:
+        collection_content = snapshot.get("collection")
+        pointer_content = snapshot.get("pointer")
+        collection_path.parent.mkdir(parents=True, exist_ok=True)
+        if collection_content is None:
+            if collection_path.exists():
+                collection_path.unlink()
+        else:
+            collection_path.write_text(collection_content, encoding="utf-8")
+        if pointer_content is None:
+            if pointer_path.exists():
+                pointer_path.unlink()
+        else:
+            pointer_path.write_text(pointer_content, encoding="utf-8")
+
+    def validate_and_canonicalize_canvas() -> dict[str, object] | None:
+        if not collection_path.exists():
+            return None
+        document = canvas_service.canonicalize_collection_for_repo(resolved_repo_path, request.canvas_id)
+        return document.model_dump(mode="json")
+
+    def canvas_files_changed(paths: list[str]) -> bool:
+        targets = {".vibeview/canvases.json", ".vibeview/canvas.json"}
+        return any(path in targets for path in paths)
 
     def generate():
         yield emit({"type": "phase", "phase": "starting", "label": "Preparing request..."})
         try:
-            resolved_mode = request.mode
-            if request.mode == "auto":
-                yield emit({"type": "phase", "phase": "understanding", "label": "Understanding request..."})
-                resolved_mode = codex_service.infer_project_run_mode(
-                    resolved_repo_path,
-                    request.prompt,
-                    request.semantic_context,
-                    conversation_context=request.conversation_context,
-                    image_paths=request.image_paths,
-                    model=request.model,
-                    reasoning_effort=request.reasoning_effort,
-                )
+            canvas_snapshot = snapshot_canvas_files()
+            yield emit({"type": "phase", "phase": "working", "label": "Working..."})
+            yield emit(
+                {
+                    "type": "run.status",
+                    "provider": project_service.get_project().agent_provider or settings.agent_provider,
+                    "model": request.model or settings.agent_model,
+                    "reasoning": request.reasoning_effort or settings.agent_reasoning_default,
+                }
+            )
 
-            if resolved_mode == "ask":
-                yield emit({"type": "phase", "phase": "answering", "label": "Answering question..."})
-                summary, answer_text = codex_service.ask_project(
-                    resolved_repo_path,
-                    request.prompt,
-                    request.semantic_context,
-                    conversation_context=request.conversation_context,
-                    image_paths=request.image_paths,
-                    model=request.model,
-                    reasoning_effort=request.reasoning_effort,
-                )
-                for chunk in stream_text_chunks(answer_text):
-                    yield chunk
-                yield emit(
-                    {
-                        "type": "completed",
-                        "mode": "ask",
-                        "summary": summary,
-                        "answer_text": answer_text,
-                    }
-                )
-                return
-
-            if resolved_mode == "plan":
-                yield emit({"type": "phase", "phase": "planning", "label": "Preparing implementation plan..."})
-                summary, plan_text = codex_service.plan_project(
+            change_response = yield from stream_agent_run(
+                lambda on_agent_event: agent_service.run_workspace_prompt(
                     repo_path=resolved_repo_path,
                     prompt=request.prompt,
                     semantic_context=request.semantic_context,
@@ -632,76 +675,73 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     image_paths=request.image_paths,
                     model=request.model,
                     reasoning_effort=request.reasoning_effort,
+                    event_callback=on_agent_event,
+                    canvas_id=request.canvas_id,
+                    canvas_title=active_canvas.title if active_canvas else None,
+                    canvas_file_path=str(collection_path),
                 )
-                for chunk in stream_text_chunks(plan_text):
-                    yield chunk
-                yield emit(
-                    {
-                        "type": "completed",
-                        "mode": "plan",
-                        "summary": summary,
-                        "plan_text": plan_text,
-                    }
-                )
-                return
-
-            yield emit({"type": "phase", "phase": "building", "label": "Editing code..."})
-            change_response = codex_service.build_project(
-                repo_path=resolved_repo_path,
-                prompt=request.prompt,
-                semantic_context=request.semantic_context,
-                conversation_context=request.conversation_context,
-                image_paths=request.image_paths,
-                model=request.model,
-                reasoning_effort=request.reasoning_effort,
-            )
-            yield emit({"type": "phase", "phase": "updating_notes", "label": "Updating notes..."})
-            generated_nodes, generated_edges, note_summary = codex_service.generate_architecture_notes(
-                repo_path=resolved_repo_path,
-                prompt=request.prompt,
-                image_paths=request.image_paths,
-            )
-            document, notes_created, note_changes = canvas_service.append_generated_map(
-                resolved_repo_path,
-                request.canvas_id,
-                generated_nodes,
-                generated_edges,
             )
 
             modified_files = [item.path for item in change_response.changed_files]
-            file_count = len(modified_files)
-            summary_parts = (
-                [f"Updated {file_count} file{'s' if file_count != 1 else ''} in {resolved_repo_path}."]
-                if file_count > 0
-                else [f"No project files were modified in {resolved_repo_path}."]
-            )
-            if notes_created > 0:
-                summary_parts.append(f"Added {notes_created} architecture note{'s' if notes_created != 1 else ''}.")
+            document_payload = None
+            repair_summary = None
+            if canvas_files_changed(modified_files):
+                try:
+                    document_payload = validate_and_canonicalize_canvas()
+                except Exception as validation_error:
+                    if canvas_snapshot.get("collection") is not None:
+                        backup_path.write_text(canvas_snapshot["collection"] or "", encoding="utf-8")
+                    elif backup_path.exists():
+                        backup_path.unlink()
+                    yield emit({"type": "phase", "phase": "repairing_canvas", "label": "Repairing canvas JSON..."})
+                    repair_summary = yield from stream_agent_run(
+                        lambda on_agent_event: agent_service.repair_canvas_json(
+                            repo_path=resolved_repo_path,
+                            canvas_file_path=str(collection_path),
+                            backup_file_path=str(backup_path) if backup_path.exists() else None,
+                            validation_error=str(validation_error),
+                            canvas_id=request.canvas_id,
+                            canvas_title=active_canvas.title if active_canvas else None,
+                            model=request.model,
+                            reasoning_effort=request.reasoning_effort,
+                            event_callback=on_agent_event,
+                        )
+                    )
+                    try:
+                        document_payload = validate_and_canonicalize_canvas()
+                    except Exception:
+                        restore_canvas_files(canvas_snapshot)
+                        try:
+                            document_payload = validate_and_canonicalize_canvas()
+                        except Exception:
+                            document_payload = None
+                        repair_summary = "Canvas JSON was still invalid after repair, so the previous valid canvas was restored."
+                    finally:
+                        if backup_path.exists():
+                            backup_path.unlink()
+            elif request.canvas_id:
+                try:
+                    document_payload = canvas_service.get_document_for_repo(resolved_repo_path, request.canvas_id).model_dump(mode="json")
+                except Exception:
+                    document_payload = None
+
+            summary_parts: list[str] = []
+            if modified_files:
+                summary_parts.append(
+                    f"Updated {len(modified_files)} file{'s' if len(modified_files) != 1 else ''} in {resolved_repo_path}."
+                )
             else:
-                summary_parts.append("Architecture notes refreshed with no new nodes added.")
+                summary_parts.append(f"No files were modified in {resolved_repo_path}.")
+            if repair_summary:
+                summary_parts.append(repair_summary)
             summary = " ".join(summary_parts)
-            assistant_text = "\n\n".join(
-                item
-                for item in [
-                    change_response.summary,
-                    note_summary,
-                    f"Notes changes summary:\n{note_changes.summary}",
-                ]
-                if item
-            )
-            for chunk in stream_text_chunks(assistant_text):
-                yield chunk
             yield emit(
                 {
                     "type": "completed",
-                    "mode": "build",
                     "summary": summary,
                     "code_summary": change_response.summary,
-                    "note_summary": note_summary,
-                    "note_changes_summary": note_changes.summary,
                     "modified_files": modified_files,
-                    "notes_created": notes_created,
-                    "document": document.model_dump(mode="json"),
+                    "document": document_payload,
                 }
             )
         except RuntimeError as error:
@@ -764,7 +804,7 @@ def create_canvas_from_prompt(request: CanvasCreateFromPromptRequest) -> CanvasG
                 title=request.title or "New canvas",
             )
         )
-        nodes, edges, summary = codex_service.generate_architecture_notes(
+        nodes, edges, summary = agent_service.generate_architecture_notes(
             repo_path=resolved_repo_path,
             prompt=request.prompt,
         )
@@ -907,7 +947,7 @@ def generate_canvas_from_prompt(request: CanvasGenerateRequest) -> CanvasGenerat
 
     try:
         canvas_service.set_repo_path(str(repo_path.resolve()))
-        nodes, edges, summary = codex_service.generate_architecture_notes(
+        nodes, edges, summary = agent_service.generate_architecture_notes(
             repo_path=str(repo_path.resolve()),
             prompt=request.prompt,
         )
@@ -949,7 +989,7 @@ def preview_canvas_edits(request: CanvasEditPreviewRequest) -> CanvasEditPreview
     impacted_map = canvas_service.find_impacted_notes(document, [node.id for node in target_nodes])
     impacted_notes = [(node, impacted_map[node.id]) for node in document.nodes if node.id in impacted_map]
     try:
-        changes, summary = codex_service.draft_canvas_changes(
+        changes, summary = agent_service.draft_canvas_changes(
             repo_path=resolved_repo_path,
             prompt=request.prompt,
             target_nodes=target_nodes,
@@ -1007,10 +1047,13 @@ def apply_canvas_edits(request: CanvasEditApplyRequest) -> CanvasEditApplyRespon
 
 def build_status(preview: str | None = None) -> StatusResponse:
     payload = state_store.load()
+    project = project_service.get_project()
+    active_provider = project.agent_provider or settings.agent_provider
+    auth_status = agent_auth_service.get_status(active_provider)
     return StatusResponse(
         memgraph_ok=graph_service.healthcheck(),
         cgr_ok=settings.cgr_binary.exists(),
-        codex_ok=codex_service.is_available(),
+        agent_ok=agent_service.is_available(),
         active_repo_path=payload.get("active_repo_path"),
         config_path=str(settings.config_path),
         log_path=str(settings.log_path),
@@ -1018,6 +1061,9 @@ def build_status(preview: str | None = None) -> StatusResponse:
         sample_repos={name: str(path) for name, path in settings.sample_repos.items()},
         index_job=index_service.current_state(),
         preview=preview,
-        codex_binary=str(settings.codex_binary) if settings.codex_binary else None,
-        codex_model=settings.codex_model,
+        agent_name=settings.agent_name,
+        agent_binary=str(settings.agent_binary) if settings.agent_binary else None,
+        agent_provider=active_provider,
+        agent_model=settings.agent_model,
+        agent_auth_required=auth_status.auth_required,
     )

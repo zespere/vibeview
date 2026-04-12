@@ -12,7 +12,7 @@ export interface IndexJobState {
 export interface StatusResponse {
   memgraph_ok: boolean;
   cgr_ok: boolean;
-  codex_ok: boolean;
+  agent_ok: boolean;
   active_repo_path: string | null;
   config_path: string;
   log_path: string;
@@ -20,14 +20,18 @@ export interface StatusResponse {
   sample_repos: Record<string, string>;
   index_job: IndexJobState;
   preview: string | null;
-  codex_binary: string | null;
-  codex_model: string | null;
+  agent_name: string;
+  agent_binary: string | null;
+  agent_provider: string | null;
+  agent_model: string | null;
+  agent_auth_required: boolean;
 }
 
 export interface ProjectProfile {
   name: string;
   repo_path: string;
   recent_projects: string[];
+  agent_provider: string | null;
 }
 
 export interface ProjectProfileResponse {
@@ -37,6 +41,19 @@ export interface ProjectProfileResponse {
 
 export interface ProjectFolderPickResponse {
   repo_path: string | null;
+}
+
+export interface AgentProviderOption {
+  id: string;
+  label: string;
+  env_var: string;
+}
+
+export interface AgentAuthStatusResponse {
+  active_provider: string | null;
+  auth_required: boolean;
+  configured_providers: string[];
+  providers: AgentProviderOption[];
 }
 
 export interface ProjectImageUploadResponse {
@@ -53,12 +70,30 @@ export interface ProjectWorkspaceStatusResponse {
   has_canvas_nodes: boolean;
 }
 
+export interface ConversationRunTool {
+  id: string;
+  name: string;
+  label: string;
+  status: "running" | "success" | "error";
+  summary?: string | null;
+}
+
+export interface ConversationRunState {
+  provider?: string | null;
+  model?: string | null;
+  reasoning?: string | null;
+  phase_label?: string | null;
+  is_streaming?: boolean;
+  tools?: ConversationRunTool[];
+}
+
 export interface ConversationMessage {
   id: string;
   role: "user" | "assistant";
   title?: string | null;
   content: string;
   created_at?: string | null;
+  run_state?: ConversationRunState | null;
 }
 
 export interface ConversationSummary {
@@ -138,7 +173,7 @@ export interface PushCreateResponse {
   summary: string;
 }
 
-export interface CodexCommandRecord {
+export interface AgentCommandRecord {
   command: string;
   status: string;
   exit_code: number | null;
@@ -151,18 +186,19 @@ export interface ChangedFileRecord {
   diff: string;
 }
 
-export interface CodexChangeResponse {
+export interface AgentChangeResponse {
   repo_path: string;
   prompt: string;
   summary: string;
   dry_run: boolean;
   used_graph_context: boolean;
-  bypass_sandbox: boolean;
-  codex_binary: string;
-  codex_model: string | null;
+  agent_binary: string;
+  agent_name: string;
+  agent_provider: string | null;
+  agent_model: string | null;
   graph_context_summary: string | null;
   changed_files: ChangedFileRecord[];
-  commands: CodexCommandRecord[];
+  commands: AgentCommandRecord[];
   raw_event_count: number;
 }
 
@@ -242,24 +278,6 @@ export interface CanvasGenerateResponse {
   created_count: number;
 }
 
-export interface ProjectBuildResponse {
-  repo_path: string;
-  prompt: string;
-  summary: string;
-  code_summary: string;
-  note_summary: string;
-  note_changes_summary: string;
-  modified_files: string[];
-  notes_created: number;
-  document: CanvasDocument;
-}
-
-export interface ProjectPlanResponse {
-  repo_path: string;
-  prompt: string;
-  summary: string;
-  plan_text: string;
-}
 
 export interface ProjectAskResponse {
   repo_path: string;
@@ -288,10 +306,27 @@ export interface ExplorationSuggestionResponse {
 }
 
 export interface ProjectRunStreamEvent {
-  type: "phase" | "assistant.chunk" | "completed" | "error";
+  type:
+    | "phase"
+    | "run.status"
+    | "assistant.chunk"
+    | "tool.start"
+    | "tool.end"
+    | "retry.start"
+    | "retry.end"
+    | "completed"
+    | "error";
   phase?: string;
   label?: string;
   text?: string;
+  provider?: string | null;
+  model?: string | null;
+  reasoning?: string | null;
+  tool_call_id?: string;
+  tool_name?: string;
+  tool_label?: string;
+  tool_status?: "success" | "error";
+  tool_summary?: string | null;
   mode?: "ask" | "plan" | "build";
   summary?: string;
   answer_text?: string;
@@ -362,6 +397,21 @@ export function fetchStatus() {
 
 export function fetchProject() {
   return apiRequest<ProjectProfileResponse>("/project", { cache: "no-store", timeoutMs: 5000 } as RequestInit & { timeoutMs: number });
+}
+
+export function fetchAgentAuthStatus() {
+  return apiRequest<AgentAuthStatusResponse>("/agent/auth", { cache: "no-store" });
+}
+
+export function updateAgentAuth(provider: string, apiKey?: string) {
+  return apiRequest<AgentAuthStatusResponse>("/agent/auth", {
+    method: "PUT",
+    body: JSON.stringify({
+      provider,
+      api_key: apiKey ?? null,
+      set_active: true,
+    }),
+  });
 }
 
 export function fetchProjectWorkspaceStatus(repoPath: string) {
@@ -463,62 +513,25 @@ export function runIndex(repoPath: string, clean: boolean, dryRun: boolean) {
   });
 }
 
-export function runCodexChange(
+export function runAgentChange(
   repoPath: string,
   prompt: string,
   dryRun: boolean,
   useGraphContext: boolean,
-  bypassSandbox: boolean,
   semanticContext?: string,
 ) {
-  return apiRequest<CodexChangeResponse>("/codex/change", {
+  return apiRequest<AgentChangeResponse>("/agent/change", {
     method: "POST",
     body: JSON.stringify({
       repo_path: repoPath,
       prompt,
       dry_run: dryRun,
       use_graph_context: useGraphContext,
-      bypass_sandbox: bypassSandbox,
       semantic_context: semanticContext,
     }),
   });
 }
 
-export function buildProjectFromPrompt(
-  repoPath: string,
-  prompt: string,
-  semanticContext?: string,
-  selectedNoteIds: string[] = [],
-  conversationContext?: string,
-) {
-  return apiRequest<ProjectBuildResponse>("/project/build", {
-    method: "POST",
-    body: JSON.stringify({
-      repo_path: repoPath,
-      prompt,
-      semantic_context: semanticContext,
-      selected_note_ids: selectedNoteIds,
-      conversation_context: conversationContext,
-    }),
-  });
-}
-
-export function planProjectFromPrompt(
-  repoPath: string,
-  prompt: string,
-  semanticContext?: string,
-  conversationContext?: string,
-) {
-  return apiRequest<ProjectPlanResponse>("/project/plan", {
-    method: "POST",
-    body: JSON.stringify({
-      repo_path: repoPath,
-      prompt,
-      semantic_context: semanticContext,
-      conversation_context: conversationContext,
-    }),
-  });
-}
 
 export function askProjectQuestion(
   repoPath: string,
@@ -565,7 +578,6 @@ export function fetchExplorationSuggestions(
 
 export async function streamProjectRun(
   repoPath: string,
-  mode: "ask" | "plan" | "build" | "auto",
   prompt: string,
   canvasId: string | null | undefined,
   semanticContext: string | undefined,
@@ -580,7 +592,6 @@ export async function streamProjectRun(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       repo_path: repoPath,
-      mode,
       prompt,
       canvas_id: canvasId,
       semantic_context: semanticContext,

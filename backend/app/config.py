@@ -20,9 +20,11 @@ class Settings(BaseModel):
     memgraph_username: str = ""
     memgraph_password: str = ""
     cgr_binary: Path = WORKSPACE_ROOT / "vendor" / "code-graph-rag" / ".venv" / "bin" / "cgr"
-    codex_binary: Path | None = None
-    codex_model: str | None = None
-    codex_bypass_sandbox_default: bool = True
+    agent_binary: Path | None = None
+    agent_name: str = "pi"
+    agent_provider: str | None = None
+    agent_model: str | None = None
+    agent_reasoning_default: str = "medium"
     state_path: Path = WORKSPACE_ROOT / "backend" / "data" / "state.json"
     canvas_path: Path = WORKSPACE_ROOT / "backend" / "data" / "canvas.json"
     project_path: Path = WORKSPACE_ROOT / "backend" / "data" / "project.json"
@@ -45,6 +47,35 @@ def _resolve_path(value: str | Path, workspace_root: Path) -> Path:
     return path if path.is_absolute() else workspace_root / path
 
 
+def _resolve_executable(value: str | Path, workspace_root: Path) -> Path | None:
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    if "/" not in raw and "\\" not in raw:
+        direct = shutil.which(raw)
+        if direct:
+            return Path(direct)
+
+        for base in (
+            Path.home() / ".config" / "nvm" / "versions" / "node",
+            Path.home() / ".nvm" / "versions" / "node",
+        ):
+            if not base.exists():
+                continue
+            candidates = sorted(
+                (path / "bin" / raw for path in base.iterdir() if path.is_dir()),
+                key=lambda path: path.parent.parent.name,
+            )
+            for candidate in reversed(candidates):
+                if candidate.exists():
+                    return candidate
+        return None
+
+    candidate = _resolve_path(raw, workspace_root)
+    return candidate if candidate.exists() else candidate
+
+
 def _read_config_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -52,8 +83,8 @@ def _read_config_file(path: Path) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
-def _discover_codex_binary() -> Path | None:
-    direct = shutil.which("codex")
+def _discover_agent_binary() -> Path | None:
+    direct = shutil.which("pi")
     if direct:
         return Path(direct)
 
@@ -75,7 +106,7 @@ def _discover_codex_binary() -> Path | None:
     if not prefix:
         return None
 
-    candidate = Path(prefix) / "bin" / "codex"
+    candidate = Path(prefix) / "bin" / "pi"
     return candidate if candidate.exists() else None
 
 
@@ -87,7 +118,7 @@ def load_settings() -> Settings:
     app_cfg = raw.get("app", {})
     memgraph_cfg = raw.get("memgraph", {})
     code_graph_cfg = raw.get("code_graph", {})
-    codex_cfg = raw.get("codex", {})
+    agent_cfg = raw.get("agent", {})
     repos_cfg = raw.get("repos", {})
 
     sample_repos = {
@@ -111,11 +142,13 @@ def load_settings() -> Settings:
             code_graph_cfg.get("binary", "vendor/code-graph-rag/.venv/bin/cgr"),
             workspace_root,
         ),
-        codex_binary=_resolve_path(codex_cfg["binary"], workspace_root)
-        if codex_cfg.get("binary")
-        else _discover_codex_binary(),
-        codex_model=codex_cfg.get("model"),
-        codex_bypass_sandbox_default=bool(codex_cfg.get("bypass_sandbox_default", True)),
+        agent_binary=_resolve_executable(agent_cfg["binary"], workspace_root)
+        if agent_cfg.get("binary")
+        else _discover_agent_binary(),
+        agent_name=str(agent_cfg.get("name", "pi")).strip() or "pi",
+        agent_provider=str(agent_cfg.get("provider", "")).strip() or None,
+        agent_model=str(agent_cfg.get("model", "")).strip() or None,
+        agent_reasoning_default=str(agent_cfg.get("reasoning_default", "medium")).strip() or "medium",
         state_path=_resolve_path(
             app_cfg.get("state_path", "backend/data/state.json"),
             workspace_root,

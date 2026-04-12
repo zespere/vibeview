@@ -9,7 +9,7 @@ This phase adds:
 - root config file: [`vibeview.toml`](../vibeview.toml)
 - backend file logging
 - dry-run support for `POST /index`
-- Codex CLI binary config
+- Pi CLI binary config
 - sample repo shortcuts surfaced through `GET /status`
 - smoke-check script: [`scripts/run-mvp-check.sh`](../scripts/run-mvp-check.sh)
 

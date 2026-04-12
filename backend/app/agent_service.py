@@ -3,25 +3,25 @@ from __future__ import annotations
 import difflib
 import json
 import logging
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from .config import settings
 from .models import (
+    AgentChangeResponse,
+    AgentCommandRecord,
     CanvasEdge,
     CanvasEditChangeRecord,
     CanvasEditPatch,
     CanvasNode,
     ChangedFileRecord,
-    CodexChangeResponse,
-    CodexCommandRecord,
     ExplorationContextNode,
     ExplorationSuggestionRecord,
     GeneratedCanvasEdge,
     GeneratedCanvasNode,
 )
+from .pi_client import PiClient
 from .services import GraphService, _clean_log_output
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ IGNORED_DIR_NAMES = {
     "node_modules",
 }
 MAX_SNAPSHOT_BYTES = 250_000
-EXPLORATION_SUGGESTION_TIMEOUT_SECONDS = 12
+FAST_PROMPT_TIMEOUT_SECONDS = 12
 
 
 def _append_unique_tags(existing: list[str], additions: list[str]) -> list[str]:
@@ -58,12 +58,19 @@ class _SnapshotFile:
     content: str
 
 
-class CodexService:
-    def __init__(self, graph_service: GraphService) -> None:
+class AgentService:
+    def __init__(
+        self,
+        graph_service: GraphService,
+        pi_client: PiClient,
+        provider_resolver: Callable[[], str | None] | None = None,
+    ) -> None:
         self.graph_service = graph_service
+        self.pi_client = pi_client
+        self.provider_resolver = provider_resolver or (lambda: settings.agent_provider)
 
     def is_available(self) -> bool:
-        return bool(settings.codex_binary and settings.codex_binary.exists())
+        return self.pi_client.is_available()
 
     def run_change(
         self,
@@ -71,20 +78,19 @@ class CodexService:
         prompt: str,
         dry_run: bool,
         use_graph_context: bool,
-        bypass_sandbox: bool | None,
         semantic_context: str | None,
         image_paths: list[str] | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
-    ) -> CodexChangeResponse:
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> AgentChangeResponse:
         if not self.is_available():
-            raise RuntimeError("Codex CLI is not available. Check codex.binary in vibeview.toml.")
+            raise RuntimeError("Pi CLI is not available. Check agent.binary in vibeview.toml.")
 
         repo_dir = Path(repo_path)
         before = self._snapshot_repo(repo_dir)
 
         graph_context_summary = None
-        final_prompt = prompt.strip()
         context_blocks: list[str] = []
         if semantic_context:
             context_blocks.append(
@@ -95,7 +101,7 @@ class CodexService:
             try:
                 impact = self.graph_service.analyze_impact(prompt, limit=5)
             except Exception:
-                logger.exception("Failed to build graph context for Codex change run")
+                logger.exception("Failed to build graph context for agent change run")
                 graph_context_summary = "Graph context unavailable; proceeding without code-graph hints."
             else:
                 graph_context_summary = impact.summary
@@ -114,50 +120,42 @@ class CodexService:
                     + "\n".join(context_lines)
                 )
 
+        final_prompt = prompt.strip()
         if context_blocks:
             final_prompt = "\n\n".join(context_blocks) + f"\n\nTask:\n{prompt.strip()}"
-
         if dry_run:
-            final_prompt += (
-                "\n\nDo not modify files. Inspect the repo and explain the exact changes you would make."
-            )
+            final_prompt += "\n\nDo not modify files. Inspect the repo and explain the exact changes you would make."
 
-        bypass = settings.codex_bypass_sandbox_default if bypass_sandbox is None else bypass_sandbox
-        command = self._build_command(repo_dir, final_prompt, dry_run, bypass, model, reasoning_effort, image_paths)
-        logger.info("Starting Codex change run for %s", repo_path)
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
+        result = self.pi_client.run_prompt(
+            repo_dir,
+            final_prompt,
+            image_paths=image_paths,
+            provider=self._active_provider(),
+            model=model,
+            reasoning_effort=reasoning_effort,
+            event_callback=event_callback,
         )
-        events = self._parse_jsonl_output(result.stdout)
-        commands = self._collect_command_records(events)
-        summary = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
+        summary = self._last_assistant_message(result.events) or _clean_log_output(result.stderr)
+        changed_files = [] if dry_run else self._build_changed_files(before, self._snapshot_repo(repo_dir))
+        commands = self._collect_command_records(result.events)
 
-        after = self._snapshot_repo(repo_dir)
-        changed_files = [] if dry_run else self._build_changed_files(before, after)
-
-        if result.returncode != 0:
-            error_tail = _clean_log_output(result.stderr or result.stdout)
-            summary = error_tail or summary or "Codex run failed."
-
-        return CodexChangeResponse(
+        return AgentChangeResponse(
             repo_path=str(repo_dir),
             prompt=prompt,
-            summary=summary,
+            summary=summary or ("No changes were made." if dry_run else "Pi run completed."),
             dry_run=dry_run,
             used_graph_context=use_graph_context,
-            bypass_sandbox=bypass,
-            codex_binary=str(settings.codex_binary),
-            codex_model=settings.codex_model,
+            agent_binary=str(settings.agent_binary),
+            agent_name=settings.agent_name,
+            agent_provider=self._active_provider(),
+            agent_model=model or settings.agent_model,
             graph_context_summary=graph_context_summary,
             changed_files=changed_files,
             commands=commands,
-            raw_event_count=len(events),
+            raw_event_count=len(result.events),
         )
 
-    def build_project(
+    def run_workspace_prompt(
         self,
         repo_path: str,
         prompt: str,
@@ -166,133 +164,101 @@ class CodexService:
         image_paths: list[str] | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
-    ) -> CodexChangeResponse:
-        implementation_prompt = (
-            "Implement the user's request directly in the repository.\n"
-            "Make real file changes when they are needed.\n"
-            "If the repository is empty or effectively empty, scaffold the smallest practical web app that satisfies the request.\n"
-            "Prefer a simple local-first web stack already implied by the repository. If there is no stack yet, choose the minimum practical setup.\n"
-            "Do not modify files inside .vibeview/. The system manages that workspace metadata.\n"
-            "Do not stop at a plan. Write the code.\n\n"
-            f"User request:\n{prompt.strip()}"
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+        canvas_id: str | None = None,
+        canvas_title: str | None = None,
+        canvas_file_path: str | None = None,
+    ) -> AgentChangeResponse:
+        canvas_file = canvas_file_path or str(Path(repo_path) / ".vibeview" / "canvases.json")
+        canvas_id_label = canvas_id or "(none)"
+        canvas_title_label = canvas_title or "(none)"
+        workspace_prompt = "\n".join(
+            [
+                "You are operating inside Vibeview, a local-first code workspace with editable project canvases.",
+                "You can inspect and edit repository files directly.",
+                "The canvas workspace data is stored in JSON and may be edited directly when the user wants something shown, mapped, visualized, reorganized, or refined on the canvas.",
+                "Use the current repository and current canvas context to decide what to change.",
+                "",
+                "Canvas workspace rules:",
+                f"- Edit this file for canvas changes: {canvas_file}",
+                f"- Current active canvas id: {canvas_id_label}",
+                f"- Current active canvas title: {canvas_title_label}",
+                "- Do not edit .vibeview/canvas.json. It is derived metadata and will be regenerated by the app.",
+                "- If the user asks to show, map, expose, represent, or refine codebase structure on the canvas, update the canvas JSON directly instead of implementing a new UI feature.",
+                "- Preserve canvases unrelated to the request.",
+                "- Keep the canvas JSON valid.",
+                "- If the user clearly asks for code changes, edit repository files directly as needed.",
+                "- After making changes, explain clearly what changed.",
+                "",
+                "User request:",
+                prompt.strip(),
+            ]
         )
         return self.run_change(
             repo_path=repo_path,
-            prompt=implementation_prompt,
+            prompt=workspace_prompt,
             dry_run=False,
             use_graph_context=True,
-            bypass_sandbox=None,
-            semantic_context=self._merge_context_blocks(
-                semantic_context,
-                conversation_context,
-            ),
+            semantic_context=self._merge_context_blocks(semantic_context, conversation_context),
             image_paths=image_paths,
             model=model,
             reasoning_effort=reasoning_effort,
+            event_callback=event_callback,
         )
 
-    def plan_project(
+    def repair_canvas_json(
         self,
         repo_path: str,
-        prompt: str,
-        semantic_context: str | None,
-        conversation_context: str | None = None,
-        image_paths: list[str] | None = None,
+        canvas_file_path: str,
+        backup_file_path: str | None,
+        validation_error: str,
+        canvas_id: str | None = None,
+        canvas_title: str | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
-    ) -> tuple[str, str]:
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> str:
         if not self.is_available():
-            raise RuntimeError("Codex CLI is not available. Check codex.binary in vibeview.toml.")
+            raise RuntimeError("Pi CLI is not available. Check agent.binary in vibeview.toml.")
 
         repo_dir = Path(repo_path)
-        context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
-        planning_prompt = (
-            "You are preparing an implementation plan for the next coding run.\n"
-            "Inspect the repository and respond with a concise, practical implementation plan only.\n"
-            "Do not modify files.\n"
-            "Keep the response grounded in the current codebase.\n"
-            "Format:\n"
-            "1. Goal\n"
-            "2. Approach\n"
-            "3. Main implementation steps\n"
-            "4. Files or areas likely affected\n"
-            "5. Risks or open questions\n\n"
-            f"User request:\n{prompt.strip()}"
+        repair_prompt_lines = [
+            "Repair the canvas workspace JSON after a bad edit.",
+            "Edit only the canvas workspace JSON file and nothing else in the repository.",
+            "Preserve the latest intended canvas changes when possible, but make the final file valid JSON that matches the expected canvas collection structure.",
+            "",
+            "Expected structure:",
+            "- top-level object with repo_path and canvases",
+            "- canvases is a list of canvas objects",
+            "- each canvas has id, title, repo_path, nodes, edges",
+            "- each node has id, title, description, tags, x, y, linked_files, linked_symbols, linked_canvas_id",
+            "- each edge has id, source_node_id, target_node_id, label",
+            "",
+            "Repair rules:",
+            f"- Broken file to repair: {canvas_file_path}",
+            f"- Current active canvas id: {canvas_id or '(none)'}",
+            f"- Current active canvas title: {canvas_title or '(none)'}",
+            f"- Validation error: {validation_error}",
+        ]
+        if backup_file_path:
+            repair_prompt_lines.append(f"- Backup file for reference: {backup_file_path}")
+        repair_prompt_lines.extend(
+            [
+                "- Do not edit .vibeview/canvas.json.",
+                "- Do not edit application source files.",
+                "- Final result must be valid JSON parseable by the app.",
+            ]
         )
-        final_prompt = (
-            f"{context_prefix}\n\nTask:\n{planning_prompt}" if context_prefix else planning_prompt
+        result = self.pi_client.run_prompt(
+            repo_dir,
+            "\n".join(repair_prompt_lines),
+            provider=self._active_provider(),
+            model=model,
+            reasoning_effort=reasoning_effort,
+            timeout_seconds=FAST_PROMPT_TIMEOUT_SECONDS,
+            event_callback=event_callback,
         )
-        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort, image_paths)
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=EXPLORATION_SUGGESTION_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError("Could not generate an implementation plan in time.")
-        events = self._parse_jsonl_output(result.stdout)
-        plan_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
-        plan_text = plan_text.strip()
-        if result.returncode != 0 or not plan_text:
-            error_tail = _clean_log_output(result.stderr or result.stdout).strip()
-            raise RuntimeError(error_tail or "Could not generate an implementation plan.")
-
-        summary = self._summarize_plan(plan_text)
-        return summary, plan_text
-
-    def infer_project_run_mode(
-        self,
-        repo_path: str,
-        prompt: str,
-        semantic_context: str | None,
-        conversation_context: str | None = None,
-        image_paths: list[str] | None = None,
-        model: str | None = None,
-        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
-    ) -> Literal["ask", "build"]:
-        fallback = self._fallback_prompt_mode(prompt)
-        if not self.is_available():
-            return fallback
-
-        repo_dir = Path(repo_path)
-        context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
-        classifier_prompt = (
-            "Classify the user's request for a codebase workspace.\n"
-            "Return JSON only in this exact shape:\n"
-            '{\n  "mode": "ask"\n}\n'
-            "Allowed modes: ask, build.\n\n"
-            "Use ask when the user primarily wants explanation, understanding, comparison, diagnosis, or discussion without changing code.\n"
-            "Use build when the user wants files changed, code written, code edited, features implemented, bugs fixed, or behavior changed.\n"
-            "If the request is ambiguous, prefer ask only when it clearly reads like a question; otherwise prefer build.\n\n"
-            f"User request:\n{prompt.strip()}"
-        )
-        final_prompt = (
-            f"{context_prefix}\n\nTask:\n{classifier_prompt}" if context_prefix else classifier_prompt
-        )
-        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort, image_paths)
-        try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=8,
-            )
-        except subprocess.TimeoutExpired:
-            logger.warning("Timed out classifying project request intent for %s", repo_path)
-            return fallback
-
-        events = self._parse_jsonl_output(result.stdout)
-        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
-        payload = self._extract_json_object(raw_text)
-        if isinstance(payload, dict):
-            mode = str(payload.get("mode", "")).strip().lower()
-            if mode in {"ask", "build"}:
-                return mode
-        return fallback
+        return (self._last_assistant_message(result.events) or _clean_log_output(result.stderr) or "Canvas repair finished.").strip()
 
     def ask_project(
         self,
@@ -303,9 +269,10 @@ class CodexService:
         image_paths: list[str] | None = None,
         model: str | None = None,
         reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> tuple[str, str]:
         if not self.is_available():
-            raise RuntimeError("Codex CLI is not available. Check codex.binary in vibeview.toml.")
+            raise RuntimeError("Pi CLI is not available. Check agent.binary in vibeview.toml.")
 
         repo_dir = Path(repo_path)
         context_prefix = self._merge_context_blocks(semantic_context, conversation_context)
@@ -316,20 +283,20 @@ class CodexService:
             "Prefer practical explanations tied to the current codebase.\n\n"
             f"User question:\n{prompt.strip()}"
         )
-        final_prompt = (
-            f"{context_prefix}\n\nTask:\n{question_prompt}" if context_prefix else question_prompt
+        final_prompt = f"{context_prefix}\n\nTask:\n{question_prompt}" if context_prefix else question_prompt
+        result = self.pi_client.run_prompt(
+            repo_dir,
+            final_prompt,
+            image_paths=image_paths,
+            provider=self._active_provider(),
+            model=model,
+            reasoning_effort=reasoning_effort,
+            event_callback=event_callback,
         )
-        command = self._build_command(repo_dir, final_prompt, True, True, model, reasoning_effort, image_paths)
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        events = self._parse_jsonl_output(result.stdout)
-        answer_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
-        answer_text = answer_text.strip()
-        if result.returncode != 0 or not answer_text:
-            error_tail = _clean_log_output(result.stderr or result.stdout).strip()
-            raise RuntimeError(error_tail or "Could not answer the project question.")
-
-        summary = self._summarize_plan(answer_text)
-        return summary, answer_text
+        answer_text = (self._last_assistant_message(result.events) or _clean_log_output(result.stderr)).strip()
+        if not answer_text:
+            raise RuntimeError("Could not answer the project question.")
+        return self._summarize_plan(answer_text), answer_text
 
     def generate_exploration_suggestions(
         self,
@@ -384,14 +351,15 @@ class CodexService:
             f"{relation_clause}"
         )
         final_prompt = f"{context_prefix}\n\nTask:\n{prompt}" if context_prefix else prompt
-        command = self._build_command(repo_dir, final_prompt, True, True)
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        events = self._parse_jsonl_output(result.stdout)
-        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
-        payload = self._extract_json_object(raw_text)
-        if result.returncode != 0 or payload is None:
+        result = self.pi_client.run_prompt(
+            repo_dir,
+            final_prompt,
+            provider=self._active_provider(),
+            timeout_seconds=FAST_PROMPT_TIMEOUT_SECONDS,
+        )
+        payload = self._extract_json_object(self._last_assistant_message(result.events) or "")
+        if payload is None:
             return fallback
-
         try:
             suggestions = [
                 ExplorationSuggestionRecord.model_validate(item)
@@ -399,17 +367,15 @@ class CodexService:
             ]
         except Exception:
             return fallback
-
-        if not suggestions:
-            return fallback
-
-        return suggestions[:suggestion_count]
+        return suggestions[:suggestion_count] or fallback
 
     def generate_architecture_notes(
         self,
         repo_path: str,
         prompt: str,
         image_paths: list[str] | None = None,
+        model: str | None = None,
+        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
     ) -> tuple[list[GeneratedCanvasNode], list[GeneratedCanvasEdge], str]:
         if not self.is_available():
             nodes = self._fallback_architecture_notes(prompt)
@@ -458,28 +424,24 @@ class CodexService:
             "- JSON only. No markdown fences.\n\n"
             f"User prompt:\n{prompt.strip()}\n"
         )
-        command = self._build_command(repo_dir, generation_prompt, True, True, image_paths=image_paths)
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        events = self._parse_jsonl_output(result.stdout)
-        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
-        payload = self._extract_json_object(raw_text)
+        result = self.pi_client.run_prompt(
+            repo_dir,
+            generation_prompt,
+            image_paths=image_paths,
+            provider=self._active_provider(),
+            model=model,
+            reasoning_effort=reasoning_effort,
+        )
+        payload = self._extract_json_object(self._last_assistant_message(result.events) or "")
         if payload is None:
             nodes = self._fallback_architecture_notes(prompt)
             return nodes, [], f"Created {len(nodes)} architecture notes from the prompt."
-
         try:
-            node_items = [
-                GeneratedCanvasNode.model_validate(item)
-                for item in payload.get("nodes", [])
-            ]
-            edge_items = [
-                GeneratedCanvasEdge.model_validate(item)
-                for item in payload.get("edges", [])
-            ]
+            node_items = [GeneratedCanvasNode.model_validate(item) for item in payload.get("nodes", [])]
+            edge_items = [GeneratedCanvasEdge.model_validate(item) for item in payload.get("edges", [])]
         except Exception:
             nodes = self._fallback_architecture_notes(prompt)
             return nodes, [], f"Created {len(nodes)} architecture notes from the prompt."
-
         summary = str(payload.get("summary") or f"Created {len(node_items)} architecture notes.").strip()
         if not node_items:
             node_items = self._fallback_architecture_notes(prompt)
@@ -536,9 +498,9 @@ class CodexService:
             '      "depends_on_change_ids": ["change_0"],\n'
             '      "impact_basis": ["shared file: frontend/app/page.tsx"],\n'
             '      "target_node_id": "node_123",\n'
-            '      "patch": { "title": "optional", "description": "optional", "tags": ["optional"], "linked_files": ["optional"], "linked_symbols": ["optional"] },\n'
+            '      "patch": { "title": "optional", "description": "optional", "tags": ["optional"], "linked_files": ["optional"], "linked_symbols": ["optional"], "linked_canvas_id": "optional" },\n'
             '      "anchor_node_id": "optional existing note id",\n'
-            '      "after_node": { "id": "draft_node_1", "title": "new note title", "description": "text", "tags": ["workflow"], "linked_files": ["frontend/app/page.tsx"], "linked_symbols": ["Home"] },\n'
+            '      "after_node": { "id": "draft_node_1", "title": "new note title", "description": "text", "tags": ["workflow"], "linked_files": ["frontend/app/page.tsx"], "linked_symbols": ["Home"], "linked_canvas_id": "optional" },\n'
             '      "after_edge": { "source_node_id": "node_or_draft_id", "target_node_id": "node_or_draft_id", "label": "drives" }\n'
             "    }\n"
             "  ]\n"
@@ -562,12 +524,14 @@ class CodexService:
             f"Impacted note candidates:\n{impacted_block}\n"
         )
         final_prompt = f"{context_prefix}\n\nTask:\n{draft_prompt}" if context_prefix else draft_prompt
-        command = self._build_command(repo_dir, final_prompt, True, True)
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        events = self._parse_jsonl_output(result.stdout)
-        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
-        payload = self._extract_json_object(raw_text)
-        if result.returncode != 0 or payload is None:
+        result = self.pi_client.run_prompt(
+            repo_dir,
+            final_prompt,
+            provider=self._active_provider(),
+            timeout_seconds=FAST_PROMPT_TIMEOUT_SECONDS,
+        )
+        payload = self._extract_json_object(self._last_assistant_message(result.events) or "")
+        if payload is None:
             return fallback
 
         nodes_by_id = {node.id: node for node in [*target_nodes, *(node for node, _ in impacted_notes)]}
@@ -603,7 +567,7 @@ class CodexService:
                     continue
                 if not any(
                     value is not None and (value != [] if isinstance(value, list) else True)
-                    for value in [patch.title, patch.description, patch.tags, patch.linked_files, patch.linked_symbols]
+                    for value in [patch.title, patch.description, patch.tags, patch.linked_files, patch.linked_symbols, patch.linked_canvas_id]
                 ):
                     continue
                 after_node = before_node.model_copy(deep=True)
@@ -656,23 +620,11 @@ class CodexService:
                     id=draft_id,
                     title=draft_title,
                     description=str(after_payload.get("description") or ""),
-                    tags=[
-                        str(tag).strip()
-                        for tag in after_payload.get("tags", [])
-                        if str(tag).strip()
-                    ],
+                    tags=[str(tag).strip() for tag in after_payload.get("tags", []) if str(tag).strip()],
                     x=0,
                     y=0,
-                    linked_files=[
-                        str(path).strip()
-                        for path in after_payload.get("linked_files", [])
-                        if str(path).strip()
-                    ],
-                    linked_symbols=[
-                        str(symbol).strip()
-                        for symbol in after_payload.get("linked_symbols", [])
-                        if str(symbol).strip()
-                    ],
+                    linked_files=[str(path).strip() for path in after_payload.get("linked_files", []) if str(path).strip()],
+                    linked_symbols=[str(symbol).strip() for symbol in after_payload.get("linked_symbols", []) if str(symbol).strip()],
                     linked_canvas_id=str(after_payload.get("linked_canvas_id") or "").strip() or None,
                 )
                 anchor_node_id = str(item.get("anchor_node_id") or "").strip() or None
@@ -751,7 +703,6 @@ class CodexService:
         if not self.is_available():
             return fallback
 
-        repo_dir = Path(repo_path)
         prompt = (
             "Read the git status and diff summary, then return exactly one concise conventional-style commit message.\n"
             "Requirements:\n"
@@ -762,17 +713,17 @@ class CodexService:
             f"Git status:\n{status_text.strip() or '(empty)'}\n\n"
             f"Git diff summary:\n{diff_text.strip() or '(empty)'}\n"
         )
-        command = self._build_command(repo_dir, prompt, True, True)
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-        events = self._parse_jsonl_output(result.stdout)
-        raw_text = self._last_agent_message(events) or _clean_log_output(result.stdout or result.stderr)
-        candidate = raw_text.strip().splitlines()[0].strip() if raw_text.strip() else ""
+        result = self.pi_client.run_prompt(
+            Path(repo_path),
+            prompt,
+            provider=self._active_provider(),
+            timeout_seconds=FAST_PROMPT_TIMEOUT_SECONDS,
+        )
+        candidate = (self._last_assistant_message(result.events) or "").strip().splitlines()[0].strip() if result.events else ""
         if not candidate:
             return fallback
         candidate = candidate.strip("`").strip()
-        if len(candidate) > 96:
-            candidate = candidate[:96].rstrip()
-        return candidate or fallback
+        return candidate[:96].rstrip() or fallback
 
     def _merge_context_blocks(
         self,
@@ -790,9 +741,7 @@ class CodexService:
                 "Use this conversation context to continue the user's current thread naturally:\n"
                 f"{conversation_context.strip()}"
             )
-        if not blocks:
-            return None
-        return "\n\n".join(blocks)
+        return "\n\n".join(blocks) if blocks else None
 
     def _summarize_plan(self, plan_text: str) -> str:
         for line in plan_text.splitlines():
@@ -801,39 +750,8 @@ class CodexService:
                 return stripped[:140]
         return "Implementation plan ready."
 
-    def _build_command(
-        self,
-        repo_dir: Path,
-        prompt: str,
-        dry_run: bool,
-        bypass_sandbox: bool,
-        model: str | None = None,
-        reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None,
-        image_paths: list[str] | None = None,
-    ) -> list[str]:
-        assert settings.codex_binary is not None
-        command = [
-            str(settings.codex_binary),
-            "exec",
-            "-C",
-            str(repo_dir),
-            "--skip-git-repo-check",
-            "--json",
-        ]
-        effective_model = model or settings.codex_model
-        if effective_model:
-            command.extend(["-m", effective_model])
-        if reasoning_effort:
-            command.extend(["-c", f'reasoning_effort="{reasoning_effort}"'])
-        for image_path in image_paths or []:
-            if image_path:
-                command.extend(["-i", image_path])
-        if bypass_sandbox:
-            command.append("--dangerously-bypass-approvals-and-sandbox")
-        else:
-            command.extend(["--sandbox", "read-only" if dry_run else "workspace-write"])
-        command.append(prompt)
-        return command
+    def _active_provider(self) -> str | None:
+        return self.provider_resolver()
 
     def _snapshot_repo(self, repo_dir: Path) -> dict[str, _SnapshotFile]:
         snapshot: dict[str, _SnapshotFile] = {}
@@ -891,44 +809,91 @@ class CodexService:
             changed.append(ChangedFileRecord(path=path, change_type=change_type, diff=diff))
         return changed
 
-    def _parse_jsonl_output(self, stdout: str) -> list[dict[str, Any]]:
-        events: list[dict[str, Any]] = []
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                events.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        return events
-
-    def _last_agent_message(self, events: list[dict[str, Any]]) -> str | None:
+    def _last_assistant_message(self, events: list[dict[str, Any]]) -> str | None:
         for event in reversed(events):
-            item = event.get("item")
-            if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
-                text = item.get("text")
-                if isinstance(text, str):
+            if event.get("type") == "agent_end":
+                message = self._last_assistant_message_from_messages(event.get("messages"))
+                if message:
+                    return message
+            if event.get("type") == "message_end":
+                message = event.get("message")
+                text = self._extract_message_text(message)
+                if text:
                     return text
         return None
 
-    def _collect_command_records(self, events: list[dict[str, Any]]) -> list[CodexCommandRecord]:
-        commands: list[CodexCommandRecord] = []
+    def _last_assistant_message_from_messages(self, messages: Any) -> str | None:
+        if not isinstance(messages, list):
+            return None
+        for message in reversed(messages):
+            text = self._extract_message_text(message)
+            if text:
+                return text
+        return None
+
+    def _extract_message_text(self, message: Any) -> str | None:
+        if not isinstance(message, dict):
+            return None
+        role = str(message.get("role") or "").strip()
+        if role != "assistant":
+            return None
+        content = message.get("content")
+        if not isinstance(content, list):
+            return None
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                text = str(block.get("text") or "").strip()
+                if text:
+                    parts.append(text)
+        return "\n\n".join(parts).strip() or None
+
+    def _collect_command_records(self, events: list[dict[str, Any]]) -> list[AgentCommandRecord]:
+        commands: list[AgentCommandRecord] = []
         for event in events:
-            item = event.get("item")
-            if event.get("type") != "item.completed" or not isinstance(item, dict):
+            if event.get("type") != "tool_execution_end":
                 continue
-            if item.get("type") != "command_execution":
-                continue
+            tool_name = str(event.get("toolName") or "").strip()
+            args = event.get("args")
+            command = self._format_tool_call(tool_name, args)
+            output = self._extract_tool_result_text(event.get("result"))
             commands.append(
-                CodexCommandRecord(
-                    command=str(item.get("command", "")),
-                    status=str(item.get("status", "")),
-                    exit_code=item.get("exit_code"),
-                    output=_clean_log_output(str(item.get("aggregated_output", ""))) or None,
+                AgentCommandRecord(
+                    command=command,
+                    status="error" if event.get("isError") else "success",
+                    exit_code=None,
+                    output=output,
                 )
             )
         return commands
+
+    def _format_tool_call(self, tool_name: str, args: Any) -> str:
+        if tool_name == "bash" and isinstance(args, dict):
+            command = str(args.get("command") or "").strip()
+            if command:
+                return command
+        if isinstance(args, dict) and args:
+            return f"{tool_name} {json.dumps(args, ensure_ascii=True, sort_keys=True)}"
+        return tool_name or "tool"
+
+    def _extract_tool_result_text(self, result: Any) -> str | None:
+        if not isinstance(result, dict):
+            return None
+        content = result.get("content")
+        if not isinstance(content, list):
+            return None
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                text = str(block.get("text") or "").strip()
+                if text:
+                    parts.append(text)
+        cleaned = _clean_log_output("\n".join(parts))
+        return cleaned or None
 
     def _extract_json_object(self, value: str) -> dict[str, Any] | None:
         if not value:
@@ -975,15 +940,14 @@ class CodexService:
         ]
 
     def _fallback_commit_message(self, status_text: str, diff_text: str) -> str:
-        combined = f"{status_text}\n{diff_text}"
-        lowered = combined.lower()
-        if any(token in lowered for token in ["package.json", "pnpm-lock", "requirements", "pyproject", "cargo.toml"]):
+        combined = f"{status_text}\n{diff_text}".lower()
+        if any(token in combined for token in ["package.json", "pnpm-lock", "requirements", "pyproject", "cargo.toml"]):
             return "chore: update project dependencies"
-        if any(token in lowered for token in ["readme", "docs", "agents.md"]):
+        if any(token in combined for token in ["readme", "docs", "agents.md"]):
             return "docs: update project documentation"
-        if any(token in lowered for token in ["css", "styles", ".tsx", ".jsx", "page.tsx", "component"]):
+        if any(token in combined for token in ["css", "styles", ".tsx", ".jsx", "page.tsx", "component"]):
             return "feat: refine app interface"
-        if any(token in lowered for token in ["test", "spec"]):
+        if any(token in combined for token in ["test", "spec"]):
             return "test: update project coverage"
         return "feat: update project workspace"
 
@@ -1235,11 +1199,6 @@ class CodexService:
         if not changes:
             return [], "No note changes were suggested."
         return changes, f"Drafted {len(changes)} note change{'s' if len(changes) != 1 else ''} for review."
-
-    def _fallback_prompt_mode(self, prompt: str) -> Literal["ask", "build"]:
-        normalized = prompt.strip().lower()
-        if not normalized:
-            return "ask"
 
         question_starters = (
             "what",

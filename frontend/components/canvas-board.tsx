@@ -161,20 +161,26 @@ export function CanvasBoard({
     if (isDraggingRef.current) {
       return;
     }
-    setLocalNodes((current) => {
-      if (areFlowNodesEquivalent(current, derivedNodes)) {
-        return current;
-      }
-      return derivedNodes;
+    const frame = window.requestAnimationFrame(() => {
+      setLocalNodes((current) => {
+        if (areFlowNodesEquivalent(current, derivedNodes)) {
+          return current;
+        }
+        return derivedNodes;
+      });
     });
+    return () => window.cancelAnimationFrame(frame);
   }, [derivedNodes]);
 
   useEffect(() => {
     if (!pendingSelectionIds) {
       return;
     }
-    onSelectNodes(pendingSelectionIds);
-    setPendingSelectionIds(null);
+    const frame = window.requestAnimationFrame(() => {
+      onSelectNodes(pendingSelectionIds);
+      setPendingSelectionIds(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [onSelectNodes, pendingSelectionIds]);
 
   const edges: Edge[] = useMemo(
@@ -275,14 +281,20 @@ export function CanvasBoard({
     }
 
     const storedViewport = readStoredViewport(repoPath);
-    if (storedViewport) {
-      flowRef.current.setViewport(storedViewport, { duration: 0 });
-      setZoom(storedViewport.zoom);
-      return;
-    }
+    const frame = window.requestAnimationFrame(() => {
+      if (!flowRef.current) {
+        return;
+      }
+      if (storedViewport) {
+        flowRef.current.setViewport(storedViewport, { duration: 0 });
+        setZoom(storedViewport.zoom);
+        return;
+      }
 
-    flowRef.current.setViewport(DEFAULT_VIEWPORT, { duration: 0 });
-    setZoom(DEFAULT_VIEWPORT.zoom);
+      flowRef.current.setViewport(DEFAULT_VIEWPORT, { duration: 0 });
+      setZoom(DEFAULT_VIEWPORT.zoom);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [repoPath]);
 
   return (

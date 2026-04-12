@@ -28,6 +28,7 @@ import {
   createProjectCommit,
   pushProjectCommits,
   deleteCanvasNode,
+  fetchAgentAuthStatus,
   fetchCanvas,
   fetchCanvases,
   fetchCommitStatus,
@@ -44,9 +45,11 @@ import {
   resetCanvas,
   renameProjectCanvas,
   uploadProjectImage,
+  updateAgentAuth,
   updateProject,
   updateProjectConversation,
   updateCanvasNode,
+  type AgentAuthStatusResponse,
   type CanvasEditChangeRecord,
   type CanvasEditPreviewResponse,
   type CanvasDocument,
@@ -55,6 +58,7 @@ import {
   type CanvasSummary,
   type CommitStatusResponse,
   type ConversationMessage,
+  type ConversationRunState,
   type ConversationSummary,
   type ProjectProfile,
   type ProjectImageUploadResponse,
@@ -142,7 +146,6 @@ interface ComposerImageAttachment {
   errorMessage: string | null;
 }
 
-type ComposerRunMode = "build" | "plan";
 type ComposerReasoningEffort = "low" | "medium" | "high" | "xhigh";
 type DockVisibilityState = "hidden" | "visible";
 type ConsoleVisibilityState = "collapsed" | "expanded";
@@ -150,12 +153,19 @@ type ConsoleVisibilityState = "collapsed" | "expanded";
 const GPT_MODEL_OPTIONS = [
   "gpt-5.4",
   "gpt-5.4-mini",
-  "gpt-5.3-codex",
+  "gpt-5.3",
   "gpt-5.2",
-  "gpt-5.2-codex",
-  "gpt-5.1-codex-max",
-  "gpt-5.1-codex-mini",
+  "gpt-4.1",
+  "gpt-4.1-mini",
+  "claude-sonnet-4.5",
 ];
+
+const COMPOSER_REASONING_OPTIONS = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" },
+] as const;
 
 const LEADER_DIGIT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
 
@@ -168,6 +178,7 @@ export default function Home() {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<OpenTab["id"] | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [agentAuthStatus, setAgentAuthStatus] = useState<AgentAuthStatusResponse | null>(null);
   const [project, setProject] = useState<ProjectProfile | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState<ProjectWorkspaceStatusResponse | null>(null);
   const [projectsTree, setProjectsTree] = useState<ProjectTreeItem[]>([]);
@@ -180,16 +191,18 @@ export default function Home() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversationRepoPath, setActiveConversationRepoPath] = useState<string | null>(null);
   const [repoPath, setRepoPath] = useState("");
-  const [codexPrompt, setCodexPrompt] = useState("");
+  const [agentAuthProvider, setAgentAuthProvider] = useState("openrouter");
+  const [agentApiKeyInput, setAgentApiKeyInput] = useState("");
+  const [isSavingAgentAuth, setIsSavingAgentAuth] = useState(false);
+  const [composerInputValue, setComposerInputValue] = useState("");
+  const [isComposerModelMenuOpen, setIsComposerModelMenuOpen] = useState(false);
   const [composerImageAttachments, setComposerImageAttachments] = useState<ComposerImageAttachment[]>([]);
   const [inspectedComposerImageId, setInspectedComposerImageId] = useState<string | null>(null);
   const [composerCaretIndex, setComposerCaretIndex] = useState(0);
   const [composerModel, setComposerModel] = useState("gpt-5.4");
   const [composerReasoning, setComposerReasoning] = useState<ComposerReasoningEffort>("medium");
-  const [composerMode, setComposerMode] = useState<ComposerRunMode>("build");
   const [composerStatus, setComposerStatus] = useState<string | null>(null);
-  const [isBuilding, setIsBuilding] = useState(false);
-  const [isPlanning, setIsPlanning] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [isPreviewingCanvasEdits, setIsPreviewingCanvasEdits] = useState(false);
@@ -202,12 +215,6 @@ export default function Home() {
   const [leaderScope, setLeaderScope] = useState<LeaderScope | null>(null);
   const [isNoteSidebarCollapsed, setIsNoteSidebarCollapsed] = useState(false);
   const [consoleMessages, setConsoleMessages] = useState<ConversationMessage[]>([]);
-  const [pendingPlan, setPendingPlan] = useState<{
-    messageId: string;
-    prompt: string;
-    planText: string;
-    summary: string;
-  } | null>(null);
   const [canvasDocument, setCanvasDocument] = useState<CanvasDocument | null>(null);
   const [selectedCanvasNodeId, setSelectedCanvasNodeId] = useState<string | null>(null);
   const [selectedCanvasNodeIds, setSelectedCanvasNodeIds] = useState<string[]>([]);
@@ -238,6 +245,7 @@ export default function Home() {
   const [renamingCanvasTitle, setRenamingCanvasTitle] = useState("");
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerModelMenuRef = useRef<HTMLDivElement | null>(null);
   const noteTitleInputRef = useRef<HTMLInputElement | null>(null);
   const renamingCanvasInputRef = useRef<HTMLInputElement | null>(null);
   const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -260,7 +268,7 @@ export default function Home() {
 
   const [, startStatusTransition] = useTransition();
   const [, startProjectTransition] = useTransition();
-  const [codexPending, startCodexTransition] = useTransition();
+  const [agentPending, startAgentTransition] = useTransition();
   const [, startCanvasTransition] = useTransition();
 
   const selectedCanvasNode = useMemo(
@@ -511,11 +519,11 @@ export default function Home() {
     }
     return [...ids];
   }, [focusedCanvasNodeId, pinnedCanvasNodeIds, selectedCanvasNodeIds]);
-  const isSlashCommandMode = codexPrompt.trim().startsWith("/");
-  const commandQuery = isSlashCommandMode ? codexPrompt.trim().slice(1).trim() : "";
+  const isSlashCommandMode = composerInputValue.trim().startsWith("/");
+  const commandQuery = isSlashCommandMode ? composerInputValue.trim().slice(1).trim() : "";
   const activeNoteMention = useMemo(
-    () => findActiveNoteMention(codexPrompt, composerCaretIndex, canvasDocument),
-    [canvasDocument, codexPrompt, composerCaretIndex],
+    () => findActiveNoteMention(composerInputValue, composerCaretIndex, canvasDocument),
+    [canvasDocument, composerInputValue, composerCaretIndex],
   );
   const isNoteMentionMode = !isSlashCommandMode && activeNoteMention !== null;
   const hasUploadingComposerImages = composerImageAttachments.some((item) => item.status === "uploading");
@@ -523,7 +531,7 @@ export default function Home() {
   const readyComposerImagePaths = composerImageAttachments
     .filter((item) => item.status === "ready" && item.uploadedPath)
     .map((item) => item.uploadedPath as string);
-  const isComposerBusy = isBuilding || isPlanning || isPushing || codexPending || hasUploadingComposerImages;
+  const isComposerBusy = isRunning || isPushing || agentPending || hasUploadingComposerImages;
   const activeConversationSummary = useMemo(
     () =>
       activeProjectTreeItem?.conversations.find(
@@ -532,11 +540,8 @@ export default function Home() {
     [activeConversationId, activeConversationRepoPath, activeProjectTreeItem],
   );
   const latestConsoleSummary = useMemo(() => {
-    if (isPlanning) {
-      return "Preparing implementation plan...";
-    }
-    if (isBuilding) {
-      return "Building the project and refreshing notes...";
+    if (isRunning) {
+      return composerStatus ?? "Working...";
     }
     if (composerStatus) {
       return composerStatus;
@@ -544,17 +549,22 @@ export default function Home() {
     if (activeConversationSummary) {
       return activeConversationSummary.title;
     }
-    return consoleMessages.at(-1)?.title ?? "Ready to build in this project.";
-  }, [activeConversationSummary, composerStatus, consoleMessages, isBuilding, isPlanning]);
+    return consoleMessages.at(-1)?.title ?? "Ready to work in this project.";
+  }, [activeConversationSummary, composerStatus, consoleMessages, isRunning]);
   const availableComposerModels = useMemo(() => {
-    const items = [status?.codex_model, composerModel, ...GPT_MODEL_OPTIONS];
+    const items = [status?.agent_model, composerModel, ...GPT_MODEL_OPTIONS];
     return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
-  }, [composerModel, status?.codex_model]);
+  }, [composerModel, status?.agent_model]);
+  const composerReasoningLabel = useMemo(
+    () =>
+      COMPOSER_REASONING_OPTIONS.find((item) => item.value === composerReasoning)?.label ?? composerReasoning,
+    [composerReasoning],
+  );
   const seedNewCanvasPrompt = useCallback(() => {
     setLeaderScope(null);
     setDockVisibility("visible");
     setConsoleVisibility("expanded");
-    setCodexPrompt("/new-canvas ");
+    setComposerInputValue("/new-canvas ");
     window.setTimeout(() => {
       composerInputRef.current?.focus();
       const value = composerInputRef.current?.value ?? "/new-canvas ";
@@ -565,7 +575,7 @@ export default function Home() {
     setLeaderScope(null);
     setDockVisibility("visible");
     setConsoleVisibility("expanded");
-    setCodexPrompt("/overview");
+    setComposerInputValue("/overview");
     window.setTimeout(() => {
       composerInputRef.current?.focus();
       const value = composerInputRef.current?.value ?? "/overview";
@@ -587,7 +597,7 @@ export default function Home() {
         run: () => {
           setComposerModel(model);
           setComposerStatus(`Composer model set to ${model}.`);
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
         },
       })),
@@ -595,12 +605,7 @@ export default function Home() {
   );
   const reasoningCommandItems = useMemo(
     () =>
-      ([
-        { value: "low", label: "Low" },
-        { value: "medium", label: "Medium" },
-        { value: "high", label: "High" },
-        { value: "xhigh", label: "Extra high" },
-      ] as const).map<CommandResultItem>((item) => ({
+      COMPOSER_REASONING_OPTIONS.map<CommandResultItem>((item) => ({
         id: `set-reasoning:${item.value}`,
         title: item.label,
         subtitle: composerReasoning === item.value ? "currently selected" : "switch reasoning level",
@@ -609,7 +614,7 @@ export default function Home() {
         run: () => {
           setComposerReasoning(item.value);
           setComposerStatus(`Reasoning set to ${item.label}.`);
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
         },
       })),
@@ -624,7 +629,7 @@ export default function Home() {
         group: "navigate",
         searchText: [canvas.title, "canvas"].join(" ").toLowerCase(),
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           const tabId = `canvas:${canvas.id}` as const;
           setOpenTabs((current) =>
@@ -646,7 +651,7 @@ export default function Home() {
         group: "navigate",
         searchText: [node.title, node.description, node.tags.join(" "), "note"].join(" ").toLowerCase(),
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           if (!activeCanvasId) {
             return;
@@ -670,7 +675,7 @@ export default function Home() {
         group: "navigate",
         searchText: [item.name, item.repo_path, "project"].join(" ").toLowerCase(),
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           startProjectTransition(() => {
             void openProjectConversation(item.repo_path);
@@ -693,7 +698,7 @@ export default function Home() {
       group: "navigate",
       searchText: [item.conversation.title, item.projectName, item.repoPath, "conversation"].join(" ").toLowerCase(),
       run: () => {
-        setCodexPrompt("");
+        setComposerInputValue("");
         setLeaderScope(null);
         startProjectTransition(() => {
           void openProjectConversation(item.repoPath, item.conversation);
@@ -709,7 +714,7 @@ export default function Home() {
         group: "action",
         searchText: "create note new",
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           startCanvasTransition(() => {
             void handleCreateCanvasNodeAt();
@@ -730,7 +735,7 @@ export default function Home() {
           if (!activeRepoPath || currentCanvasSelectionIds.length === 0) {
             return;
           }
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           startCanvasTransition(() => {
             void handleCreateCanvasFromSelection();
@@ -760,7 +765,7 @@ export default function Home() {
         group: "action",
         searchText: "canvas reset clear",
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           startCanvasTransition(() => {
             void handleResetCanvas();
@@ -785,7 +790,7 @@ export default function Home() {
           if (!activeRepoPath || !commitStatus?.is_git_repo || !commitStatus?.has_changes || isCommitting || isPushing) {
             return;
           }
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           handleCommitClick();
         },
@@ -810,7 +815,7 @@ export default function Home() {
           if (!activeRepoPath || !commitStatus?.is_git_repo || !commitStatus?.can_push || isCommitting || isPushing) {
             return;
           }
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           handlePushClick();
         },
@@ -822,7 +827,7 @@ export default function Home() {
         group: "action",
         searchText: "conversation chat new",
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           startProjectTransition(() => {
             void createConversationForProject(activeRepoPath, "New conversation", { preserveActiveView: true });
@@ -839,7 +844,7 @@ export default function Home() {
         group: "action",
         searchText: ["pin current note", focusedContextNode.title].join(" ").toLowerCase(),
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           pinCanvasNode(focusedContextNode.id);
         },
@@ -854,7 +859,7 @@ export default function Home() {
         group: "action",
         searchText: ["unpin current note", focusedContextNode.title].join(" ").toLowerCase(),
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           unpinCanvasNode(focusedContextNode.id);
         },
@@ -869,7 +874,7 @@ export default function Home() {
         group: "action",
         searchText: "clear pinned context unpin",
         run: () => {
-          setCodexPrompt("");
+          setComposerInputValue("");
           setLeaderScope(null);
           clearPinnedCanvasNodes();
         },
@@ -909,28 +914,6 @@ export default function Home() {
       { id: "leader-git", key: "g", title: "Git", subtitle: "Commit and push", scope: "git" },
       { id: "leader-models", key: "m", title: "Models", subtitle: "Switch model", scope: "models" },
       { id: "leader-reasoning", key: "r", title: "Reasoning", subtitle: "Switch reasoning level", scope: "reasoning" },
-      {
-        id: "leader-build-mode",
-        key: "b",
-        title: "Build mode",
-        subtitle: "Set the composer to Build",
-        run: () => {
-          setComposerMode("build");
-          setComposerStatus("Composer set to Build mode.");
-          setLeaderScope(null);
-        },
-      },
-      {
-        id: "leader-plan-mode",
-        key: "l",
-        title: "Plan mode",
-        subtitle: "Set the composer to Plan",
-        run: () => {
-          setComposerMode("plan");
-          setComposerStatus("Composer set to Plan mode.");
-          setLeaderScope(null);
-        },
-      },
     ],
     [seedNewCanvasPrompt],
   );
@@ -1047,7 +1030,17 @@ export default function Home() {
             setCommitStatus(null);
           }
         } catch (error) {
-          setProject((current) => current ?? { name: "", repo_path: "", recent_projects: [] });
+          setProject((current) => current ?? { name: "", repo_path: "", recent_projects: [], agent_provider: null });
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+    startProjectTransition(() => {
+      void (async () => {
+        try {
+          const response = await fetchAgentAuthStatus();
+          setAgentAuthStatus(response);
+        } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
       })();
@@ -1172,6 +1165,7 @@ export default function Home() {
         name: current?.name || PathLabel(fallbackRepoPath),
         repo_path: fallbackRepoPath,
         recent_projects: recentProjects,
+        agent_provider: current?.agent_provider ?? null,
       };
     });
   }, [project?.repo_path, projectsTree, repoPath, status?.active_repo_path]);
@@ -1181,7 +1175,6 @@ export default function Home() {
       setActiveConversationId(null);
       setActiveConversationRepoPath(null);
       setConsoleMessages([]);
-      setPendingPlan(null);
       setCommitStatus(null);
       setWorkspaceStatus(null);
       setExplorationBranches({});
@@ -1448,13 +1441,19 @@ export default function Home() {
 
   useEffect(() => {
     resizeComposerInput(composerInputRef.current);
-  }, [codexPrompt]);
+  }, [composerInputValue]);
 
   useEffect(() => {
-    if (status?.codex_model) {
-      setComposerModel((current) => (current === "gpt-5.4" ? status.codex_model! : current));
+    if (status?.agent_model) {
+      setComposerModel((current) => (current === "gpt-5.4" ? status.agent_model! : current));
     }
-  }, [status?.codex_model]);
+  }, [status?.agent_model]);
+
+  useEffect(() => {
+    if (agentAuthStatus?.active_provider) {
+      setAgentAuthProvider(agentAuthStatus.active_provider);
+    }
+  }, [agentAuthStatus?.active_provider]);
 
   useEffect(() => {
     try {
@@ -1668,7 +1667,7 @@ export default function Home() {
         setLeaderScope(null);
         setDockVisibility("visible");
         setConsoleVisibility("expanded");
-        setCodexPrompt((current) => (current.trim() ? current : "/"));
+        setComposerInputValue((current) => (current.trim() ? current : "/"));
         window.setTimeout(() => {
           composerInputRef.current?.focus();
           const value = composerInputRef.current?.value ?? "/";
@@ -1684,7 +1683,7 @@ export default function Home() {
   }, [
     activeTab,
     canvasDocument,
-    codexPrompt,
+    composerInputValue,
     commandSelectedIndex,
     leaderItems,
     leaderRootItems,
@@ -1696,11 +1695,41 @@ export default function Home() {
 
   useEffect(() => {
     setCommandSelectedIndex(0);
-  }, [codexPrompt, composerCaretIndex]);
+  }, [composerInputValue, composerCaretIndex]);
 
   useEffect(() => {
     setCommandSelectedIndex(0);
   }, [leaderScope]);
+
+  useEffect(() => {
+    if (!isComposerModelMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (composerModelMenuRef.current?.contains(target)) {
+        return;
+      }
+      setIsComposerModelMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsComposerModelMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isComposerModelMenuOpen]);
 
   useEffect(() => {
     if (!requestedTitleFocusNodeId || activeNoteTabId !== requestedTitleFocusNodeId) {
@@ -1809,6 +1838,30 @@ export default function Home() {
     }
   }
 
+  const isAgentAuthPromptVisible = Boolean(status?.agent_ok && agentAuthStatus?.auth_required);
+  const canSaveAgentAuth =
+    agentAuthProvider.trim().length > 0 &&
+    (agentApiKeyInput.trim().length > 0 || agentAuthStatus?.configured_providers.includes(agentAuthProvider));
+
+  async function handleSaveAgentAuth() {
+    if (!canSaveAgentAuth || isSavingAgentAuth) {
+      return;
+    }
+    try {
+      setIsSavingAgentAuth(true);
+      setErrorMessage(null);
+      const response = await updateAgentAuth(agentAuthProvider, agentApiKeyInput.trim() || undefined);
+      setAgentAuthStatus(response);
+      setAgentApiKeyInput("");
+      setProject((current) => (current ? { ...current, agent_provider: response.active_provider } : current));
+      await refreshStatus();
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+    } finally {
+      setIsSavingAgentAuth(false);
+    }
+  }
+
   async function refreshProjectsTree() {
     try {
       setErrorMessage(null);
@@ -1843,7 +1896,6 @@ export default function Home() {
 
     if (conversation.placeholder || conversation.id === "default") {
       setConsoleMessages([]);
-      setPendingPlan(null);
       setComposerStatus(`Ready in ${PathLabel(resolvedRepoPath)}.`);
       return;
     }
@@ -1855,7 +1907,6 @@ export default function Home() {
         return;
       }
       setConsoleMessages(response.conversation.messages);
-      setPendingPlan(null);
       setComposerStatus(`Opened ${response.conversation.title}.`);
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -1873,7 +1924,6 @@ export default function Home() {
       setActiveConversationRepoPath(response.repo_path);
       setActiveConversationId(response.conversation.id);
       setConsoleMessages(response.conversation.messages);
-      setPendingPlan(null);
       setComposerStatus(`Created ${response.conversation.title}.`);
       await refreshProjectsTree();
       if (!options?.preserveActiveView && activeCanvasId) {
@@ -1995,7 +2045,7 @@ export default function Home() {
           setCanvasDocument(response.document);
           setActiveCanvasId(response.document.id);
           setCanvasEditPreview(null);
-          setCodexPrompt("");
+          setComposerInputValue("");
           await refreshProjectsTree();
           if (response.document.id) {
             openCanvasTab(response.document.id);
@@ -2204,8 +2254,8 @@ export default function Home() {
     }
   }
 
-  async function submitBuildPrompt(
-    promptValue = codexPrompt.trim(),
+  async function submitAgentPrompt(
+    promptValue = composerInputValue.trim(),
     options?: { preserveActiveView?: boolean },
   ) {
     const prompt = promptValue.trim();
@@ -2223,46 +2273,48 @@ export default function Home() {
     const userMessage: ConversationMessage = {
       id: `user-${Date.now()}`,
       role: "user",
-      content: attachmentSummary ? `${attachmentSummary}\n\n${prompt}` : prompt,
+      content: attachmentSummary ? `${attachmentSummary}
+
+${prompt}` : prompt,
       created_at: new Date().toISOString(),
     };
     const pendingMessages = [...consoleMessages, userMessage];
     setConsoleMessages(pendingMessages);
-    setIsBuilding(true);
-    if (promptValue === codexPrompt.trim()) {
-      setCodexPrompt("");
+    setIsRunning(true);
+    if (promptValue === composerInputValue.trim()) {
+      setComposerInputValue("");
     }
-    setPendingPlan(null);
     let ensuredConversationId: string | null = null;
     try {
       setErrorMessage(null);
-      setComposerStatus("Building the project and refreshing notes...");
+      setComposerStatus("Working...");
       ensuredConversationId =
         activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
           ? activeConversationId
           : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
       if (!ensuredConversationId) {
-        setIsBuilding(false);
+        setIsRunning(false);
         return;
       }
       await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
       let assistantContent = "";
       const assistantId = `assistant-${Date.now()}`;
+      let latestRunState: ConversationRunState = buildInitialRunState("Preparing request...");
       setConsoleMessages([
         ...pendingMessages,
         {
           id: assistantId,
           role: "assistant",
-          title: "Building...",
+          title: "Working...",
           content: "",
           created_at: new Date().toISOString(),
+          run_state: latestRunState,
         },
       ]);
 
-      let finalSummary = "Build complete.";
+      let finalSummary = "Run complete.";
       await streamProjectRun(
         activeRepoPath,
-        "build",
         prompt,
         activeCanvasId,
         buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
@@ -2273,298 +2325,31 @@ export default function Home() {
         (event) => {
           handleProjectRunEvent(event, {
             assistantId,
-            onChunk: (text) => {
-              assistantContent += text;
+            onChunk: (chunkText) => {
+              assistantContent += chunkText;
               setConsoleMessages((current) =>
                 current.map((message) =>
                   message.id === assistantId ? { ...message, content: assistantContent } : message,
                 ),
               );
+            },
+            onRunState: (updater) => {
+              latestRunState = updater(latestRunState) ?? latestRunState;
+              updateAssistantRunState(assistantId, updater);
             },
             onCompleted: (completedEvent) => {
               finalSummary = completedEvent.summary ?? finalSummary;
               if (completedEvent.document) {
                 setCanvasDocument(completedEvent.document);
-              }
-              setComposerStatus(finalSummary);
-              setConsoleMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? {
-                        ...message,
-                        title: completedEvent.summary ?? "Build complete.",
-                        content:
-                          assistantContent ||
-                          [
-                            completedEvent.code_summary,
-                            completedEvent.note_summary,
-                            completedEvent.note_changes_summary
-                              ? `Notes changes summary:\n${completedEvent.note_changes_summary}`
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join("\n\n"),
-                      }
-                    : message,
-                ),
-              );
-            },
-          });
-        },
-      );
-
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant" as const,
-          title: finalSummary,
-          content: assistantContent,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      clearComposerImageAttachments();
-      await refreshCommitStatus(activeRepoPath);
-    } catch (error) {
-      setComposerStatus("Build failed.");
-      setErrorMessage(getErrorMessage(error));
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: `assistant-error-${Date.now()}`,
-          role: "assistant" as const,
-          title: "Build failed.",
-          content: getErrorMessage(error),
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      if (ensuredConversationId) {
-        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      }
-    } finally {
-      setIsBuilding(false);
-    }
-  }
-
-  async function submitPlanPrompt(
-    promptValue = codexPrompt.trim(),
-    options?: { preserveActiveView?: boolean },
-  ) {
-    const prompt = promptValue.trim();
-    if (!prompt) {
-      return;
-    }
-
-    const promptContextNodeIds = resolvePromptContextNodeIds(prompt, activeContextDocument, visibleContextNodeIds);
-    const attachmentSummary = readyComposerImagePaths.length
-      ? `Attached images: ${composerImageAttachments
-          .filter((item) => item.status === "ready")
-          .map((item) => item.fileName)
-          .join(", ")}`
-      : null;
-    const userMessage: ConversationMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: attachmentSummary ? `${attachmentSummary}\n\n${prompt}` : prompt,
-      created_at: new Date().toISOString(),
-    };
-    const pendingMessages = [...consoleMessages, userMessage];
-    setConsoleMessages(pendingMessages);
-    if (promptValue === codexPrompt.trim()) {
-      setCodexPrompt("");
-    }
-    setIsPlanning(true);
-    if (promptValue === codexPrompt.trim()) {
-      setDockVisibility("visible");
-      setConsoleVisibility("expanded");
-    }
-    let ensuredConversationId: string | null = null;
-
-    try {
-      setErrorMessage(null);
-      setComposerStatus("Preparing implementation plan...");
-      ensuredConversationId =
-        activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
-          ? activeConversationId
-          : await createConversationForProject(activeRepoPath, deriveConversationTitle(prompt), options);
-      if (!ensuredConversationId) {
-        setIsPlanning(false);
-        return;
-      }
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
-
-      let assistantContent = "";
-      const assistantId = `assistant-plan-${Date.now()}`;
-      setConsoleMessages([
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant",
-          title: "Planning...",
-          content: "",
-          created_at: new Date().toISOString(),
-        },
-      ]);
-      let finalSummary = "Plan ready.";
-      await streamProjectRun(
-        activeRepoPath,
-        "plan",
-        prompt,
-        activeCanvasId,
-        buildSelectedNoteContext(activeContextDocument, promptContextNodeIds),
-        buildConversationContext(pendingMessages),
-        readyComposerImagePaths,
-        composerModel,
-        composerReasoning,
-        (event) => {
-          handleProjectRunEvent(event, {
-            assistantId,
-            onChunk: (text) => {
-              assistantContent += text;
-              setConsoleMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? { ...message, content: assistantContent } : message,
-                ),
-              );
-            },
-            onCompleted: (completedEvent) => {
-              finalSummary = completedEvent.summary ?? finalSummary;
-              setPendingPlan({
-                messageId: assistantId,
-                prompt,
-                planText: completedEvent.plan_text ?? assistantContent,
-                summary: finalSummary,
-              });
-              setComposerStatus("Plan ready.");
-              setConsoleMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId
-                    ? { ...message, title: finalSummary, content: completedEvent.plan_text ?? assistantContent }
-                    : message,
-                ),
-              );
-            },
-          });
-        },
-      );
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant" as const,
-          title: finalSummary,
-          content: assistantContent,
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      clearComposerImageAttachments();
-    } catch (error) {
-      setComposerStatus("Plan failed.");
-      setErrorMessage(getErrorMessage(error));
-      const nextMessages = [
-        ...pendingMessages,
-        {
-          id: `assistant-plan-error-${Date.now()}`,
-          role: "assistant" as const,
-          title: "Plan failed.",
-          content: getErrorMessage(error),
-          created_at: new Date().toISOString(),
-        },
-      ];
-      setConsoleMessages(nextMessages);
-      if (ensuredConversationId) {
-        await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
-      }
-    } finally {
-      setIsPlanning(false);
-    }
-  }
-
-  function handleApprovePlan() {
-    if (!pendingPlan || isBuilding || !activeRepoPath) {
-      return;
-    }
-    setCodexPrompt("");
-    startCodexTransition(() => {
-      void submitApprovedPlan(pendingPlan);
-    });
-  }
-
-  async function submitApprovedPlan(plan: NonNullable<typeof pendingPlan>) {
-    const approvalMessage: ConversationMessage = {
-      id: `user-approve-${Date.now()}`,
-      role: "user",
-      title: "Approved plan",
-      content: "Approve and implement the current plan.",
-      created_at: new Date().toISOString(),
-    };
-    const pendingMessages = [...consoleMessages, approvalMessage];
-    setConsoleMessages(pendingMessages);
-    setPendingPlan(null);
-    setIsBuilding(true);
-    let ensuredConversationId: string | null =
-      activeConversationId && activeConversationRepoPath === activeRepoPath && activeConversationId !== "default"
-        ? activeConversationId
-        : null;
-
-    try {
-      setErrorMessage(null);
-      setComposerStatus("Building the approved plan and refreshing notes...");
-      if (!ensuredConversationId) {
-        ensuredConversationId = await createConversationForProject(activeRepoPath, deriveConversationTitle(plan.prompt));
-      }
-      if (!ensuredConversationId) {
-        setIsBuilding(false);
-        return;
-      }
-      await persistConversationMessages(activeRepoPath, ensuredConversationId, pendingMessages);
-      let assistantContent = "";
-      const assistantId = `assistant-${Date.now()}`;
-      setConsoleMessages([
-        ...pendingMessages,
-        {
-          id: assistantId,
-          role: "assistant",
-          title: "Building...",
-          content: "",
-          created_at: new Date().toISOString(),
-        },
-      ]);
-      let finalSummary = "Build complete.";
-      await streamProjectRun(
-        activeRepoPath,
-        "build",
-        [
-          "Implement this approved plan.",
-          `Original request:\n${plan.prompt}`,
-          `Approved plan:\n${plan.planText}`,
-        ].join("\n\n"),
-        activeCanvasId,
-        buildSelectedNoteContext(activeContextDocument, visibleContextNodeIds),
-        buildConversationContext(pendingMessages),
-        readyComposerImagePaths,
-        composerModel,
-        composerReasoning,
-        (event) => {
-          handleProjectRunEvent(event, {
-            assistantId,
-            onChunk: (text) => {
-              assistantContent += text;
-              setConsoleMessages((current) =>
-                current.map((message) =>
-                  message.id === assistantId ? { ...message, content: assistantContent } : message,
-                ),
-              );
-            },
-            onCompleted: (completedEvent) => {
-              finalSummary = completedEvent.summary ?? finalSummary;
-              if (completedEvent.document) {
-                setCanvasDocument(completedEvent.document);
+                if (completedEvent.document.id) {
+                  setProjectCanvases((current) =>
+                    current.map((canvas) =>
+                      canvas.id === completedEvent.document?.id
+                        ? { ...canvas, title: completedEvent.document.title, node_count: completedEvent.document.nodes.length }
+                        : canvas,
+                    ),
+                  );
+                }
               }
               setComposerStatus(finalSummary);
               setConsoleMessages((current) =>
@@ -2573,17 +2358,8 @@ export default function Home() {
                     ? {
                         ...message,
                         title: finalSummary,
-                        content:
-                          assistantContent ||
-                          [
-                            completedEvent.code_summary,
-                            completedEvent.note_summary,
-                            completedEvent.note_changes_summary
-                              ? `Notes changes summary:\n${completedEvent.note_changes_summary}`
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join("\n\n"),
+                        content: assistantContent || completedEvent.code_summary || completedEvent.summary || "",
+                        run_state: latestRunState,
                       }
                     : message,
                 ),
@@ -2592,6 +2368,7 @@ export default function Home() {
           });
         },
       );
+
       const nextMessages = [
         ...pendingMessages,
         {
@@ -2600,6 +2377,7 @@ export default function Home() {
           title: finalSummary,
           content: assistantContent,
           created_at: new Date().toISOString(),
+          run_state: latestRunState,
         },
       ];
       setConsoleMessages(nextMessages);
@@ -2607,14 +2385,14 @@ export default function Home() {
       clearComposerImageAttachments();
       await refreshCommitStatus(activeRepoPath);
     } catch (error) {
-      setComposerStatus("Build failed.");
+      setComposerStatus("Run failed.");
       setErrorMessage(getErrorMessage(error));
       const nextMessages = [
         ...pendingMessages,
         {
           id: `assistant-error-${Date.now()}`,
           role: "assistant" as const,
-          title: "Build failed.",
+          title: "Run failed.",
           content: getErrorMessage(error),
           created_at: new Date().toISOString(),
         },
@@ -2624,15 +2402,16 @@ export default function Home() {
         await persistConversationMessages(activeRepoPath, ensuredConversationId, nextMessages);
       }
     } finally {
-      setIsBuilding(false);
+      setIsRunning(false);
     }
   }
+
 
   function handleCommitClick() {
     if (!activeRepoPath || !commitStatus?.has_changes || isCommitting || isPushing) {
       return;
     }
-    startCodexTransition(() => {
+    startAgentTransition(() => {
       void (async () => {
         try {
           setIsCommitting(true);
@@ -2665,7 +2444,7 @@ export default function Home() {
     if (!activeRepoPath || !commitStatus?.can_push || isPushing || isCommitting) {
       return;
     }
-    startCodexTransition(() => {
+    startAgentTransition(() => {
       void (async () => {
         try {
           setIsPushing(true);
@@ -2724,7 +2503,7 @@ export default function Home() {
       setCanvasEditPreview(response);
       setCanvasEditReviewIndex(0);
       setComposerStatus(response.summary);
-      setCodexPrompt("");
+      setComposerInputValue("");
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
       setComposerStatus("Canvas edit preview failed.");
@@ -2804,6 +2583,7 @@ export default function Home() {
           repo_path: normalizedRepoPath,
           name: "",
           recent_projects: [],
+          agent_provider: project?.agent_provider ?? null,
         });
         setProject(response.project);
         void refreshProjectsTree();
@@ -2826,8 +2606,7 @@ export default function Home() {
         setActiveConversationRepoPath(normalizedRepoPath);
         setActiveConversationId(null);
         setConsoleMessages([]);
-        setPendingPlan(null);
-        setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
+          setComposerStatus(`Opened ${PathLabel(normalizedRepoPath)}.`);
       }
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
@@ -2850,6 +2629,7 @@ export default function Home() {
             repo_path: pickedRepoPath,
             name: "",
             recent_projects: [],
+            agent_provider: project?.agent_provider ?? null,
           });
           setProject(projectResponse.project);
           void refreshProjectsTree();
@@ -2908,18 +2688,130 @@ export default function Home() {
     });
   }
 
+  function buildInitialRunState(phaseLabel: string): ConversationRunState {
+    return {
+      provider: project?.agent_provider ?? status?.agent_provider ?? null,
+      model: composerModel || status?.agent_model || null,
+      reasoning: composerReasoning,
+      phase_label: phaseLabel,
+      is_streaming: true,
+      tools: [],
+    };
+  }
+
+  function updateAssistantRunState(
+    assistantId: string,
+    updater: (current: ConversationRunState | null | undefined) => ConversationRunState | null | undefined,
+  ) {
+    setConsoleMessages((current) =>
+      current.map((message) =>
+        message.id === assistantId
+          ? {
+              ...message,
+              run_state: updater(message.run_state),
+            }
+          : message,
+      ),
+    );
+  }
+
+  function applyProjectRunStateEvent(
+    current: ConversationRunState | null | undefined,
+    event: ProjectRunStreamEvent,
+  ): ConversationRunState {
+    const next: ConversationRunState = {
+      provider: current?.provider ?? project?.agent_provider ?? status?.agent_provider ?? null,
+      model: current?.model ?? (composerModel || status?.agent_model || null),
+      reasoning: current?.reasoning ?? composerReasoning,
+      phase_label: current?.phase_label ?? null,
+      is_streaming: current?.is_streaming ?? true,
+      tools: [...(current?.tools ?? [])],
+    };
+
+    if (event.type === "phase") {
+      next.phase_label = event.label ?? next.phase_label;
+      return next;
+    }
+
+    if (event.type === "run.status") {
+      next.provider = event.provider ?? next.provider ?? null;
+      next.model = event.model ?? next.model ?? null;
+      next.reasoning = event.reasoning ?? next.reasoning ?? null;
+      return next;
+    }
+
+    if (event.type === "tool.start") {
+      const toolId = event.tool_call_id || `${event.tool_name || "tool"}-${Date.now()}`;
+      const existingIndex = next.tools?.findIndex((tool) => tool.id === toolId) ?? -1;
+      const tool: NonNullable<ConversationRunState["tools"]>[number] = {
+        id: toolId,
+        name: event.tool_name || "tool",
+        label: event.tool_label || event.tool_name || "tool",
+        status: "running",
+        summary: null,
+      };
+      if (existingIndex >= 0 && next.tools) {
+        next.tools[existingIndex] = tool;
+      } else {
+        next.tools = [...(next.tools ?? []), tool].slice(-6);
+      }
+      return next;
+    }
+
+    if (event.type === "tool.end") {
+      const toolId = event.tool_call_id || `${event.tool_name || "tool"}-${Date.now()}`;
+      const existingIndex = next.tools?.findIndex((tool) => tool.id === toolId) ?? -1;
+      const tool: NonNullable<ConversationRunState["tools"]>[number] = {
+        id: toolId,
+        name: event.tool_name || "tool",
+        label: event.tool_label || event.tool_name || "tool",
+        status: event.tool_status === "error" ? "error" : "success",
+        summary: event.tool_summary ?? null,
+      };
+      if (existingIndex >= 0 && next.tools) {
+        next.tools[existingIndex] = tool;
+      } else {
+        next.tools = [...(next.tools ?? []), tool].slice(-6);
+      }
+      return next;
+    }
+
+    if (event.type === "retry.start" || event.type === "retry.end") {
+      next.phase_label = event.label ?? next.phase_label;
+      return next;
+    }
+
+    if (event.type === "completed") {
+      next.is_streaming = false;
+      next.phase_label = null;
+      return next;
+    }
+
+    return next;
+  }
+
   function handleProjectRunEvent(
     event: ProjectRunStreamEvent,
     handlers: {
       assistantId: string;
       onChunk: (text: string) => void;
       onCompleted: (event: ProjectRunStreamEvent) => void;
+      onRunState: (updater: (current: ConversationRunState | null | undefined) => ConversationRunState) => void;
     },
   ) {
     if (event.type === "phase") {
       if (event.label) {
         setComposerStatus(event.label);
       }
+      handlers.onRunState((current) => applyProjectRunStateEvent(current, event));
+      return;
+    }
+
+    if (event.type === "run.status" || event.type === "tool.start" || event.type === "tool.end" || event.type === "retry.start" || event.type === "retry.end") {
+      if (event.label) {
+        setComposerStatus(event.label);
+      }
+      handlers.onRunState((current) => applyProjectRunStateEvent(current, event));
       return;
     }
 
@@ -2931,6 +2823,7 @@ export default function Home() {
     }
 
     if (event.type === "completed") {
+      handlers.onRunState((current) => applyProjectRunStateEvent(current, event));
       handlers.onCompleted(event);
       return;
     }
@@ -3059,33 +2952,17 @@ export default function Home() {
     const [commandNameRaw = ""] = trimmedCommand.split(/\s+/, 1);
     const commandName = commandNameRaw.toLowerCase();
     const commandArgs = commandNameRaw ? trimmedCommand.slice(commandNameRaw.length).trim() : "";
-    const buildPrompt = commandName === "build" ? commandArgs : "";
-    const planPrompt = commandName === "plan" ? commandArgs : "";
-
-    if (commandName === "build" && !buildPrompt) {
-      return leaderRootItems
-        .filter((item) => item.id === "leader-build-mode")
-        .map<CommandResultItem>((item) => ({
-          id: item.id,
-          title: item.title,
-          subtitle: item.subtitle,
-          group: "action",
-          searchText: [item.title, item.subtitle].join(" ").toLowerCase(),
-          run: () => item.run?.(),
-        }));
-    }
-
-    if (commandName === "plan" && !planPrompt) {
-      return leaderRootItems
-        .filter((item) => item.id === "leader-plan-mode")
-        .map<CommandResultItem>((item) => ({
-          id: item.id,
-          title: item.title,
-          subtitle: item.subtitle,
-          group: "action",
-          searchText: [item.title, item.subtitle].join(" ").toLowerCase(),
-          run: () => item.run?.(),
-        }));
+    if (commandName === "build" || commandName === "plan") {
+      return [
+        {
+          id: `execute-legacy-${commandName}`,
+          title: `/${commandName} is gone`,
+          subtitle: "Send the request normally. Vibeview now uses one flexible prompt flow.",
+          group: "execute",
+          searchText: "legacy mode removed build plan",
+          run: () => undefined,
+        },
+      ];
     }
 
     if (commandName === "model") {
@@ -3204,46 +3081,8 @@ export default function Home() {
               return;
             }
             setLeaderScope(null);
-            startCodexTransition(() => {
+            startAgentTransition(() => {
               void previewCanvasEditPrompt(commandArgs);
-            });
-          },
-        },
-      ];
-    }
-
-    if (buildPrompt) {
-      return [
-        {
-          id: "execute-build",
-          title: `Build: ${buildPrompt}`,
-          subtitle: "Implement changes and refresh the canvas afterward",
-          group: "execute",
-          run: () => {
-            setCodexPrompt("");
-            setDockVisibility("visible");
-            setConsoleVisibility("expanded");
-            startCodexTransition(() => {
-              void submitBuildPrompt(buildPrompt, { preserveActiveView: true });
-            });
-          },
-        },
-      ];
-    }
-
-    if (planPrompt) {
-      return [
-        {
-          id: "execute-plan",
-          title: `Plan: ${planPrompt}`,
-          subtitle: "Draft an implementation plan in the current conversation",
-          group: "execute",
-          run: () => {
-            setCodexPrompt("");
-            setDockVisibility("visible");
-            setConsoleVisibility("expanded");
-            startCodexTransition(() => {
-              void submitPlanPrompt(planPrompt, { preserveActiveView: true });
             });
           },
         },
@@ -3269,14 +3108,14 @@ export default function Home() {
 
   const insertComposerNoteMention = useCallback(
     (node: CanvasNode) => {
-      const mention = findActiveNoteMention(codexPrompt, composerCaretIndex, canvasDocument);
+      const mention = findActiveNoteMention(composerInputValue, composerCaretIndex, canvasDocument);
       const nextMentionText = `@${node.title} `;
       const nextValue = mention
-        ? `${codexPrompt.slice(0, mention.start)}${nextMentionText}${codexPrompt.slice(mention.end)}`
-        : `${codexPrompt}${nextMentionText}`;
-      const nextCaretIndex = (mention ? mention.start : codexPrompt.length) + nextMentionText.length;
+        ? `${composerInputValue.slice(0, mention.start)}${nextMentionText}${composerInputValue.slice(mention.end)}`
+        : `${composerInputValue}${nextMentionText}`;
+      const nextCaretIndex = (mention ? mention.start : composerInputValue.length) + nextMentionText.length;
 
-      setCodexPrompt(nextValue);
+      setComposerInputValue(nextValue);
       setComposerCaretIndex(nextCaretIndex);
       setCommandSelectedIndex(0);
       window.requestAnimationFrame(() => {
@@ -3289,7 +3128,7 @@ export default function Home() {
         resizeComposerInput(element);
       });
     },
-    [canvasDocument, codexPrompt, composerCaretIndex],
+    [canvasDocument, composerInputValue, composerCaretIndex],
   );
 
   const mentionResults: CommandResultItem[] = useMemo(() => {
@@ -3367,7 +3206,7 @@ export default function Home() {
   }
 
   function handleSubmitOmnibox() {
-    const value = codexPrompt.trim();
+    const value = composerInputValue.trim();
     if (!value) {
       return;
     }
@@ -3382,12 +3221,8 @@ export default function Home() {
       return;
     }
 
-    startCodexTransition(() => {
-      if (composerMode === "build") {
-        void submitBuildPrompt(value, { preserveActiveView: true });
-        return;
-      }
-      void submitPlanPrompt(value, { preserveActiveView: true });
+    startAgentTransition(() => {
+      void submitAgentPrompt(value, { preserveActiveView: true });
     });
   }
 
@@ -3403,15 +3238,15 @@ export default function Home() {
     };
 
     if (event.key === "Escape") {
-      if (codexPrompt.trim() === "/") {
+      if (composerInputValue.trim() === "/") {
         event.preventDefault();
-        setCodexPrompt("");
+        setComposerInputValue("");
         collapseComposer();
         event.currentTarget.blur();
         return;
       }
 
-      if (!codexPrompt.trim()) {
+      if (!composerInputValue.trim()) {
         event.preventDefault();
         collapseComposer();
         event.currentTarget.blur();
@@ -3457,7 +3292,7 @@ export default function Home() {
   }
 
   function handleComposerChange(value: string) {
-    setCodexPrompt(value);
+    setComposerInputValue(value);
     const element = composerInputRef.current;
     if (element) {
       setComposerCaretIndex(element.selectionStart ?? value.length);
@@ -4172,6 +4007,43 @@ export default function Home() {
                       >
                         <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Vibeview"}</span>
                         {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
+                        {message.role === "assistant" && message.run_state ? (
+                          <div className={styles.consoleRunMeta}>
+                            {message.run_state.provider ? (
+                              <span className={styles.consoleRunMetaItem}>{message.run_state.provider}</span>
+                            ) : null}
+                            {message.run_state.model ? (
+                              <span className={styles.consoleRunMetaItem}>{message.run_state.model}</span>
+                            ) : null}
+                            {message.run_state.reasoning ? (
+                              <span className={styles.consoleRunMetaItem}>{message.run_state.reasoning}</span>
+                            ) : null}
+                            {message.run_state.phase_label ? (
+                              <span className={styles.consoleRunMetaActive}>{message.run_state.phase_label}</span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {message.role === "assistant" && message.run_state?.tools?.length ? (
+                          <div className={styles.consoleRunTools}>
+                            {message.run_state.tools.slice(-4).map((tool) => (
+                              <div className={styles.consoleRunTool} key={tool.id}>
+                                <span
+                                  className={
+                                    tool.status === "error"
+                                      ? styles.consoleRunToolDotError
+                                      : tool.status === "success"
+                                        ? styles.consoleRunToolDotSuccess
+                                        : styles.consoleRunToolDotRunning
+                                  }
+                                />
+                                <span className={styles.consoleRunToolLabel}>{tool.label}</span>
+                                <span className={styles.consoleRunToolState}>
+                                  {tool.status === "running" ? "Running" : tool.status === "error" ? "Failed" : "Done"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                         <div className={styles.consoleMessageBody}>
                           {renderConsoleMessageContent(
                             message.content,
@@ -4181,18 +4053,6 @@ export default function Home() {
                             handleCopyConsoleFileLink,
                           )}
                         </div>
-                        {pendingPlan?.messageId === message.id ? (
-                          <div className={styles.consoleMessageActions}>
-                            <button
-                              className={styles.secondaryButton}
-                              disabled={isBuilding}
-                              onClick={handleApprovePlan}
-                              type="button"
-                            >
-                              Approve
-                            </button>
-                          </div>
-                        ) : null}
                       </article>
                     ))
                   )}
@@ -4231,7 +4091,7 @@ export default function Home() {
               placeholder="Ask about the project, describe a change, paste an image, or type / for commands."
               ref={composerInputRef}
               rows={2}
-              value={codexPrompt}
+              value={composerInputValue}
             />
             {composerImageAttachments.length > 0 ? (
               <div className={styles.consoleComposerAttachments}>
@@ -4277,51 +4137,80 @@ export default function Home() {
             ) : null}
             <div className={styles.consoleComposerActions}>
               <div className={styles.consoleComposerLeft}>
-                <div className={styles.consoleControlCluster}>
-                  <label className={styles.consoleInlineControl}>
-                    <select
-                      aria-label="Model"
-                      className={styles.consoleInlineSelect}
-                      disabled={isComposerBusy}
-                      onChange={(event) => setComposerModel(event.target.value)}
-                      value={composerModel}
-                    >
-                      {availableComposerModels.map((model) => (
-                        <option key={model} value={model}>
-                          {model}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className={styles.consoleInlineControl}>
-                    <select
-                      aria-label="Reasoning"
-                      className={styles.consoleInlineSelect}
-                      disabled={isComposerBusy}
-                      onChange={(event) => setComposerReasoning(event.target.value as ComposerReasoningEffort)}
-                      value={composerReasoning}
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="xhigh">Extra high</option>
-                    </select>
-                  </label>
-                </div>
-                <div aria-label="Run mode" className={styles.consoleModeSwitch} role="tablist">
-                  {(["build", "plan"] as const).map((mode) => (
-                    <button
-                      aria-selected={composerMode === mode}
-                      className={composerMode === mode ? styles.consoleModeButtonActive : styles.consoleModeButton}
-                      disabled={isComposerBusy}
-                      key={mode}
-                      onClick={() => setComposerMode(mode)}
-                      role="tab"
-                      type="button"
-                    >
-                      {mode === "build" ? "Build" : "Plan"}
-                    </button>
-                  ))}
+                <div className={styles.consoleControlCluster} ref={composerModelMenuRef}>
+                  <button
+                    aria-haspopup="menu"
+                    aria-expanded={isComposerModelMenuOpen}
+                    className={isComposerModelMenuOpen ? styles.consoleModelButtonActive : styles.consoleModelButton}
+                    disabled={isComposerBusy}
+                    onClick={() => setIsComposerModelMenuOpen((current) => !current)}
+                    type="button"
+                  >
+                    <span className={styles.consoleModelButtonLabel}>Model</span>
+                    <span className={styles.consoleModelButtonValue}>
+                      {composerModel} · {composerReasoningLabel}
+                    </span>
+                  </button>
+                  {isComposerModelMenuOpen ? (
+                    <div className={styles.consoleModelMenu} role="menu">
+                      <div className={styles.consoleModelMenuSection}>
+                        <div className={styles.consoleModelMenuHeading}>Model</div>
+                        <div className={styles.consoleModelMenuList}>
+                          {availableComposerModels.map((model) => (
+                            <button
+                              aria-checked={model === composerModel}
+                              className={
+                                model === composerModel
+                                  ? styles.consoleModelMenuItemActive
+                                  : styles.consoleModelMenuItem
+                              }
+                              key={model}
+                              onClick={() => {
+                                setComposerModel(model);
+                                setComposerStatus(`Composer model set to ${model}.`);
+                                setIsComposerModelMenuOpen(false);
+                              }}
+                              role="menuitemradio"
+                              type="button"
+                            >
+                              <span>{model}</span>
+                              {model === composerModel ? (
+                                <span className={styles.consoleModelMenuCheck}>Current</span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className={styles.consoleModelMenuSection}>
+                        <div className={styles.consoleModelMenuHeading}>Thinking</div>
+                        <div className={styles.consoleModelMenuList}>
+                          {COMPOSER_REASONING_OPTIONS.map((item) => (
+                            <button
+                              aria-checked={item.value === composerReasoning}
+                              className={
+                                item.value === composerReasoning
+                                  ? styles.consoleModelMenuItemActive
+                                  : styles.consoleModelMenuItem
+                              }
+                              key={item.value}
+                              onClick={() => {
+                                setComposerReasoning(item.value);
+                                setComposerStatus(`Reasoning set to ${item.label}.`);
+                                setIsComposerModelMenuOpen(false);
+                              }}
+                              role="menuitemradio"
+                              type="button"
+                            >
+                              <span>{item.label}</span>
+                              {item.value === composerReasoning ? (
+                                <span className={styles.consoleModelMenuCheck}>Current</span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
               <div className={styles.consoleComposerRight}>
@@ -4362,21 +4251,16 @@ export default function Home() {
                   disabled={
                     isComposerBusy ||
                     hasComposerImageErrors ||
-                    !codexPrompt.trim() ||
+                    !composerInputValue.trim() ||
                     (!isSlashCommandMode && !activeRepoPath)
                   }
                   onClick={handleSubmitOmnibox}
                   type="button"
                 >
-                  {isPlanning ? (
+                  {isRunning ? (
                     <>
                       <span aria-hidden="true" className={styles.buttonSpinner} />
-                      <span>Planning...</span>
-                    </>
-                  ) : isBuilding ? (
-                    <>
-                      <span aria-hidden="true" className={styles.buttonSpinner} />
-                      <span>Building...</span>
+                      <span>Working...</span>
                     </>
                   ) : isPushing ? (
                     <>
@@ -4384,13 +4268,7 @@ export default function Home() {
                       <span>Pushing...</span>
                     </>
                   ) : (
-                    <span>
-                      {isSlashCommandMode || isNoteMentionMode
-                        ? "Run"
-                        : composerMode === "build"
-                          ? "Build"
-                          : "Plan"}
-                    </span>
+<span>Run</span>
                   )}
                 </button>
               </div>
@@ -4880,6 +4758,73 @@ export default function Home() {
           >
             {renderActiveView()}
           </section>
+
+          {isAgentAuthPromptVisible ? (
+            <aside className={styles.agentAuthCallout}>
+              <div className={styles.agentAuthCalloutHeader}>
+                <strong className={styles.agentAuthCalloutTitle}>Connect Pi to a provider</strong>
+                <span className={styles.agentAuthCalloutMeta}>
+                  {agentAuthStatus?.active_provider ? `Active: ${agentAuthStatus.active_provider}` : "No provider selected"}
+                </span>
+              </div>
+              <p className={styles.agentAuthCalloutText}>
+                Add an API key for a Pi-supported provider. The key is stored locally in `~/.pi/agent/auth.json`.
+              </p>
+              <div className={styles.agentAuthCalloutFields}>
+                <label className={styles.agentAuthField}>
+                  <span className={styles.agentAuthFieldLabel}>Provider</span>
+                  <select
+                    className={styles.agentAuthSelect}
+                    onChange={(event) => setAgentAuthProvider(event.target.value)}
+                    value={agentAuthProvider}
+                  >
+                    {agentAuthStatus?.providers.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.agentAuthField}>
+                  <span className={styles.agentAuthFieldLabel}>API key</span>
+                  <input
+                    className={styles.agentAuthInput}
+                    onChange={(event) => setAgentApiKeyInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void handleSaveAgentAuth();
+                      }
+                    }}
+                    placeholder={
+                      agentAuthStatus?.configured_providers.includes(agentAuthProvider)
+                        ? "Leave empty to keep the saved key"
+                        : "Paste provider API key"
+                    }
+                    type="password"
+                    value={agentApiKeyInput}
+                  />
+                </label>
+              </div>
+              <div className={styles.agentAuthCalloutActions}>
+                <span className={styles.agentAuthHint}>
+                  {agentAuthStatus?.configured_providers.includes(agentAuthProvider)
+                    ? "This provider is already configured."
+                    : "Use a key-based provider such as OpenRouter or OpenAI."}
+                </span>
+                <button
+                  className={styles.primaryButton}
+                  disabled={!canSaveAgentAuth || isSavingAgentAuth}
+                  onClick={() => {
+                    void handleSaveAgentAuth();
+                  }}
+                  type="button"
+                >
+                  {isSavingAgentAuth ? "Saving..." : "Save key"}
+                </button>
+              </div>
+            </aside>
+          ) : null}
 
           {activeTab?.type === "note" ? null : renderUnifiedDock()}
         </main>

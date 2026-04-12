@@ -57,6 +57,12 @@ class CanvasStore:
     def _project_canvases_path(self, repo_path: str) -> Path:
         return self._metadata_dir(repo_path) / "canvases.json"
 
+    def collection_path_for_repo(self, repo_path: str) -> Path:
+        return self._project_canvases_path(repo_path)
+
+    def pointer_path_for_repo(self, repo_path: str) -> Path:
+        return self._project_canvas_path(repo_path)
+
     def _ensure_metadata_gitignore(self, repo_path: str) -> None:
         metadata_dir = self._metadata_dir(repo_path)
         metadata_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +163,11 @@ class CanvasService:
                 raise ValueError(f"Canvas not found: {canvas_id}")
             return target
         return self.store.get_default_for_repo(repo_path)
+
+    def canonicalize_collection_for_repo(self, repo_path: str, canvas_id: str | None = None) -> CanvasDocument:
+        collection = self.store.load_collection_for_repo(repo_path)
+        self.store.save_collection(collection)
+        return self.get_document_for_repo(repo_path, canvas_id)
 
     def set_repo_path(self, repo_path: str) -> CanvasDocument:
         document = self.store.get_default_for_repo(repo_path)

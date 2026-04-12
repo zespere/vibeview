@@ -13,7 +13,7 @@ Prerequisites:
 - `docker`
 - `uv`
 - `pnpm`
-- `@openai/codex`
+- `@mariozechner/pi-coding-agent`
 
 Start everything:
 
@@ -26,6 +26,8 @@ Then open:
 ```text
 http://localhost:3001
 ```
+
+For build, plan, and ask actions, authenticate Pi once with `pi` or set a supported provider API key.
 
 ## What `./scripts/dev.sh` does
 

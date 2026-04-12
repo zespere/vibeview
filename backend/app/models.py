@@ -24,7 +24,7 @@ class IndexJobState(BaseModel):
 class StatusResponse(BaseModel):
     memgraph_ok: bool
     cgr_ok: bool
-    codex_ok: bool
+    agent_ok: bool
     active_repo_path: str | None
     config_path: str
     log_path: str
@@ -32,14 +32,18 @@ class StatusResponse(BaseModel):
     sample_repos: dict[str, str]
     index_job: IndexJobState
     preview: str | None = None
-    codex_binary: str | None = None
-    codex_model: str | None = None
+    agent_name: str
+    agent_binary: str | None = None
+    agent_provider: str | None = None
+    agent_model: str | None = None
+    agent_auth_required: bool = False
 
 
 class ProjectProfile(BaseModel):
     name: str = ""
     repo_path: str = ""
     recent_projects: list[str] = Field(default_factory=list)
+    agent_provider: str | None = None
 
     @property
     def is_configured(self) -> bool:
@@ -58,6 +62,25 @@ class ProjectProfileResponse(BaseModel):
 
 class ProjectFolderPickResponse(BaseModel):
     repo_path: str | None = None
+
+
+class AgentProviderOption(BaseModel):
+    id: str
+    label: str
+    env_var: str
+
+
+class AgentAuthStatusResponse(BaseModel):
+    active_provider: str | None = None
+    auth_required: bool = False
+    configured_providers: list[str] = Field(default_factory=list)
+    providers: list[AgentProviderOption] = Field(default_factory=list)
+
+
+class AgentAuthUpdateRequest(BaseModel):
+    provider: str
+    api_key: str | None = None
+    set_active: bool = True
 
 
 class ProjectImageUploadResponse(BaseModel):
@@ -271,16 +294,15 @@ class AssistImpactResponse(BaseModel):
     affected_files: list[ImpactFileRecord]
 
 
-class CodexChangeRequest(BaseModel):
+class AgentChangeRequest(BaseModel):
     repo_path: str
     prompt: str = Field(min_length=4)
     dry_run: bool = False
     use_graph_context: bool = True
-    bypass_sandbox: bool | None = None
     semantic_context: str | None = None
 
 
-class CodexCommandRecord(BaseModel):
+class AgentCommandRecord(BaseModel):
     command: str
     status: str
     exit_code: int | None = None
@@ -293,39 +315,20 @@ class ChangedFileRecord(BaseModel):
     diff: str
 
 
-class CodexChangeResponse(BaseModel):
+class AgentChangeResponse(BaseModel):
     repo_path: str
     prompt: str
     summary: str
     dry_run: bool
     used_graph_context: bool
-    bypass_sandbox: bool
-    codex_binary: str
-    codex_model: str | None = None
+    agent_binary: str
+    agent_name: str
+    agent_provider: str | None = None
+    agent_model: str | None = None
     graph_context_summary: str | None = None
     changed_files: list[ChangedFileRecord]
-    commands: list[CodexCommandRecord]
+    commands: list[AgentCommandRecord]
     raw_event_count: int
-
-
-class ProjectBuildRequest(BaseModel):
-    repo_path: str
-    prompt: str = Field(min_length=4)
-    selected_note_ids: list[str] = Field(default_factory=list)
-    semantic_context: str | None = None
-    conversation_context: str | None = None
-
-
-class ProjectBuildResponse(BaseModel):
-    repo_path: str
-    prompt: str
-    summary: str
-    code_summary: str
-    note_summary: str
-    note_changes_summary: str
-    modified_files: list[str]
-    notes_created: int
-    document: "CanvasDocument"
 
 
 class NoteChangeSummary(BaseModel):
@@ -333,20 +336,6 @@ class NoteChangeSummary(BaseModel):
     created_titles: list[str] = Field(default_factory=list)
     updated_titles: list[str] = Field(default_factory=list)
     linked_titles: list[str] = Field(default_factory=list)
-
-
-class ProjectPlanRequest(BaseModel):
-    repo_path: str
-    prompt: str = Field(min_length=4)
-    semantic_context: str | None = None
-    conversation_context: str | None = None
-
-
-class ProjectPlanResponse(BaseModel):
-    repo_path: str
-    prompt: str
-    summary: str
-    plan_text: str
 
 
 class ProjectAskRequest(BaseModel):
@@ -395,7 +384,6 @@ class ExplorationSuggestionResponse(BaseModel):
 class ProjectRunStreamRequest(BaseModel):
     repo_path: str
     prompt: str = Field(min_length=2)
-    mode: Literal["ask", "plan", "build", "auto"]
     canvas_id: str | None = None
     semantic_context: str | None = None
     conversation_context: str | None = None

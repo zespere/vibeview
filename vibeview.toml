@@ -13,9 +13,10 @@ password = ""
 [code_graph]
 binary = "vendor/code-graph-rag/.venv/bin/cgr"
 
-[codex]
-binary = "codex"
-bypass_sandbox_default = true
+[agent]
+name = "pi"
+binary = "pi"
+
 
 [repos]
 sample-python = "repos/sample-app"
