@@ -160,6 +160,23 @@ const GPT_MODEL_OPTIONS = [
   "claude-sonnet-4.5",
 ];
 
+const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
+  openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3", "gpt-5.2", "gpt-4.1", "gpt-4.1-mini"],
+  openrouter: [
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "claude-sonnet-4.5",
+    "claude-opus-4.1",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+  ],
+  anthropic: ["claude-sonnet-4.5", "claude-opus-4.1"],
+  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  groq: ["llama-3.3-70b-versatile", "qwen-qwq-32b"],
+  mistral: ["mistral-medium", "mistral-small"],
+  xai: ["grok-4", "grok-3-mini"],
+};
+
 const COMPOSER_REASONING_OPTIONS = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
@@ -196,6 +213,8 @@ export default function Home() {
   const [isSavingAgentAuth, setIsSavingAgentAuth] = useState(false);
   const [composerInputValue, setComposerInputValue] = useState("");
   const [isComposerModelMenuOpen, setIsComposerModelMenuOpen] = useState(false);
+  const [composerProviderDraft, setComposerProviderDraft] = useState("openrouter");
+  const [composerModelDraft, setComposerModelDraft] = useState("gpt-5.4");
   const [composerImageAttachments, setComposerImageAttachments] = useState<ComposerImageAttachment[]>([]);
   const [inspectedComposerImageId, setInspectedComposerImageId] = useState<string | null>(null);
   const [composerCaretIndex, setComposerCaretIndex] = useState(0);
@@ -245,7 +264,6 @@ export default function Home() {
   const [renamingCanvasTitle, setRenamingCanvasTitle] = useState("");
   const consoleMessagesRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const composerModelMenuRef = useRef<HTMLDivElement | null>(null);
   const noteTitleInputRef = useRef<HTMLInputElement | null>(null);
   const renamingCanvasInputRef = useRef<HTMLInputElement | null>(null);
   const commandResultRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -551,15 +569,26 @@ export default function Home() {
     }
     return consoleMessages.at(-1)?.title ?? "Ready to work in this project.";
   }, [activeConversationSummary, composerStatus, consoleMessages, isRunning]);
-  const availableComposerModels = useMemo(() => {
-    const items = [status?.agent_model, composerModel, ...GPT_MODEL_OPTIONS];
-    return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
-  }, [composerModel, status?.agent_model]);
-  const composerReasoningLabel = useMemo(
-    () =>
-      COMPOSER_REASONING_OPTIONS.find((item) => item.value === composerReasoning)?.label ?? composerReasoning,
-    [composerReasoning],
+  const activeComposerProvider = useMemo(
+    () => project?.agent_provider ?? agentAuthStatus?.active_provider ?? status?.agent_provider ?? agentAuthProvider,
+    [agentAuthProvider, agentAuthStatus?.active_provider, project?.agent_provider, status?.agent_provider],
   );
+  const availableComposerProviders = useMemo(() => {
+    const configured = new Set(agentAuthStatus?.configured_providers ?? []);
+    const providers = agentAuthStatus?.providers ?? [];
+    const preferred = providers.filter((item) => configured.has(item.id));
+    return preferred.length > 0 ? preferred : providers;
+  }, [agentAuthStatus]);
+  const activeComposerProviderLabel = useMemo(
+    () => availableComposerProviders.find((item) => item.id === activeComposerProvider)?.label ?? activeComposerProvider ?? "Provider",
+    [activeComposerProvider, availableComposerProviders],
+  );
+  const availableComposerModels = useMemo(() => {
+    const sourceProvider = composerProviderDraft || activeComposerProvider || "openai";
+    const presets = PROVIDER_MODEL_OPTIONS[sourceProvider] ?? GPT_MODEL_OPTIONS;
+    const items = [status?.agent_model, composerModel, composerModelDraft, ...presets];
+    return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
+  }, [activeComposerProvider, composerModel, composerModelDraft, composerProviderDraft, status?.agent_model]);
   const seedNewCanvasPrompt = useCallback(() => {
     setLeaderScope(null);
     setDockVisibility("visible");
@@ -1706,16 +1735,14 @@ export default function Home() {
       return;
     }
 
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-      if (composerModelMenuRef.current?.contains(target)) {
-        return;
-      }
-      setIsComposerModelMenuOpen(false);
-    };
+    setComposerProviderDraft(activeComposerProvider || availableComposerProviders[0]?.id || "openrouter");
+    setComposerModelDraft(composerModel);
+  }, [activeComposerProvider, availableComposerProviders, composerModel, isComposerModelMenuOpen]);
+
+  useEffect(() => {
+    if (!isComposerModelMenuOpen) {
+      return;
+    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -1723,10 +1750,8 @@ export default function Home() {
       }
     };
 
-    window.addEventListener("mousedown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("mousedown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [isComposerModelMenuOpen]);
@@ -1862,6 +1887,29 @@ export default function Home() {
       setErrorMessage(getErrorMessage(error));
     } finally {
       setIsSavingAgentAuth(false);
+    }
+  }
+
+  async function handleApplyComposerSettings() {
+    const nextProvider = composerProviderDraft.trim();
+    const nextModel = composerModelDraft.trim();
+    if (!nextProvider || !nextModel) {
+      return;
+    }
+
+    try {
+      setErrorMessage(null);
+      if (nextProvider !== activeComposerProvider) {
+        const response = await updateAgentAuth(nextProvider);
+        setAgentAuthStatus(response);
+        setProject((current) => (current ? { ...current, agent_provider: response.active_provider } : current));
+        await refreshStatus();
+      }
+      setComposerModel(nextModel);
+      setComposerStatus(`Provider set to ${nextProvider}. Model set to ${nextModel}.`);
+      setIsComposerModelMenuOpen(false);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     }
   }
 
@@ -4181,80 +4229,20 @@ ${prompt}` : prompt,
                 ) : null}
                 <div className={styles.consoleComposerActions}>
                   <div className={styles.consoleComposerLeft}>
-                    <div className={styles.consoleControlCluster} ref={composerModelMenuRef}>
+                    <div className={styles.consoleControlCluster}>
                       <button
-                        aria-haspopup="menu"
+                        aria-haspopup="dialog"
                         aria-expanded={isComposerModelMenuOpen}
                         className={isComposerModelMenuOpen ? styles.consoleModelButtonActive : styles.consoleModelButton}
                         disabled={isComposerBusy}
-                        onClick={() => setIsComposerModelMenuOpen((current) => !current)}
+                        onClick={() => setIsComposerModelMenuOpen(true)}
                         type="button"
                       >
                         <span className={styles.consoleModelButtonLabel}>Model</span>
                         <span className={styles.consoleModelButtonValue}>
-                          {composerModel} · {composerReasoningLabel}
+                          {activeComposerProviderLabel} · {composerModel}
                         </span>
                       </button>
-                      {isComposerModelMenuOpen ? (
-                        <div className={styles.consoleModelMenu} role="menu">
-                          <div className={styles.consoleModelMenuSection}>
-                            <div className={styles.consoleModelMenuHeading}>Model</div>
-                            <div className={styles.consoleModelMenuList}>
-                              {availableComposerModels.map((model) => (
-                                <button
-                                  aria-checked={model === composerModel}
-                                  className={
-                                    model === composerModel
-                                      ? styles.consoleModelMenuItemActive
-                                      : styles.consoleModelMenuItem
-                                  }
-                                  key={model}
-                                  onClick={() => {
-                                    setComposerModel(model);
-                                    setComposerStatus(`Composer model set to ${model}.`);
-                                    setIsComposerModelMenuOpen(false);
-                                  }}
-                                  role="menuitemradio"
-                                  type="button"
-                                >
-                                  <span>{model}</span>
-                                  {model === composerModel ? (
-                                    <span className={styles.consoleModelMenuCheck}>Current</span>
-                                  ) : null}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <div className={styles.consoleModelMenuSection}>
-                            <div className={styles.consoleModelMenuHeading}>Thinking</div>
-                            <div className={styles.consoleModelMenuList}>
-                              {COMPOSER_REASONING_OPTIONS.map((item) => (
-                                <button
-                                  aria-checked={item.value === composerReasoning}
-                                  className={
-                                    item.value === composerReasoning
-                                      ? styles.consoleModelMenuItemActive
-                                      : styles.consoleModelMenuItem
-                                  }
-                                  key={item.value}
-                                  onClick={() => {
-                                    setComposerReasoning(item.value);
-                                    setComposerStatus(`Reasoning set to ${item.label}.`);
-                                    setIsComposerModelMenuOpen(false);
-                                  }}
-                                  role="menuitemradio"
-                                  type="button"
-                                >
-                                  <span>{item.label}</span>
-                                  {item.value === composerReasoning ? (
-                                    <span className={styles.consoleModelMenuCheck}>Current</span>
-                                  ) : null}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
                     </div>
                   </div>
                   <div className={styles.consoleComposerRight}>
@@ -4323,6 +4311,112 @@ ${prompt}` : prompt,
             </>
           )}
           </div>
+          {isComposerModelMenuOpen && typeof document !== "undefined"
+            ? createPortal(
+                <div
+                  className={styles.consoleModelOverlay}
+                  onClick={() => setIsComposerModelMenuOpen(false)}
+                  role="presentation"
+                >
+                  <div
+                    aria-label="Model and provider settings"
+                    aria-modal="true"
+                    className={styles.consoleModelDialog}
+                    onClick={(event) => event.stopPropagation()}
+                    role="dialog"
+                  >
+                    <div className={styles.consoleModelDialogBody}>
+                      <div className={styles.consoleModelDialogSection}>
+                        <label className={styles.consoleModelFieldLabel} htmlFor="composer-provider-select">
+                          Provider
+                        </label>
+                        <div className={styles.consoleModelProviderList}>
+                          <select
+                            className={styles.consoleModelSelect}
+                            id="composer-provider-select"
+                            onChange={(event) => setComposerProviderDraft(event.target.value)}
+                            value={composerProviderDraft}
+                          >
+                            {availableComposerProviders.map((provider) => (
+                              <option key={provider.id} value={provider.id}>
+                                {provider.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className={styles.consoleModelDialogSection}>
+                        <label className={styles.consoleModelFieldLabel} htmlFor="composer-model-input">
+                          Model
+                        </label>
+                        <input
+                          className={styles.consoleModelInput}
+                          id="composer-model-input"
+                          placeholder="Model id"
+                          onChange={(event) => setComposerModelDraft(event.target.value)}
+                          value={composerModelDraft}
+                        />
+                        <div className={styles.consoleModelPresetList}>
+                          {availableComposerModels.map((model) => (
+                            <button
+                              aria-pressed={model === composerModelDraft}
+                              className={
+                                model === composerModelDraft
+                                  ? styles.consoleModelPresetItemActive
+                                  : styles.consoleModelPresetItem
+                              }
+                              key={model}
+                              onClick={() => setComposerModelDraft(model)}
+                              type="button"
+                            >
+                              {model}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className={styles.consoleModelDialogSection}>
+                        <div className={styles.consoleModelFieldLabel}>Thinking</div>
+                        <div className={styles.consoleReasoningList}>
+                          {COMPOSER_REASONING_OPTIONS.map((item) => (
+                            <button
+                              aria-pressed={item.value === composerReasoning}
+                              className={
+                                item.value === composerReasoning
+                                  ? styles.consoleReasoningItemActive
+                                  : styles.consoleReasoningItem
+                              }
+                              key={item.value}
+                              onClick={() => setComposerReasoning(item.value)}
+                              type="button"
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    <div className={styles.consoleModelDialogActions}>
+                      <button
+                        className={styles.commitButton}
+                        onClick={() => setIsComposerModelMenuOpen(false)}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className={styles.primaryButton}
+                        disabled={!composerProviderDraft.trim() || !composerModelDraft.trim()}
+                        onClick={() => void handleApplyComposerSettings()}
+                        type="button"
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                </div>,
+                document.body,
+              )
+            : null}
           {inspectedComposerImage && typeof document !== "undefined"
             ? createPortal(
                 <div

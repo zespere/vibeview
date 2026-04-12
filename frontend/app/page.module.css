@@ -2256,6 +2256,116 @@
   color: #866342;
 }
 
+.consoleModelOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  background: rgba(28, 22, 16, 0.28);
+  padding: 24px;
+}
+
+.consoleModelDialog {
+  display: flex;
+  width: min(760px, calc(100vw - 32px));
+  flex-direction: column;
+  gap: 18px;
+  border: 1px solid #d8cebf;
+  border-radius: 12px;
+  background: #fffdf9;
+  padding: 18px;
+  box-shadow: 0 18px 48px rgba(34, 24, 16, 0.16);
+}
+
+.consoleModelDialogBody {
+  display: grid;
+  gap: 16px;
+}
+
+.consoleModelDialogSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.consoleModelFieldLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6a5d50;
+}
+
+.consoleModelSelect,
+.consoleModelInput {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #d8ccbd;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #241d17;
+  font: inherit;
+  padding: 0 12px;
+}
+
+.consoleModelInput::placeholder {
+  color: #7d7062;
+}
+
+.consoleModelSelect:focus,
+.consoleModelInput:focus {
+  outline: none;
+  border-color: #b79268;
+  box-shadow: 0 0 0 3px rgba(183, 146, 104, 0.1);
+}
+
+.consoleModelProviderList {
+  display: block;
+}
+
+.consoleModelPresetList,
+.consoleReasoningList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.consoleModelPresetItem,
+.consoleModelPresetItemActive,
+.consoleReasoningItem,
+.consoleReasoningItemActive {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  border: 1px solid #ddd2c4;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #3b3027;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.consoleModelPresetItem:hover,
+.consoleReasoningItem:hover {
+  background: #f7f0e6;
+}
+
+.consoleModelPresetItemActive,
+.consoleReasoningItemActive {
+  border-color: #b79268;
+  background: #f5ecdf;
+  color: #2d241b;
+}
+
+.consoleModelDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .commitButton {
   min-height: 36px;
   border: 1px solid rgba(222, 212, 200, 0.92);
@@ -3620,6 +3730,25 @@
 .errorText {
   margin: 14px 28px 0;
   color: #b42318;
+}
+
+@media (max-width: 720px) {
+  .consoleModelOverlay {
+    padding: 12px;
+  }
+
+  .consoleModelDialog {
+    width: 100%;
+    padding: 14px;
+  }
+
+  .consoleModelDialogActions {
+    flex-direction: column-reverse;
+  }
+
+  .consoleModelDialogActions > button {
+    width: 100%;
+  }
 }
 
 @media (max-width: 720px) {
