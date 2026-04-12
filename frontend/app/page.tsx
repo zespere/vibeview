@@ -29,6 +29,7 @@ import {
   pushProjectCommits,
   deleteCanvasNode,
   fetchAgentAuthStatus,
+  fetchAgentCapabilities,
   fetchCanvas,
   fetchCanvases,
   fetchCommitStatus,
@@ -50,6 +51,8 @@ import {
   updateProjectConversation,
   updateCanvasNode,
   type AgentAuthStatusResponse,
+  type AgentCapabilitiesResponse,
+  type AgentModelCapability,
   type CanvasEditChangeRecord,
   type CanvasEditPreviewResponse,
   type CanvasDocument,
@@ -150,33 +153,6 @@ type ComposerReasoningEffort = "low" | "medium" | "high" | "xhigh";
 type DockVisibilityState = "hidden" | "visible";
 type ConsoleVisibilityState = "collapsed" | "expanded";
 
-const GPT_MODEL_OPTIONS = [
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.3",
-  "gpt-5.2",
-  "gpt-4.1",
-  "gpt-4.1-mini",
-  "claude-sonnet-4.5",
-];
-
-const PROVIDER_MODEL_OPTIONS: Record<string, string[]> = {
-  openai: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3", "gpt-5.2", "gpt-4.1", "gpt-4.1-mini"],
-  openrouter: [
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "claude-sonnet-4.5",
-    "claude-opus-4.1",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash",
-  ],
-  anthropic: ["claude-sonnet-4.5", "claude-opus-4.1"],
-  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
-  groq: ["llama-3.3-70b-versatile", "qwen-qwq-32b"],
-  mistral: ["mistral-medium", "mistral-small"],
-  xai: ["grok-4", "grok-3-mini"],
-};
-
 const COMPOSER_REASONING_OPTIONS = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
@@ -185,6 +161,14 @@ const COMPOSER_REASONING_OPTIONS = [
 ] as const;
 
 const LEADER_DIGIT_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
+
+function formatProviderLabel(providerId: string): string {
+  return providerId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 export default function Home() {
   const [isRailExpanded, setIsRailExpanded] = useState(true);
@@ -196,6 +180,7 @@ export default function Home() {
   const [activeTabId, setActiveTabId] = useState<OpenTab["id"] | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [agentAuthStatus, setAgentAuthStatus] = useState<AgentAuthStatusResponse | null>(null);
+  const [agentCapabilities, setAgentCapabilities] = useState<AgentCapabilitiesResponse | null>(null);
   const [project, setProject] = useState<ProjectProfile | null>(null);
   const [workspaceStatus, setWorkspaceStatus] = useState<ProjectWorkspaceStatusResponse | null>(null);
   const [projectsTree, setProjectsTree] = useState<ProjectTreeItem[]>([]);
@@ -215,6 +200,7 @@ export default function Home() {
   const [isComposerModelMenuOpen, setIsComposerModelMenuOpen] = useState(false);
   const [composerProviderDraft, setComposerProviderDraft] = useState("openrouter");
   const [composerModelDraft, setComposerModelDraft] = useState("gpt-5.4");
+  const [composerModelQuery, setComposerModelQuery] = useState("");
   const [composerImageAttachments, setComposerImageAttachments] = useState<ComposerImageAttachment[]>([]);
   const [inspectedComposerImageId, setInspectedComposerImageId] = useState<string | null>(null);
   const [composerCaretIndex, setComposerCaretIndex] = useState(0);
@@ -575,20 +561,94 @@ export default function Home() {
   );
   const availableComposerProviders = useMemo(() => {
     const configured = new Set(agentAuthStatus?.configured_providers ?? []);
-    const providers = agentAuthStatus?.providers ?? [];
-    const preferred = providers.filter((item) => configured.has(item.id));
-    return preferred.length > 0 ? preferred : providers;
-  }, [agentAuthStatus]);
+    const fromAuth = (agentAuthStatus?.providers ?? []).map((item) => ({
+      id: item.id,
+      label: item.label,
+      connected: configured.has(item.id),
+    }));
+    const seen = new Set(fromAuth.map((item) => item.id));
+    const fromCapabilities = (agentCapabilities?.providers ?? [])
+      .filter((provider) => !seen.has(provider.id))
+      .map((provider) => ({
+        id: provider.id,
+        label: formatProviderLabel(provider.id),
+        connected: configured.has(provider.id),
+      }));
+    return [...fromAuth, ...fromCapabilities].sort((left, right) => {
+      if (left.connected !== right.connected) {
+        return left.connected ? -1 : 1;
+      }
+      return left.label.localeCompare(right.label);
+    });
+  }, [agentAuthStatus, agentCapabilities]);
   const activeComposerProviderLabel = useMemo(
     () => availableComposerProviders.find((item) => item.id === activeComposerProvider)?.label ?? activeComposerProvider ?? "Provider",
     [activeComposerProvider, availableComposerProviders],
   );
-  const availableComposerModels = useMemo(() => {
-    const sourceProvider = composerProviderDraft || activeComposerProvider || "openai";
-    const presets = PROVIDER_MODEL_OPTIONS[sourceProvider] ?? GPT_MODEL_OPTIONS;
-    const items = [status?.agent_model, composerModel, composerModelDraft, ...presets];
+  const providerComposerModelMap = useMemo(() => {
+    const entries = (agentCapabilities?.providers ?? []).map((provider) => [provider.id, provider.models] as const);
+    return new Map<string, AgentModelCapability[]>(entries);
+  }, [agentCapabilities]);
+  const recentComposerModels = useMemo(() => {
+    const items = [composerModel, composerModelDraft, status?.agent_model];
     return [...new Set(items.filter((item): item is string => Boolean(item && item.trim())))];
-  }, [activeComposerProvider, composerModel, composerModelDraft, composerProviderDraft, status?.agent_model]);
+  }, [composerModel, composerModelDraft, status?.agent_model]);
+  const providerComposerModelRecords = useMemo(() => {
+    const sourceProvider = composerProviderDraft || activeComposerProvider || "openrouter";
+    return providerComposerModelMap.get(sourceProvider) ?? [];
+  }, [activeComposerProvider, composerProviderDraft, providerComposerModelMap]);
+  const filteredComposerModelRecords = useMemo(() => {
+    const query = composerModelQuery.trim().toLowerCase();
+    const matchesQuery = (model: AgentModelCapability) => {
+      if (!query) {
+        return true;
+      }
+      const id = model.id.toLowerCase();
+      const name = model.name.toLowerCase();
+      return id.includes(query) || name.includes(query);
+    };
+    const rank = (model: AgentModelCapability) => {
+      if (model.id === composerModelDraft) {
+        return -1;
+      }
+      if (!query) {
+        return 0;
+      }
+      const id = model.id.toLowerCase();
+      const name = model.name.toLowerCase();
+      if (id === query) {
+        return 0;
+      }
+      if (id.startsWith(query)) {
+        return 1;
+      }
+      if (name.startsWith(query)) {
+        return 2;
+      }
+      if (id.includes(query)) {
+        return 3;
+      }
+      if (name.includes(query)) {
+        return 4;
+      }
+      return 5;
+    };
+    return [...providerComposerModelRecords]
+      .filter(matchesQuery)
+      .sort((left, right) => {
+        const leftRank = rank(left);
+        const rightRank = rank(right);
+        if (leftRank !== rightRank) {
+          return leftRank - rightRank;
+        }
+        return left.id.localeCompare(right.id);
+      })
+      .slice(0, 80);
+  }, [composerModelDraft, composerModelQuery, providerComposerModelRecords]);
+  const availableComposerModels = useMemo(
+    () => [...new Set([...recentComposerModels, ...providerComposerModelRecords.map((model) => model.id)])],
+    [providerComposerModelRecords, recentComposerModels],
+  );
   const seedNewCanvasPrompt = useCallback(() => {
     setLeaderScope(null);
     setDockVisibility("visible");
@@ -1069,6 +1129,16 @@ export default function Home() {
         try {
           const response = await fetchAgentAuthStatus();
           setAgentAuthStatus(response);
+        } catch (error) {
+          setErrorMessage(getErrorMessage(error));
+        }
+      })();
+    });
+    startProjectTransition(() => {
+      void (async () => {
+        try {
+          const response = await fetchAgentCapabilities();
+          setAgentCapabilities(response);
         } catch (error) {
           setErrorMessage(getErrorMessage(error));
         }
@@ -1737,6 +1807,7 @@ export default function Home() {
 
     setComposerProviderDraft(activeComposerProvider || availableComposerProviders[0]?.id || "openrouter");
     setComposerModelDraft(composerModel);
+    setComposerModelQuery("");
   }, [activeComposerProvider, availableComposerProviders, composerModel, isComposerModelMenuOpen]);
 
   useEffect(() => {
@@ -4326,72 +4397,126 @@ ${prompt}` : prompt,
                     role="dialog"
                   >
                     <div className={styles.consoleModelDialogBody}>
-                      <div className={styles.consoleModelDialogSection}>
-                        <label className={styles.consoleModelFieldLabel} htmlFor="composer-provider-select">
-                          Provider
-                        </label>
-                        <div className={styles.consoleModelProviderList}>
-                          <select
-                            className={styles.consoleModelSelect}
-                            id="composer-provider-select"
-                            onChange={(event) => setComposerProviderDraft(event.target.value)}
-                            value={composerProviderDraft}
-                          >
-                            {availableComposerProviders.map((provider) => (
-                              <option key={provider.id} value={provider.id}>
-                                {provider.label}
-                              </option>
+                      <div className={styles.consoleModelDialogTop}>
+                        <div className={styles.consoleModelDialogSection}>
+                          <label className={styles.consoleModelFieldLabel} htmlFor="composer-provider-select">
+                            Provider
+                          </label>
+                          <div className={styles.consoleModelProviderList}>
+                            <select
+                              className={styles.consoleModelSelect}
+                              id="composer-provider-select"
+                              onChange={(event) => setComposerProviderDraft(event.target.value)}
+                              value={composerProviderDraft}
+                            >
+                              {availableComposerProviders.map((provider) => (
+                                <option key={provider.id} value={provider.id}>
+                                  {provider.connected ? `${provider.label} · Connected` : provider.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                        <div className={styles.consoleModelDialogSection}>
+                          <div className={styles.consoleModelFieldLabel}>Thinking</div>
+                          <div className={styles.consoleReasoningList}>
+                            {COMPOSER_REASONING_OPTIONS.map((item) => (
+                              <button
+                                aria-pressed={item.value === composerReasoning}
+                                className={
+                                  item.value === composerReasoning
+                                    ? styles.consoleReasoningItemActive
+                                    : styles.consoleReasoningItem
+                                }
+                                key={item.value}
+                                onClick={() => setComposerReasoning(item.value)}
+                                type="button"
+                              >
+                                {item.label}
+                              </button>
                             ))}
-                          </select>
+                          </div>
                         </div>
                       </div>
-                      <div className={styles.consoleModelDialogSection}>
-                        <label className={styles.consoleModelFieldLabel} htmlFor="composer-model-input">
-                          Model
-                        </label>
-                        <input
-                          className={styles.consoleModelInput}
-                          id="composer-model-input"
-                          placeholder="Model id"
-                          onChange={(event) => setComposerModelDraft(event.target.value)}
-                          value={composerModelDraft}
-                        />
-                        <div className={styles.consoleModelPresetList}>
-                          {availableComposerModels.map((model) => (
-                            <button
-                              aria-pressed={model === composerModelDraft}
-                              className={
-                                model === composerModelDraft
-                                  ? styles.consoleModelPresetItemActive
-                                  : styles.consoleModelPresetItem
-                              }
-                              key={model}
-                              onClick={() => setComposerModelDraft(model)}
-                              type="button"
-                            >
-                              {model}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className={styles.consoleModelDialogSection}>
-                        <div className={styles.consoleModelFieldLabel}>Thinking</div>
-                        <div className={styles.consoleReasoningList}>
-                          {COMPOSER_REASONING_OPTIONS.map((item) => (
-                            <button
-                              aria-pressed={item.value === composerReasoning}
-                              className={
-                                item.value === composerReasoning
-                                  ? styles.consoleReasoningItemActive
-                                  : styles.consoleReasoningItem
-                              }
-                              key={item.value}
-                              onClick={() => setComposerReasoning(item.value)}
-                              type="button"
-                            >
-                              {item.label}
-                            </button>
-                          ))}
+                      <div className={styles.consoleModelPickerLayout}>
+                        <div className={styles.consoleModelDialogSection}>
+                          <label className={styles.consoleModelFieldLabel} htmlFor="composer-model-search">
+                            Search
+                          </label>
+                          <input
+                            className={styles.consoleModelInput}
+                            id="composer-model-search"
+                            placeholder="Search models"
+                            onChange={(event) => setComposerModelQuery(event.target.value)}
+                            value={composerModelQuery}
+                          />
+                          {recentComposerModels.length > 0 ? (
+                            <div className={styles.consoleModelPresetGroup}>
+                              <div className={styles.consoleModelSubheading}>Recent</div>
+                              <div className={styles.consoleModelPresetList}>
+                                {recentComposerModels.map((model) => (
+                                  <button
+                                    aria-pressed={model === composerModelDraft}
+                                    className={
+                                      model === composerModelDraft
+                                        ? styles.consoleModelPresetItemActive
+                                        : styles.consoleModelPresetItem
+                                    }
+                                    key={model}
+                                    onClick={() => setComposerModelDraft(model)}
+                                    type="button"
+                                  >
+                                    {model}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className={styles.consoleModelResultsHeader}>
+                            <div className={styles.consoleModelSubheading}>
+                              {composerModelQuery.trim() ? "Matches" : "Provider models"}
+                            </div>
+                            <div className={styles.consoleModelResultCount}>
+                              {filteredComposerModelRecords.length} / {providerComposerModelRecords.length}
+                            </div>
+                          </div>
+                          <div className={styles.consoleModelResultList}>
+                            {filteredComposerModelRecords.length > 0 ? (
+                              filteredComposerModelRecords.map((model) => (
+                                <button
+                                  aria-pressed={model.id === composerModelDraft}
+                                  className={
+                                    model.id === composerModelDraft
+                                      ? styles.consoleModelResultItemActive
+                                      : styles.consoleModelResultItem
+                                  }
+                                  key={model.id}
+                                  onClick={() => setComposerModelDraft(model.id)}
+                                  type="button"
+                                >
+                                  <span className={styles.consoleModelResultMain}>
+                                    <span className={styles.consoleModelResultPrimary}>{model.id}</span>
+                                    <span className={styles.consoleModelResultMeta}>
+                                      {model.id === composerModelDraft ? (
+                                        <span className={styles.consoleModelCapabilitySelected}>Selected</span>
+                                      ) : null}
+                                      {model.reasoning ? (
+                                        <span className={styles.consoleModelCapability}>Reasoning</span>
+                                      ) : null}
+                                      {model.supports_images ? (
+                                        <span className={styles.consoleModelCapability}>Vision</span>
+                                      ) : null}
+                                    </span>
+                                  </span>
+                                  <span className={styles.consoleModelResultSecondary}>{model.name}</span>
+                                </button>
+                              ))
+                            ) : (
+                              <div className={styles.consoleModelEmptyState}>
+                                No models match <span className={styles.consoleModelEmptyValue}>{composerModelQuery}</span>.
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

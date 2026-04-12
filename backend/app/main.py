@@ -22,6 +22,9 @@ from .models import (
     AgentChangeResponse,
     AgentAuthStatusResponse,
     AgentAuthUpdateRequest,
+    AgentCapabilitiesResponse,
+    AgentProviderCapabilities,
+    AgentModelCapability,
     AgentsDocumentResponse,
     AgentsDocumentUpdateRequest,
     AssistImpactRequest,
@@ -95,9 +98,10 @@ index_service = IndexService(state_store)
 canvas_service = CanvasService(canvas_store)
 project_service = ProjectService(project_store)
 agent_auth_service = AgentAuthService()
+pi_client = PiClient()
 agent_service = AgentService(
     graph_service,
-    PiClient(),
+    pi_client,
     provider_resolver=lambda: project_service.get_project().agent_provider or settings.agent_provider,
 )
 
@@ -162,6 +166,25 @@ def update_agent_auth(request: AgentAuthUpdateRequest) -> AgentAuthStatusRespons
         project_service.set_agent_provider(request.provider)
     project = project_service.get_project()
     return agent_auth_service.get_status(project.agent_provider or settings.agent_provider)
+
+
+@app.get("/agent/capabilities", response_model=AgentCapabilitiesResponse)
+def get_agent_capabilities() -> AgentCapabilitiesResponse:
+    auth_providers = agent_auth_service.get_status(settings.agent_provider).providers
+    provider_ids = [provider.id for provider in auth_providers]
+    for provider_id in pi_client.custom_provider_ids():
+        if provider_id not in provider_ids:
+            provider_ids.append(provider_id)
+    models_by_provider = pi_client.get_available_models_by_provider(provider_ids)
+    return AgentCapabilitiesResponse(
+        providers=[
+            AgentProviderCapabilities(
+                id=provider_id,
+                models=[AgentModelCapability(**item) for item in models_by_provider.get(provider_id, [])],
+            )
+            for provider_id in provider_ids
+        ]
+    )
 
 
 @app.get("/project", response_model=ProjectProfileResponse)

@@ -56,6 +56,25 @@ export interface AgentAuthStatusResponse {
   providers: AgentProviderOption[];
 }
 
+export interface AgentModelCapability {
+  id: string;
+  name: string;
+  provider: string;
+  reasoning: boolean;
+  supports_images: boolean;
+  context_window: number | null;
+  max_tokens: number | null;
+}
+
+export interface AgentProviderCapabilities {
+  id: string;
+  models: AgentModelCapability[];
+}
+
+export interface AgentCapabilitiesResponse {
+  providers: AgentProviderCapabilities[];
+}
+
 export interface ProjectImageUploadResponse {
   file_path: string;
   file_name: string;
@@ -401,6 +420,10 @@ export function fetchProject() {
 
 export function fetchAgentAuthStatus() {
   return apiRequest<AgentAuthStatusResponse>("/agent/auth", { cache: "no-store" });
+}
+
+export function fetchAgentCapabilities() {
+  return apiRequest<AgentCapabilitiesResponse>("/agent/capabilities", { cache: "no-store" });
 }
 
 export function updateAgentAuth(provider: string, apiKey?: string) {

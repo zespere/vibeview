@@ -2268,25 +2268,37 @@
 
 .consoleModelDialog {
   display: flex;
-  width: min(760px, calc(100vw - 32px));
+  width: min(860px, calc(100vw - 32px));
+  max-height: calc(100vh - 28px);
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   border: 1px solid #d8cebf;
   border-radius: 12px;
   background: #fffdf9;
-  padding: 18px;
-  box-shadow: 0 18px 48px rgba(34, 24, 16, 0.16);
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(34, 24, 16, 0.12);
+  overflow: hidden;
 }
 
 .consoleModelDialogBody {
   display: grid;
-  gap: 16px;
+  gap: 14px;
+  min-height: 0;
 }
 
+.consoleModelDialogTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.consoleModelPickerLayout,
 .consoleModelDialogSection {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .consoleModelFieldLabel {
@@ -2306,6 +2318,15 @@
   color: #241d17;
   font: inherit;
   padding: 0 12px;
+}
+
+.consoleModelSelect {
+  appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M2.5 4.5L6 8L9.5 4.5' stroke='%23594c3f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 12px;
 }
 
 .consoleModelInput::placeholder {
@@ -2328,6 +2349,161 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.consoleReasoningList {
+  align-items: center;
+}
+
+.consoleModelPresetGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.consoleModelSubheading {
+  font-size: 12px;
+  font-weight: 600;
+  color: #7a6a59;
+}
+
+.consoleModelResultsHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consoleModelResultCount {
+  font-size: 12px;
+  color: #8a7a67;
+  white-space: nowrap;
+}
+
+.consoleModelResultList {
+  display: flex;
+  flex-direction: column;
+  min-height: 260px;
+  max-height: min(300px, calc(100vh - 430px));
+  overflow: auto;
+  border: 1px solid #e3d8cb;
+  border-radius: 10px;
+  background: #fcfaf6;
+}
+
+.consoleModelResultItem,
+.consoleModelResultItemActive {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  min-height: 58px;
+  border: 0;
+  border-bottom: 1px solid #efe5d9;
+  background: transparent;
+  color: #2f261f;
+  font: inherit;
+  line-height: 1.35;
+  text-align: left;
+  padding: 10px 14px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.consoleModelResultList > :last-child {
+  border-bottom: 0;
+}
+
+.consoleModelResultItem:hover {
+  background: #f6efe6;
+}
+
+.consoleModelResultItemActive {
+  background: #f1e6d7;
+  box-shadow: inset 2px 0 0 #b79268;
+}
+
+.consoleModelResultMain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 0;
+}
+
+.consoleModelResultPrimary {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2f261f;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.consoleModelResultMeta {
+  display: inline-flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.consoleModelCapability {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border: 1px solid #ddd2c4;
+  border-radius: 999px;
+  background: #fffdf9;
+  color: #6a5d50;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 8px;
+}
+
+.consoleModelCapabilitySelected {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border: 1px solid #c7a37c;
+  border-radius: 999px;
+  background: #f5e7d5;
+  color: #6b4522;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 8px;
+}
+
+.consoleModelResultSecondary {
+  display: block;
+  min-width: 0;
+  font-size: 12px;
+  color: #7c6c5c;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.consoleModelEmptyState {
+  display: flex;
+  min-height: 320px;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #7c6c5c;
+  font-size: 13px;
+  text-align: center;
+}
+
+.consoleModelEmptyValue {
+  font-weight: 600;
+  color: #2f261f;
 }
 
 .consoleModelPresetItem,
@@ -2364,6 +2540,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  padding-top: 4px;
 }
 
 .commitButton {
@@ -3739,7 +3916,17 @@
 
   .consoleModelDialog {
     width: 100%;
+    max-height: calc(100vh - 20px);
     padding: 14px;
+  }
+
+  .consoleModelDialogTop {
+    grid-template-columns: 1fr;
+  }
+
+  .consoleModelResultList {
+    min-height: 220px;
+    max-height: min(280px, calc(100vh - 420px));
   }
 
   .consoleModelDialogActions {

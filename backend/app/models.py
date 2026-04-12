@@ -77,6 +77,25 @@ class AgentAuthStatusResponse(BaseModel):
     providers: list[AgentProviderOption] = Field(default_factory=list)
 
 
+class AgentModelCapability(BaseModel):
+    id: str
+    name: str
+    provider: str
+    reasoning: bool = False
+    supports_images: bool = False
+    context_window: int | None = None
+    max_tokens: int | None = None
+
+
+class AgentProviderCapabilities(BaseModel):
+    id: str
+    models: list[AgentModelCapability] = Field(default_factory=list)
+
+
+class AgentCapabilitiesResponse(BaseModel):
+    providers: list[AgentProviderCapabilities] = Field(default_factory=list)
+
+
 class AgentAuthUpdateRequest(BaseModel):
     provider: str
     api_key: str | None = None
