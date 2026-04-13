@@ -531,19 +531,20 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
     def emit(event: dict[str, object]) -> bytes:
         return (json.dumps(event) + "\n").encode("utf-8")
 
-    def format_tool_label(tool_name: str, args: object) -> str:
+    def format_tool_command(tool_name: str, args: object) -> str:
         if tool_name == "bash" and isinstance(args, dict):
             command = str(args.get("command") or "").strip()
             if command:
                 return command
-        if tool_name in {"read", "write", "edit", "grep", "find", "ls"} and isinstance(args, dict):
-            for key in ("path", "filePath", "pattern", "query"):
-                value = str(args.get(key) or "").strip()
-                if value:
-                    return f"{tool_name} {value}"[:120]
+        if isinstance(args, dict) and args:
+            return f"{tool_name} {json.dumps(args, ensure_ascii=True, sort_keys=True)}"
         return tool_name or "tool"
 
-    def extract_tool_summary(result: object) -> str | None:
+    def format_tool_label(tool_name: str, args: object) -> str:
+        command = format_tool_command(tool_name, args)
+        return command[:120] if command else (tool_name or "tool")
+
+    def extract_tool_output(result: object) -> str | None:
         if not isinstance(result, dict):
             return None
         content = result.get("content")
@@ -558,7 +559,16 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                 parts.append(text)
         if not parts:
             return None
-        cleaned = " ".join(part.replace("\n", " ").strip() for part in parts).strip()
+        cleaned = "\n\n".join(part.strip() for part in parts if part.strip()).strip()
+        if not cleaned:
+            return None
+        return cleaned[:4000]
+
+    def extract_tool_summary(result: object) -> str | None:
+        output = extract_tool_output(result)
+        if not output:
+            return None
+        cleaned = " ".join(part.replace("\n", " ").strip() for part in output.split("\n\n")).strip()
         return cleaned[:160] if cleaned else None
 
     def translate_pi_event(pi_event: dict[str, object]) -> list[dict[str, object]]:
@@ -578,6 +588,7 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     "tool_call_id": str(pi_event.get("toolCallId") or "").strip(),
                     "tool_name": tool_name,
                     "tool_label": format_tool_label(tool_name, pi_event.get("args")),
+                    "tool_command": format_tool_command(tool_name, pi_event.get("args")),
                 }
             )
         elif event_type == "tool_execution_end":
@@ -588,8 +599,10 @@ def run_project_stream(request: ProjectRunStreamRequest) -> StreamingResponse:
                     "tool_call_id": str(pi_event.get("toolCallId") or "").strip(),
                     "tool_name": tool_name,
                     "tool_label": format_tool_label(tool_name, pi_event.get("args")),
+                    "tool_command": format_tool_command(tool_name, pi_event.get("args")),
                     "tool_status": "error" if pi_event.get("isError") else "success",
                     "tool_summary": extract_tool_summary(pi_event.get("result")),
+                    "tool_output": extract_tool_output(pi_event.get("result")),
                 }
             )
         elif event_type == "auto_retry_start":

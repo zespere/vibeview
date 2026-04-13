@@ -26,4 +26,3 @@ frontend/.next*/
 frontend/node_modules/
 frontend/.env.local
 .vibeview/*.json
-.konceptura/*.json

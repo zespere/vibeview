@@ -122,6 +122,7 @@ class ConversationMessage(BaseModel):
     title: str | None = None
     content: str
     created_at: datetime | None = None
+    run_state: dict[str, Any] | None = None
 
 
 class ConversationRecord(BaseModel):

@@ -2925,17 +2925,20 @@ ${prompt}` : prompt,
     if (event.type === "tool.start") {
       const toolId = event.tool_call_id || `${event.tool_name || "tool"}-${Date.now()}`;
       const existingIndex = next.tools?.findIndex((tool) => tool.id === toolId) ?? -1;
+      const previous = existingIndex >= 0 && next.tools ? next.tools[existingIndex] : null;
       const tool: NonNullable<ConversationRunState["tools"]>[number] = {
         id: toolId,
         name: event.tool_name || "tool",
         label: event.tool_label || event.tool_name || "tool",
         status: "running",
-        summary: null,
+        summary: previous?.summary ?? null,
+        command: event.tool_command ?? previous?.command ?? null,
+        output: previous?.output ?? null,
       };
       if (existingIndex >= 0 && next.tools) {
         next.tools[existingIndex] = tool;
       } else {
-        next.tools = [...(next.tools ?? []), tool].slice(-6);
+        next.tools = [...(next.tools ?? []), tool];
       }
       return next;
     }
@@ -2943,17 +2946,20 @@ ${prompt}` : prompt,
     if (event.type === "tool.end") {
       const toolId = event.tool_call_id || `${event.tool_name || "tool"}-${Date.now()}`;
       const existingIndex = next.tools?.findIndex((tool) => tool.id === toolId) ?? -1;
+      const previous = existingIndex >= 0 && next.tools ? next.tools[existingIndex] : null;
       const tool: NonNullable<ConversationRunState["tools"]>[number] = {
         id: toolId,
         name: event.tool_name || "tool",
         label: event.tool_label || event.tool_name || "tool",
         status: event.tool_status === "error" ? "error" : "success",
-        summary: event.tool_summary ?? null,
+        summary: event.tool_summary ?? previous?.summary ?? null,
+        command: event.tool_command ?? previous?.command ?? null,
+        output: event.tool_output ?? previous?.output ?? null,
       };
       if (existingIndex >= 0 && next.tools) {
         next.tools[existingIndex] = tool;
       } else {
-        next.tools = [...(next.tools ?? []), tool].slice(-6);
+        next.tools = [...(next.tools ?? []), tool];
       }
       return next;
     }
@@ -4228,7 +4234,15 @@ ${prompt}` : prompt,
                             className={message.role === "user" ? styles.consoleMessageUser : styles.consoleMessageAssistant}
                             key={message.id}
                           >
-                            <span className={styles.consoleMessageRole}>{message.role === "user" ? "You" : "Vibeview"}</span>
+                            <span
+                              className={
+                                message.role === "user"
+                                  ? styles.consoleMessageRole
+                                  : styles.consoleMessageRoleAssistant
+                              }
+                            >
+                              {message.role === "user" ? "You" : "Vibeview"}
+                            </span>
                             {message.title ? <strong className={styles.consoleMessageTitle}>{message.title}</strong> : null}
                             {message.role === "assistant" && message.run_state ? (
                               <div className={styles.consoleRunMeta}>
@@ -4248,23 +4262,52 @@ ${prompt}` : prompt,
                             ) : null}
                             {message.role === "assistant" && message.run_state?.tools?.length ? (
                               <div className={styles.consoleRunTools}>
-                                {message.run_state.tools.slice(-4).map((tool) => (
-                                  <div className={styles.consoleRunTool} key={tool.id}>
-                                    <span
-                                      className={
-                                        tool.status === "error"
-                                          ? styles.consoleRunToolDotError
-                                          : tool.status === "success"
-                                            ? styles.consoleRunToolDotSuccess
-                                            : styles.consoleRunToolDotRunning
-                                      }
-                                    />
-                                    <span className={styles.consoleRunToolLabel}>{tool.label}</span>
-                                    <span className={styles.consoleRunToolState}>
-                                      {tool.status === "running" ? "Running" : tool.status === "error" ? "Failed" : "Done"}
-                                    </span>
-                                  </div>
-                                ))}
+                                <div className={styles.consoleRunToolsHeader}>
+                                  <span className={styles.consoleRunToolsTitle}>Activity</span>
+                                  <span className={styles.consoleRunToolsCount}>{message.run_state.tools.length} calls</span>
+                                </div>
+                                <div className={styles.consoleRunToolList}>
+                                  {message.run_state.tools.map((tool) => (
+                                    <details className={styles.consoleRunToolItem} key={tool.id}>
+                                      <summary className={styles.consoleRunToolSummary}>
+                                        <span
+                                          className={
+                                            tool.status === "error"
+                                              ? styles.consoleRunToolDotError
+                                              : tool.status === "success"
+                                                ? styles.consoleRunToolDotSuccess
+                                                : styles.consoleRunToolDotRunning
+                                          }
+                                        />
+                                        <span className={styles.consoleRunToolName}>{tool.name}</span>
+                                        <span className={styles.consoleRunToolLabel}>{tool.label}</span>
+                                        <span className={styles.consoleRunToolState}>
+                                          {tool.status === "running" ? "Running" : tool.status === "error" ? "Failed" : "Done"}
+                                        </span>
+                                      </summary>
+                                      <div className={styles.consoleRunToolBody}>
+                                        {tool.command ? (
+                                          <div className={styles.consoleRunToolBlock}>
+                                            <div className={styles.consoleRunToolBlockLabel}>Command</div>
+                                            <pre className={styles.consoleRunToolCode}>{tool.command}</pre>
+                                          </div>
+                                        ) : null}
+                                        {tool.summary ? (
+                                          <div className={styles.consoleRunToolBlock}>
+                                            <div className={styles.consoleRunToolBlockLabel}>Summary</div>
+                                            <div className={styles.consoleRunToolText}>{tool.summary}</div>
+                                          </div>
+                                        ) : null}
+                                        {tool.output ? (
+                                          <div className={styles.consoleRunToolBlock}>
+                                            <div className={styles.consoleRunToolBlockLabel}>Output</div>
+                                            <pre className={styles.consoleRunToolCode}>{tool.output}</pre>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    </details>
+                                  ))}
+                                </div>
                               </div>
                             ) : null}
                             <div className={styles.consoleMessageBody}>
@@ -5929,6 +5972,8 @@ function renderConsoleMessageContent(
     ? new RegExp(`\\b(${titles.map(escapeRegExp).join("|")})\\b`, "g")
     : null;
   const markdownLinkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const markdownBoldPattern = /\*\*([^*]+)\*\*/g;
+  const markdownInlineCodePattern = /`([^`]+)`/g;
 
   function renderPlainText(text: string, lineIndex: number, segmentKey: string) {
     if (!text) {
@@ -5974,70 +6019,224 @@ function renderConsoleMessageContent(
     return parts.length > 0 ? parts : [text];
   }
 
-  const lines = content.split("\n");
-
-  return lines.map((line, lineIndex) => {
-    const parts: React.ReactNode[] = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-    markdownLinkPattern.lastIndex = 0;
-
-    while ((match = markdownLinkPattern.exec(line)) !== null) {
-      const [fullMatch, label, href] = match;
-      const start = match.index;
-      if (start > lastIndex) {
-        parts.push(...renderPlainText(line.slice(lastIndex, start), lineIndex, `plain-${start}`));
-      }
-
-      if (/^https?:\/\//i.test(href)) {
-        parts.push(
-          <a
-            className={styles.consoleFileLink}
-            href={href}
-            key={`${lineIndex}-md-${start}-${label}`}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {label}
-          </a>,
-        );
-      } else {
-        const linkKey = `${lineIndex}-md-${start}-${href}`;
-        parts.push(
-          <span className={styles.consoleFileLinkWrap} key={linkKey}>
-            <button
-              className={styles.consoleFileLink}
-              onClick={() => onCopyLocalLink(linkKey, href)}
-              title={href}
-              type="button"
-            >
-              {label}
-            </button>
-            {copiedLinkKey === linkKey ? (
-              <span className={styles.consoleFileLinkCopiedBubble} role="status">
-                Copied path
-              </span>
-            ) : null}
-          </span>,
-        );
-      }
-      lastIndex = start + fullMatch.length;
+  function renderMarkdownLink(label: string, href: string, lineIndex: number, start: number) {
+    if (/^https?:\/\//i.test(href)) {
+      return (
+        <a
+          className={styles.consoleFileLink}
+          href={href}
+          key={`${lineIndex}-md-${start}-${label}`}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {label}
+        </a>
+      );
     }
 
-    if (lastIndex < line.length) {
-      parts.push(...renderPlainText(line.slice(lastIndex), lineIndex, `tail-${lastIndex}`));
-    }
-    if (parts.length === 0) {
-      parts.push(line);
-    }
-
+    const linkKey = `${lineIndex}-md-${start}-${href}`;
     return (
-      <span key={`line-${lineIndex}`}>
-        {parts}
-        {lineIndex < lines.length - 1 ? <br /> : null}
+      <span className={styles.consoleFileLinkWrap} key={linkKey}>
+        <button
+          className={styles.consoleFileLink}
+          onClick={() => onCopyLocalLink(linkKey, href)}
+          title={href}
+          type="button"
+        >
+          {label}
+        </button>
+        {copiedLinkKey === linkKey ? (
+          <span className={styles.consoleFileLinkCopiedBubble} role="status">
+            Copied path
+          </span>
+        ) : null}
       </span>
     );
+  }
+
+  function renderInlineContent(line: string, lineIndex: number, segmentKey: string): React.ReactNode[] {
+    const parts: React.ReactNode[] = [];
+    let cursor = 0;
+
+    while (cursor < line.length) {
+      markdownLinkPattern.lastIndex = cursor;
+      markdownBoldPattern.lastIndex = cursor;
+      markdownInlineCodePattern.lastIndex = cursor;
+      const linkMatch = markdownLinkPattern.exec(line);
+      const boldMatch = markdownBoldPattern.exec(line);
+      const codeMatch = markdownInlineCodePattern.exec(line);
+
+      const nextMatch = [
+        linkMatch ? { kind: "link" as const, match: linkMatch } : null,
+        boldMatch ? { kind: "bold" as const, match: boldMatch } : null,
+        codeMatch ? { kind: "code" as const, match: codeMatch } : null,
+      ]
+        .filter((value): value is { kind: "link" | "bold" | "code"; match: RegExpExecArray } => value !== null)
+        .sort((left, right) => left.match.index - right.match.index)[0];
+
+      if (!nextMatch) {
+        parts.push(...renderPlainText(line.slice(cursor), lineIndex, `${segmentKey}-tail-${cursor}`));
+        break;
+      }
+
+      const [fullMatch, firstValue, secondValue] = nextMatch.match;
+      const start = nextMatch.match.index;
+
+      if (start > cursor) {
+        parts.push(...renderPlainText(line.slice(cursor, start), lineIndex, `${segmentKey}-plain-${cursor}`));
+      }
+
+      if (nextMatch.kind === "link") {
+        parts.push(renderMarkdownLink(firstValue, secondValue, lineIndex, start));
+      } else if (nextMatch.kind === "bold") {
+        parts.push(
+          <strong className={styles.consoleMarkdownStrong} key={`${lineIndex}-${segmentKey}-bold-${start}`}>
+            {renderInlineContent(firstValue, lineIndex, `${segmentKey}-bold-${start}`)}
+          </strong>,
+        );
+      } else {
+        parts.push(
+          <code className={styles.consoleMarkdownInlineCode} key={`${lineIndex}-${segmentKey}-code-${start}`}>
+            {firstValue}
+          </code>,
+        );
+      }
+
+      cursor = start + fullMatch.length;
+    }
+
+    return parts.length > 0 ? parts : [line];
+  }
+
+  const lines = content.split("\n");
+  const blocks: React.ReactNode[] = [];
+  const pendingList: Array<{
+    key: string;
+    kind: "unordered" | "ordered";
+    indent: number;
+    marker: string;
+    content: React.ReactNode[];
+  }> = [];
+  let fencedCodeBlock: { language: string; lines: string[] } | null = null;
+
+  function flushList() {
+    if (pendingList.length === 0) {
+      return;
+    }
+    const kind = pendingList[0]?.kind ?? "unordered";
+    const listClassName =
+      kind === "ordered"
+        ? `${styles.consoleMarkdownList} ${styles.consoleMarkdownOrderedList}`
+        : styles.consoleMarkdownList;
+
+    blocks.push(
+      <ul className={listClassName} key={`list-${blocks.length}`}>
+        {pendingList.splice(0).map((item) => (
+          <li
+            className={styles.consoleMarkdownListItem}
+            key={item.key}
+            style={{ paddingInlineStart: `${item.indent * 18}px` }}
+          >
+            <span className={styles.consoleMarkdownListBullet}>{item.marker}</span>
+            <span className={styles.consoleMarkdownListItemContent}>{item.content}</span>
+          </li>
+        ))}
+      </ul>,
+    );
+  }
+
+  function flushCodeBlock() {
+    if (!fencedCodeBlock) {
+      return;
+    }
+    blocks.push(
+      <div className={styles.consoleMarkdownCodeBlock} key={`code-${blocks.length}`}>
+        {fencedCodeBlock.language ? (
+          <div className={styles.consoleMarkdownCodeLanguage}>{fencedCodeBlock.language}</div>
+        ) : null}
+        <pre className={styles.consoleMarkdownCodePre}>
+          <code>{fencedCodeBlock.lines.join("\n")}</code>
+        </pre>
+      </div>,
+    );
+    fencedCodeBlock = null;
+  }
+
+  lines.forEach((line, lineIndex) => {
+    const trailingTrimmed = line.trimEnd();
+    const fullyTrimmed = trailingTrimmed.trim();
+    const fenceMatch = /^```\s*([^`]*)$/.exec(fullyTrimmed);
+
+    if (fenceMatch) {
+      flushList();
+      if (fencedCodeBlock) {
+        flushCodeBlock();
+      } else {
+        fencedCodeBlock = {
+          language: fenceMatch[1].trim(),
+          lines: [],
+        };
+      }
+      return;
+    }
+
+    if (fencedCodeBlock) {
+      fencedCodeBlock.lines.push(line);
+      return;
+    }
+
+    if (!fullyTrimmed) {
+      flushList();
+      return;
+    }
+
+    const bulletMatch = /^(\s*)-\s+(.*)$/.exec(trailingTrimmed);
+    if (bulletMatch) {
+      const leadingWhitespace = bulletMatch[1].replace(/\t/g, "  ").length;
+      const indentLevel = Math.min(Math.floor(leadingWhitespace / 2), 6);
+      const nextKind = "unordered";
+      if (pendingList.length > 0 && pendingList[0]?.kind !== nextKind) {
+        flushList();
+      }
+      pendingList.push({
+        key: `list-item-${lineIndex}`,
+        kind: nextKind,
+        indent: indentLevel,
+        marker: "•",
+        content: renderInlineContent(bulletMatch[2], lineIndex, `list-${lineIndex}`),
+      });
+      return;
+    }
+
+    const orderedMatch = /^(\s*)(\d+)\.\s+(.*)$/.exec(trailingTrimmed);
+    if (orderedMatch) {
+      const leadingWhitespace = orderedMatch[1].replace(/\t/g, "  ").length;
+      const indentLevel = Math.min(Math.floor(leadingWhitespace / 2), 6);
+      const nextKind = "ordered";
+      if (pendingList.length > 0 && pendingList[0]?.kind !== nextKind) {
+        flushList();
+      }
+      pendingList.push({
+        key: `ordered-item-${lineIndex}`,
+        kind: nextKind,
+        indent: indentLevel,
+        marker: `${orderedMatch[2]}.`,
+        content: renderInlineContent(orderedMatch[3], lineIndex, `ordered-${lineIndex}`),
+      });
+      return;
+    }
+
+    flushList();
+    blocks.push(
+      <p className={styles.consoleMarkdownParagraph} key={`paragraph-${lineIndex}`}>
+        {renderInlineContent(fullyTrimmed, lineIndex, `paragraph-${lineIndex}`)}
+      </p>,
+    );
   });
+
+  flushList();
+  flushCodeBlock();
+  return blocks;
 }
 
 function escapeRegExp(value: string) {

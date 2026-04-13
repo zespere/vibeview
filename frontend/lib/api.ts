@@ -95,6 +95,8 @@ export interface ConversationRunTool {
   label: string;
   status: "running" | "success" | "error";
   summary?: string | null;
+  command?: string | null;
+  output?: string | null;
 }
 
 export interface ConversationRunState {
@@ -346,6 +348,8 @@ export interface ProjectRunStreamEvent {
   tool_label?: string;
   tool_status?: "success" | "error";
   tool_summary?: string | null;
+  tool_command?: string | null;
+  tool_output?: string | null;
   mode?: "ask" | "plan" | "build";
   summary?: string;
   answer_text?: string;

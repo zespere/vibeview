@@ -1590,21 +1590,21 @@
 .consoleMessageAssistant {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  max-width: min(720px, 100%);
-  border-radius: 10px;
-  padding: 8px 10px;
+  gap: 6px;
 }
 
 .consoleMessageUser {
   align-self: flex-end;
+  width: min(720px, 100%);
+  border-radius: 10px;
   background: #f1e6d8;
+  padding: 8px 10px;
 }
 
 .consoleMessageAssistant {
-  align-self: flex-start;
-  background: #f7f3ec;
-  border: 1px solid #e7ddcf;
+  align-self: stretch;
+  width: 100%;
+  padding: 0;
 }
 
 .consoleMessageRole {
@@ -1613,6 +1613,12 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #8a7a67;
+}
+
+.consoleMessageRoleAssistant {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6f6152;
 }
 
 .consoleMessageTitle {
@@ -1648,19 +1654,55 @@
 }
 
 .consoleRunTools {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
 }
 
-.consoleRunTool {
+.consoleRunToolsHeader {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 22px;
-  color: #5b4e42;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consoleRunToolsTitle {
   font-size: 12px;
+  font-weight: 600;
+  color: #594c3f;
+}
+
+.consoleRunToolsCount {
+  font-size: 11px;
+  color: #897968;
+}
+
+.consoleRunToolList {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.consoleRunToolItem {
+  border: 1px solid #e7ddd1;
+  border-radius: 8px;
+  background: #fcfaf6;
+}
+
+.consoleRunToolSummary {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.consoleRunToolSummary::-webkit-details-marker {
+  display: none;
 }
 
 .consoleRunToolDotRunning,
@@ -1684,12 +1726,21 @@
   background: #b35a4b;
 }
 
+.consoleRunToolName {
+  font-size: 11px;
+  font-weight: 600;
+  color: #756758;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 .consoleRunToolLabel {
   min-width: 0;
-  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #40342a;
+  font-size: 12px;
 }
 
 .consoleRunToolState {
@@ -1699,12 +1750,134 @@
   font-weight: 600;
 }
 
-.consoleMessageBody {
+.consoleRunToolBody {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid #efe5d9;
+  padding: 10px 12px 12px;
+}
+
+.consoleRunToolBlock {
+  display: grid;
+  gap: 4px;
+}
+
+.consoleRunToolBlockLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #756758;
+}
+
+.consoleRunToolText {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #4c4035;
+}
+
+.consoleRunToolCode {
   margin: 0;
+  overflow: auto;
+  border: 1px solid #e7ddd1;
+  border-radius: 6px;
+  background: #fffdf9;
+  padding: 8px 10px;
+  color: #3f342b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
   white-space: pre-wrap;
-  line-height: 1.4;
+  word-break: break-word;
+}
+
+.consoleMessageBody {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  line-height: 1.5;
   font-size: 13px;
   color: #4c4035;
+}
+
+.consoleMarkdownParagraph {
+  margin: 0;
+}
+
+.consoleMarkdownList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.consoleMarkdownOrderedList {
+  gap: 5px;
+}
+
+.consoleMarkdownListItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.consoleMarkdownListBullet {
+  min-width: 18px;
+  color: #8a7a67;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.consoleMarkdownListItemContent {
+  min-width: 0;
+}
+
+.consoleMarkdownStrong {
+  font-weight: 700;
+  color: #2d241c;
+}
+
+.consoleMarkdownInlineCode {
+  display: inline-block;
+  border: 1px solid #e4dacd;
+  border-radius: 6px;
+  background: #f8f4ed;
+  padding: 0 6px;
+  color: #3b3027;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+  line-height: 1.5;
+}
+
+.consoleMarkdownCodeBlock {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #e4dacd;
+  border-radius: 8px;
+  background: #faf7f1;
+}
+
+.consoleMarkdownCodeLanguage {
+  border-bottom: 1px solid #ebe1d5;
+  background: #f4ede3;
+  padding: 6px 10px;
+  color: #7a6a59;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.consoleMarkdownCodePre {
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  color: #322821;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .consoleNoteLink {
@@ -2282,15 +2455,16 @@
 
 .consoleModelDialogBody {
   display: grid;
-  gap: 14px;
+  gap: 16px;
   min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .consoleModelDialogTop {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
-  align-items: start;
+  align-items: end;
 }
 
 .consoleModelTopField,
@@ -2309,6 +2483,7 @@
 .consoleModelFieldLabel {
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.2;
   color: #6a5d50;
 }
 
@@ -2316,22 +2491,20 @@
 .consoleModelInput {
   width: 100%;
   min-width: 0;
-  min-height: 42px;
+  min-height: 44px;
   border: 1px solid #d8ccbd;
   border-radius: 8px;
   background: #fffdf9;
   color: #241d17;
   font: inherit;
+  line-height: 1.2;
   padding: 0 14px;
 }
 
 .consoleModelSelect {
   appearance: none;
-  padding-right: 42px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3.25 5.25L7 9L10.75 5.25' stroke='%23594c3f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 14px 14px;
+  background-image: none;
+  padding-right: 40px;
 }
 
 .consoleModelInput::placeholder {
@@ -2346,7 +2519,20 @@
 }
 
 .consoleModelProviderList {
+  position: relative;
   display: block;
+}
+
+.consoleModelProviderList::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  transform: translateY(-50%);
+  background: center / 14px 14px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3.25 5.25L7 9L10.75 5.25' stroke='%23594c3f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  pointer-events: none;
 }
 
 .consoleModelPresetList,
@@ -2357,7 +2543,7 @@
 }
 
 .consoleReasoningList {
-  align-items: center;
+  align-items: stretch;
 }
 
 .consoleModelPresetGroup {
@@ -2377,7 +2563,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 .consoleModelResultCount {
@@ -2389,8 +2575,8 @@
 .consoleModelResultList {
   display: flex;
   flex-direction: column;
-  min-height: 220px;
-  max-height: min(272px, calc(100vh - 470px));
+  min-height: 0;
+  max-height: min(236px, calc(100vh - 520px));
   overflow: auto;
   border: 1px solid #e3d8cb;
   border-radius: 10px;
@@ -2408,7 +2594,7 @@
   color: #2f261f;
   font: inherit;
   text-align: left;
-  padding: 10px 14px;
+  padding: 11px 14px;
   cursor: pointer;
 }
 
@@ -2426,9 +2612,10 @@
 }
 
 .consoleModelResultContent {
-  display: grid;
-  gap: 3px;
+  display: flex;
   min-width: 0;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .consoleModelResultMain {
@@ -2441,13 +2628,11 @@
 
 .consoleModelResultPrimary {
   min-width: 0;
+  overflow-wrap: anywhere;
   font-size: 13px;
   font-weight: 600;
   color: #2f261f;
-  line-height: 1.35;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.28;
 }
 
 .consoleModelResultMeta {
@@ -2485,19 +2670,19 @@
 }
 
 .consoleModelResultSecondary {
-  display: block;
+  display: -webkit-box;
   min-width: 0;
-  font-size: 12px;
-  color: #7c6c5c;
-  line-height: 1.3;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
+  color: #7c6c5c;
+  font-size: 12px;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 
 .consoleModelEmptyState {
   display: flex;
-  min-height: 220px;
+  min-height: 180px;
   align-items: center;
   justify-content: center;
   padding: 24px;
@@ -2515,7 +2700,7 @@
 .consoleReasoningItem,
 .consoleReasoningItemActive {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 36px;
   align-items: center;
   border: 1px solid #ddd2c4;
   border-radius: 8px;
@@ -2544,7 +2729,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  padding-top: 4px;
+  padding-top: 10px;
 }
 
 .commitButton {
@@ -3929,8 +4114,7 @@
   }
 
   .consoleModelResultList {
-    min-height: 220px;
-    max-height: min(280px, calc(100vh - 420px));
+    max-height: min(240px, calc(100vh - 360px));
   }
 
   .consoleModelDialogActions {
