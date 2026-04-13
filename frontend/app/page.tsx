@@ -4596,22 +4596,19 @@ ${prompt}` : prompt,
                                 onClick={() => setComposerModelDraft(model.id)}
                                 type="button"
                               >
-                                <span className={styles.consoleModelResultContent}>
-                                  <span className={styles.consoleModelResultMain}>
-                                    <span className={styles.consoleModelResultPrimary}>{model.id}</span>
-                                    <span className={styles.consoleModelResultMeta}>
-                                      {model.id === composerModelDraft ? (
-                                        <span className={styles.consoleModelCapabilitySelected}>Selected</span>
-                                      ) : null}
-                                      {model.reasoning ? (
-                                        <span className={styles.consoleModelCapability}>Reasoning</span>
-                                      ) : null}
-                                      {model.supports_images ? (
-                                        <span className={styles.consoleModelCapability}>Vision</span>
-                                      ) : null}
-                                    </span>
+                                <span className={styles.consoleModelResultMain}>
+                                  <span className={styles.consoleModelResultPrimary}>{model.id}</span>
+                                  <span className={styles.consoleModelResultMeta}>
+                                    {model.id === composerModelDraft ? (
+                                      <span className={styles.consoleModelCapabilitySelected}>Selected</span>
+                                    ) : null}
+                                    {model.reasoning ? (
+                                      <span className={styles.consoleModelCapability}>Reasoning</span>
+                                    ) : null}
+                                    {model.supports_images ? (
+                                      <span className={styles.consoleModelCapability}>Vision</span>
+                                    ) : null}
                                   </span>
-                                  <span className={styles.consoleModelResultSecondary}>{model.name}</span>
                                 </span>
                               </button>
                             ))

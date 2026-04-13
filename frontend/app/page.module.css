@@ -1679,16 +1679,18 @@
 
 .consoleRunToolList {
   display: grid;
-  gap: 6px;
-  max-height: 240px;
-  overflow: auto;
-  padding-right: 2px;
-}
-
-.consoleRunToolItem {
+  gap: 0;
   border: 1px solid #e7ddd1;
   border-radius: 8px;
   background: #fcfaf6;
+}
+
+.consoleRunToolItem {
+  background: transparent;
+}
+
+.consoleRunToolItem + .consoleRunToolItem {
+  border-top: 1px solid #e7ddd1;
 }
 
 .consoleRunToolSummary {
@@ -1699,6 +1701,10 @@
   list-style: none;
   cursor: pointer;
   padding: 10px 12px;
+}
+
+.consoleRunToolSummary:hover {
+  background: #f8f3eb;
 }
 
 .consoleRunToolSummary::-webkit-details-marker {
@@ -2594,7 +2600,7 @@
   color: #2f261f;
   font: inherit;
   text-align: left;
-  padding: 11px 14px;
+  padding: 9px 14px;
   cursor: pointer;
 }
 
@@ -2611,34 +2617,30 @@
   box-shadow: inset 2px 0 0 #b79268;
 }
 
-.consoleModelResultContent {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .consoleModelResultMain {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   gap: 12px;
   min-width: 0;
 }
 
 .consoleModelResultPrimary {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
   font-weight: 600;
   color: #2f261f;
-  line-height: 1.28;
+  line-height: 1.25;
 }
 
 .consoleModelResultMeta {
   display: inline-flex;
   flex-shrink: 0;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -2667,17 +2669,6 @@
   font-size: 11px;
   font-weight: 600;
   padding: 0 8px;
-}
-
-.consoleModelResultSecondary {
-  display: -webkit-box;
-  min-width: 0;
-  overflow: hidden;
-  color: #7c6c5c;
-  font-size: 12px;
-  line-height: 1.25;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
 }
 
 .consoleModelEmptyState {
