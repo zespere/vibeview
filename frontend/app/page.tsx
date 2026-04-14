@@ -4280,7 +4280,7 @@ ${prompt}` : prompt,
                                           }
                                         />
                                         <span className={styles.consoleRunToolName}>{tool.name}</span>
-                                        <span className={styles.consoleRunToolLabel}>{tool.label}</span>
+                                        <span className={styles.consoleRunToolLabel}>{formatToolActionLabel(tool)}</span>
                                         <span className={styles.consoleRunToolState}>
                                           {tool.status === "running" ? "Running" : tool.status === "error" ? "Failed" : "Done"}
                                         </span>
@@ -5950,6 +5950,109 @@ function extractMentionedCanvasNodes(prompt: string, document: CanvasDocument | 
   }
 
   return [...matches.values()];
+}
+
+function truncateToolText(value: string, maxLength = 96) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function parseToolCommandArgs(toolName: string, command: string | null | undefined): Record<string, unknown> | null {
+  const normalizedName = toolName.trim();
+  const normalizedCommand = (command ?? "").trim();
+  const prefix = `${normalizedName} `;
+  if (!normalizedName || !normalizedCommand.startsWith(prefix)) {
+    return null;
+  }
+  const payload = normalizedCommand.slice(prefix.length).trim();
+  if (!payload.startsWith("{")) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(payload);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickToolPath(args: Record<string, unknown> | null): string | null {
+  if (!args) {
+    return null;
+  }
+  for (const key of ["path", "filePath", "file_path", "target", "file", "dir", "directory"]) {
+    const value = args[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function formatToolActionLabel(tool: ConversationRunTool) {
+  const normalizedName = tool.name.trim().toLowerCase();
+  const normalizedLabel = (tool.label ?? "").trim();
+  const normalizedCommand = (tool.command ?? "").trim();
+  const args = parseToolCommandArgs(tool.name, tool.command);
+  const targetPath = pickToolPath(args);
+
+  if (normalizedName === "bash") {
+    if (normalizedCommand && normalizedCommand !== normalizedName) {
+      return `Ran ${truncateToolText(normalizedCommand)}`;
+    }
+    return "Ran shell command";
+  }
+
+  if (normalizedName === "read") {
+    if (targetPath) {
+      return `Read ${targetPath}`;
+    }
+    return "Read file";
+  }
+
+  if (normalizedName === "write") {
+    if (targetPath) {
+      return `Wrote ${targetPath}`;
+    }
+    return "Wrote file";
+  }
+
+  if (normalizedName === "edit") {
+    if (targetPath) {
+      return `Edited ${targetPath}`;
+    }
+    return "Edited file";
+  }
+
+  if (normalizedName === "grep" || normalizedName === "search") {
+    const pattern = typeof args?.pattern === "string" ? args.pattern.trim() : "";
+    if (pattern) {
+      return `Searched ${truncateToolText(pattern, 72)}`;
+    }
+    return "Searched files";
+  }
+
+  if (normalizedName === "glob" || normalizedName === "ls") {
+    if (targetPath) {
+      return `Listed ${targetPath}`;
+    }
+    return "Listed files";
+  }
+
+  if (normalizedLabel && normalizedLabel.toLowerCase() != normalizedName) {
+    return truncateToolText(normalizedLabel);
+  }
+
+  if (normalizedCommand && normalizedCommand !== normalizedName) {
+    return truncateToolText(normalizedCommand);
+  }
+
+  return normalizedName ? `${normalizedName[0].toUpperCase()}${normalizedName.slice(1)} action` : "Tool action";
 }
 
 function renderConsoleMessageContent(
